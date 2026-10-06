@@ -1,5 +1,8 @@
 pluginManagement {
     repositories {
+        maven("https://maven.aliyun.com/repository/google")
+        maven("https://maven.aliyun.com/repository/public")
+        maven("https://maven.aliyun.com/repository/gradle-plugin")
         google {
             content {
                 includeGroupByRegex("com\\.android.*")
@@ -17,17 +20,15 @@ plugins {
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
+        maven("https://maven.aliyun.com/repository/google")
+        maven("https://maven.aliyun.com/repository/public")
         google()
         mavenCentral()
     }
 }
 
-rootProject.name = "xcertplay"
+rootProject.name = "xcertplay-cs11"
 include(":common")
 include(":mobile")
-include(":automotive")
 include(":shared")
-include(":maphost")
-project(":maphost").projectDir = file("samples/maphost")
-include(":home")
-project(":home").projectDir = file("samples/home")
+// CS11 移植: automotive / samples 暂不参与构建（API 要求高、与手机端场景无关）
