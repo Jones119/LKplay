@@ -1,5 +1,6 @@
 package com.shilapi.xcertplay
 
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
@@ -175,9 +176,10 @@ internal object CarPlayMediaKeys {
     }
 
     private fun start(context: Context) {
-        // CS11: MediaSession 是 API21+；4.4 上整块功能停用（不崩溃、不打日志噪音）
+        // CS11: MediaSession 是 API21+；4.4（CS11）改走遗留 MEDIA_BUTTON 广播路径——
+        // 车机以 ACTION_MEDIA_BUTTON 广播方向盘媒体键，报名的接收器收到（与 HYLink 同法，见 _digest/08）
         if (Build.VERSION.SDK_INT < 21) {
-            Log.i(TAG, "media keys unavailable before API 21")
+            startLegacyKeys(context)
             return
         }
         val audio = context.systemService(AudioManager::class.java)
@@ -212,6 +214,46 @@ internal object CarPlayMediaKeys {
         Log.i(TAG, "media keys active focusGranted=$granted")
     }
 
+    /** 4.4: the wheel's media keys arrive as android.intent.action.MEDIA_BUTTON broadcasts (the same
+     *  route HYLink's SwcMediaButtonReceiver uses on this platform). The last AudioManager
+     *  registration wins, so hold it while CarPlay owns the media audio. */
+    private var legacyKeysRegistered = false
+
+    @Suppress("DEPRECATION")
+    private fun startLegacyKeys(context: Context) {
+        val audio = context.systemService(AudioManager::class.java) ?: return
+        focusHeld = audio.requestAudioFocus(
+            focusChangeListener, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN,
+        ) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+        audio.registerMediaButtonEventReceiver(ComponentName(context, MediaButtonReceiver::class.java))
+        legacyKeysRegistered = true
+        Log.i(TAG, "media keys active (legacy MEDIA_BUTTON) focusGranted=$focusHeld")
+    }
+
+    @Suppress("DEPRECATION")
+    private fun stopLegacyKeys(context: Context) {
+        if (!legacyKeysRegistered) return
+        legacyKeysRegistered = false
+        context.systemService(AudioManager::class.java)?.unregisterMediaButtonEventReceiver(
+            ComponentName(context, MediaButtonReceiver::class.java),
+        )
+    }
+
+    /** A legacy MEDIA_BUTTON KeyEvent from [MediaButtonReceiver]; same mapping as the media session. */
+    fun onLegacyMediaKeyEvent(event: KeyEvent): Boolean {
+        val index = CarPlayMediaButton.forKeyCode(
+            event.keyCode,
+            appContext?.let(BydOutputSettings::carPlayCallControls) == true,
+        ) ?: run {
+            Log.i(TAG, "legacy media key unmapped code=${event.keyCode}")
+            return false
+        }
+        if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+            send(index, KeyEvent.keyCodeToString(event.keyCode))
+        }
+        return true
+    }
+
     private fun releaseLocked() {
         artworkOwner = null
         artworkQueue.clear()
@@ -224,12 +266,13 @@ internal object CarPlayMediaKeys {
         nowPlaying = CarPlayNowPlaying()
         artwork = null
         artworkCache.clear()
-        // CS11: abandonAudioFocusRequest 是 26+；21–25 走遗留 abandon
+        // CS11: abandonAudioFocusRequest 是 26+；21 以下走遗留 abandon；4.4 同时撤下遗留按键注册
         if (Build.VERSION.SDK_INT >= 26) {
             focusRequest?.let { request -> appContext?.systemService(AudioManager::class.java)?.abandonAudioFocusRequest(request) }
-        } else if (Build.VERSION.SDK_INT >= 21) {
+        } else {
             appContext?.systemService(AudioManager::class.java)?.abandonAudioFocus(focusChangeListener)
         }
+        appContext?.let(::stopLegacyKeys)
         focusRequest = null
         focusHeld = false
     }

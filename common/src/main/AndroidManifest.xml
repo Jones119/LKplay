@@ -135,6 +135,16 @@
             </intent-filter>
         </receiver>
 
+        <!-- CS11 / Android 4.4: steering-wheel media keys arrive as MEDIA_BUTTON broadcasts. -->
+        <receiver
+            android:name="com.shilapi.xcertplay.MediaButtonReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MEDIA_BUTTON" />
+            </intent-filter>
+        </receiver>
+
         <service
             android:name="com.shilapi.xcertplay.UsbAutoConfirmService"
             android:exported="true"
