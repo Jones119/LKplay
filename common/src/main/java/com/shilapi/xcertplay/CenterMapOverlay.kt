@@ -45,7 +45,9 @@ internal object CenterMapOverlay {
     var requestShow: (() -> Unit)? = null
     private val showIfBackground = Runnable { if (!diPlayInFront()) requestShow?.invoke() }
 
-    fun permitted(context: Context): Boolean = Settings.canDrawOverlays(context)
+    // CS11: canDrawOverlays 是 API23+；4.4 安装即授予
+    fun permitted(context: Context): Boolean =
+        if (Build.VERSION.SDK_INT < 23) true else Settings.canDrawOverlays(context)
 
     /** Shows the card shortly, unless a DiPlay screen is in front by then. */
     fun scheduleShow() {

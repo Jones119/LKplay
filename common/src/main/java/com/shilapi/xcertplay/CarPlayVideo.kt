@@ -12,7 +12,6 @@ import com.shilapi.xcertplay.host.R
 import com.shilapi.xcertplay.hud.BydNavigationOutputs
 import com.shilapi.xcertplay.orchestration.CarPlayController
 import com.shilapi.xcertplay.orchestration.CarPlayVideoListener
-import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -164,7 +163,25 @@ internal object CarPlayVideo : CarPlayVideoListener {
     /** What the iPhone answered to [resolveOnIphone]. */
     class LoadedUrl(val status: Int?, val data: ByteArray?, val location: String?)
 
-    private val pendingUrls = ConcurrentHashMap<Long, CompletableFuture<Map<*, *>>>()
+    /**
+     * CS11: CompletableFuture 是 API24+（desugar 未覆盖）——改用闩锁实现同样的"一次性答案"语义。
+     */
+    private class PendingAnswer {
+        @Volatile private var value: Map<*, *>? = null
+        private val latch = java.util.concurrent.CountDownLatch(1)
+
+        fun complete(result: Map<*, *>?) {
+            value = result
+            latch.countDown()
+        }
+
+        fun get(timeout: Long, unit: TimeUnit): Map<*, *>? {
+            if (!latch.await(timeout, unit)) throw java.util.concurrent.TimeoutException()
+            return value
+        }
+    }
+
+    private val pendingUrls = ConcurrentHashMap<Long, PendingAnswer>()
     private val nextUrlRequest = AtomicLong(1)
 
     /**
@@ -175,7 +192,7 @@ internal object CarPlayVideo : CarPlayVideoListener {
     fun resolveOnIphone(url: String): LoadedUrl? {
         val stream = streamId ?: return null
         val id = nextUrlRequest.getAndIncrement()
-        val answer = CompletableFuture<Map<*, *>>()
+        val answer = PendingAnswer()
         pendingUrls[id] = answer
         reply(stream, linkedMapOf(
             "type" to "unhandledURL",

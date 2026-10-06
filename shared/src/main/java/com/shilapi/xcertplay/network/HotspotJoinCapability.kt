@@ -64,7 +64,7 @@ internal object HotspotJoinCapability {
                         val channels = capabilityType.getMethod("getSupportedChannelList", Int::class.javaPrimitiveType)
                             .invoke(capability, 2) as IntArray
                         result.set(Snapshot(supported, channels.toSet()))
-                    } catch (_: Exception) {
+                    } catch (_: Throwable) { // CS11: 旧系统缺 readTypedObject/enforceNoDataAvail（NoSuchMethodError 是 Error）
                         result.set(null) // Unknown OEM parcel or capability API never approves a mutation.
                     } finally { ready.countDown() }
                     return true

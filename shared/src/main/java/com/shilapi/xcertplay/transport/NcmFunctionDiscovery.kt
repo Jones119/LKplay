@@ -4,6 +4,7 @@ import android.hardware.usb.UsbConfiguration
 import android.hardware.usb.UsbConstants
 import android.hardware.usb.UsbEndpoint
 import android.hardware.usb.UsbInterface
+import android.os.Build
 
 /**
  * Finds the NCM control/data interface pair inside an active iPhone configuration.
@@ -38,7 +39,7 @@ object NcmFunctionDiscovery {
         } ?: return null
         val data = interfaces(configuration)
             .filter { it.interfaceClass == DATA_CLASS && bulkEndpoints(it) != null }
-            .minByOrNull { if (it.alternateSetting == DATA_ALTERNATE_SETTING) 0 else 1 }
+            .minByOrNull { if (alternateSettingOf(it) == DATA_ALTERNATE_SETTING) 0 else 1 }
             ?: return null
         val endpoints = bulkEndpoints(data) ?: return null
         val statusIn = (0 until control.endpointCount)
@@ -51,7 +52,23 @@ object NcmFunctionDiscovery {
     }
 
     private fun interfaces(configuration: UsbConfiguration): List<UsbInterface> =
-        (0 until configuration.interfaceCount).map(configuration::getInterface)
+        // CS11: getInterfaceCount/getInterface 是 API21+；4.4 走反射探测，缺失则空列表（NCM 发现降级）
+        if (Build.VERSION.SDK_INT >= 21) {
+            (0 until configuration.interfaceCount).map(configuration::getInterface)
+        } else {
+            runCatching {
+                val count = UsbConfiguration::class.java.getMethod("getInterfaceCount").invoke(configuration) as Int
+                val getInterface = UsbConfiguration::class.java.getMethod("getInterface", Int::class.javaPrimitiveType)
+                (0 until count).map { getInterface.invoke(configuration, it) as UsbInterface }
+            }.getOrDefault(emptyList())
+        }
+
+    private fun alternateSettingOf(usbInterface: UsbInterface): Int =
+        // CS11: UsbInterface.getAlternateSetting 是 API21+；4.4 走反射探测，缺失按 0 处理
+        if (Build.VERSION.SDK_INT >= 21) usbInterface.alternateSetting
+        else runCatching {
+            UsbInterface::class.java.getMethod("getAlternateSetting").invoke(usbInterface) as Int
+        }.getOrDefault(0)
 
     private fun bulkEndpoints(usbInterface: UsbInterface): Pair<UsbEndpoint, UsbEndpoint>? {
         val endpoints = (0 until usbInterface.endpointCount).map(usbInterface::getEndpoint)

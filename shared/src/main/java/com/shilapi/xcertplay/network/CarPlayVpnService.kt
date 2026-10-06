@@ -24,6 +24,7 @@ import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.util.concurrent.atomic.AtomicBoolean
+import android.os.Build
 
 /**
  * Hosts the AirPlay TCP listener for both NCM/VPN and local-only Wi-Fi transports.
@@ -92,16 +93,19 @@ class CarPlayVpnService : VpnService() {
             }
             require(hostMac.size == 6) { "hostMac must be 6 bytes" }
 
-            val tunFd = Builder()
+            val builder = Builder()
                 .addAddress(linkLocal, LINK_PREFIX)
                 .addRoute(LINK_LOCAL_ROUTE, LINK_PREFIX)
                 .setSession(SESSION_NAME)
                 .setMtu(TUN_MTU)
-                .setBlocking(true)
+            // CS11: setBlocking/addAllowedApplication 是 API21+；4.4 上退回非阻塞 + 全应用路由
+            if (Build.VERSION.SDK_INT >= 21) {
+                builder.setBlocking(true)
                 // An empty app list routes every UID through this VPN. Scope it before establish;
                 // rejection must reach the existing attachment cleanup, never an unscoped retry.
-                .addAllowedApplication(packageName)
-                .establish()
+                builder.addAllowedApplication(packageName)
+            }
+            val tunFd = builder.establish()
                 ?: throw IOException("VpnService.establish returned null")
             tun = tunFd
 

@@ -364,8 +364,11 @@ class CarPlayBonjour(
             serviceName = config.deviceName
             serviceType = AIRPLAY_SERVICE_TYPE
             port = config.port
-            CarPlayBonjourProtocol.airPlayTxtRecords(config, identity).forEach { (key, value) ->
-                setAttribute(key, value)
+            // CS11: NsdServiceInfo.setAttribute 是 API21+；4.4 跳过 TXT 记录（无线发现降级）
+            if (Build.VERSION.SDK_INT >= 21) {
+                CarPlayBonjourProtocol.airPlayTxtRecords(config, identity).forEach { (key, value) ->
+                    setAttribute(key, value)
+                }
             }
             localAdvertisedAddress?.let(::setHost)
         }
@@ -432,10 +435,15 @@ class CarPlayBonjour(
         if (port !in 1..65535) return
         val serviceName = resolved.serviceName ?: service.serviceName ?: return
         val host = address.hostAddress ?: return
-        val bluetoothId = resolved.attributes
-            ?.get("id")
-            ?.let(::decodeTxtValue)
-            ?.takeIf { it.isNotBlank() }
+        // CS11: NsdServiceInfo.getAttributes 是 API21+
+        val bluetoothId = if (Build.VERSION.SDK_INT >= 21) {
+            resolved.attributes
+                ?.get("id")
+                ?.let(::decodeTxtValue)
+                ?.takeIf { it.isNotBlank() }
+        } else {
+            null
+        }
         val endpoint = CarPlayBonjourEndpoint(
             serviceName = serviceName,
             host = host,

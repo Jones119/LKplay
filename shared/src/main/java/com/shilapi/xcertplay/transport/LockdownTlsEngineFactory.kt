@@ -14,6 +14,7 @@ import javax.net.ssl.KeyManagerFactory
 import javax.net.ssl.SSLContext
 import javax.net.ssl.SSLEngine
 import javax.net.ssl.X509TrustManager
+import android.os.Build
 
 /**
  * Builds an unstarted client TLS engine for the dedicated USB Lockdown channel.
@@ -48,7 +49,11 @@ object LockdownTlsEngineFactory {
             }
             return context.createSSLEngine(PEER_HOST, PEER_PORT).apply {
                 useClientMode = true
-                sslParameters = sslParameters.apply { endpointIdentificationAlgorithm = null }
+                // CS11: SSLParameters.setEndpointIdentificationAlgorithm 是 API24+；
+                // 4.4 默认即不做主机名校验（正是本处所需），跳过设置
+                sslParameters = sslParameters.apply {
+                    if (Build.VERSION.SDK_INT >= 24) endpointIdentificationAlgorithm = null
+                }
             }
         } finally {
             password.fill('\u0000')

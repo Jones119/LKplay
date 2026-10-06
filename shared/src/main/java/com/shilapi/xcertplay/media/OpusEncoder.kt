@@ -53,7 +53,7 @@ internal class OpusEncoder(bitrate: Int) : Closeable {
             return emptyList()
         }
         if (inputIndex >= 0) {
-            val input = codec.getInputBuffer(inputIndex)
+            val input = codec.inputBufferCompat(inputIndex)
             if (input == null || pcm.size > input.remaining()) {
                 codec.queueInputBuffer(inputIndex, 0, 0, presentationTimeUs, 0)
             } else {
@@ -90,7 +90,7 @@ internal class OpusEncoder(bitrate: Int) : Closeable {
                         codec.releaseOutputBuffer(index, false)
                         continue
                     }
-                    val buffer = codec.getOutputBuffer(index)
+                    val buffer = codec.outputBufferCompat(index)
                     if (buffer != null && bufferInfo.size > 0) {
                         val bytes = ByteArray(bufferInfo.size)
                         buffer.position(bufferInfo.offset)
@@ -139,3 +139,10 @@ internal class OpusEncoder(bitrate: Int) : Closeable {
         const val FIRST_PACKET_LOG_COUNT = 3
     }
 }
+
+// CS11: MediaCodec.getInputBuffer/getOutputBuffer 是 API21+；4.4 上走 legacy 缓冲区数组（文件级扩展）
+private fun android.media.MediaCodec.inputBufferCompat(index: Int): java.nio.ByteBuffer? =
+    if (android.os.Build.VERSION.SDK_INT >= 21) getInputBuffer(index) else inputBuffers.getOrNull(index)
+
+private fun android.media.MediaCodec.outputBufferCompat(index: Int): java.nio.ByteBuffer? =
+    if (android.os.Build.VERSION.SDK_INT >= 21) getOutputBuffer(index) else outputBuffers.getOrNull(index)

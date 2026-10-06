@@ -16,6 +16,7 @@ import com.shilapi.xcertplay.airplay.CarPlayClusterDisplay
 import com.shilapi.xcertplay.host.R
 import com.shilapi.xcertplay.airplay.ClusterTurnCardOverlay
 import com.shilapi.xcertplay.hud.ClusterTurnGuidance
+import android.os.Build
 
 /**
  * Instruction card drawn by DiPlay on top of the dashboard map.
@@ -221,7 +222,10 @@ internal class ClusterTurnCardView(context: Context) : View(context) {
         if (next.icon == 0) return
         val resId = glyphRes(next.icon)
         if (resId != glyphTag) {
-            glyph = ContextCompat.getDrawable(context, resId)?.mutate()?.apply { setTint(accent) }
+            glyph = ContextCompat.getDrawable(context, resId)?.mutate()?.apply {
+                // CS11: Drawable.setTint 是 API21+
+                if (Build.VERSION.SDK_INT >= 21) setTint(accent)
+            }
             glyphTag = resId
         }
         val inset = side * 0.10f

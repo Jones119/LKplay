@@ -78,6 +78,9 @@ object SettingsWidgets {
             if (theme.isOverlay) {
                 if (Build.VERSION.SDK_INT >= 21) {
                     showText = false
+                }
+                // CS11: Switch.setThumbTintList/setTrackTintList 是 API23+
+                if (Build.VERSION.SDK_INT >= 23) {
                     thumbTintList = ColorStateList(
                         arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
                         intArrayOf(theme.accent, theme.textSecondary),
