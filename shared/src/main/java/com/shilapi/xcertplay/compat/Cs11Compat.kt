@@ -1,6 +1,7 @@
 package com.shilapi.xcertplay.compat
 
 import android.content.Context
+import android.media.AudioRecord
 import android.media.AudioTrack
 import android.media.MediaCodec
 import android.os.Build
@@ -47,3 +48,7 @@ fun trackRouteTypeCompat(track: AudioTrack): Int =
 /** `AudioTrack.getBufferSizeInFrames` 需要 API 23。 */
 fun trackBufferSizeFramesCompat(track: AudioTrack): Int =
     if (Build.VERSION.SDK_INT >= 23) track.bufferSizeInFrames else -1
+
+/** `AudioRecord.getRoutedDevice`（AudioDeviceInfo）需要 API 23。 */
+fun recorderRouteTypeCompat(recorder: AudioRecord): Int? =
+    if (Build.VERSION.SDK_INT >= 23) recorder.routedDevice?.type else null

@@ -3,11 +3,13 @@ package com.shilapi.xcertplay.media
 import android.media.AudioFormat as AndroidAudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.os.Build
 import android.media.audiofx.AcousticEchoCanceler
 import android.media.audiofx.AudioEffect
 import android.media.audiofx.NoiseSuppressor
 import android.util.Log
 import com.shilapi.xcertplay.airplay.AudioCodecKind
+import com.shilapi.xcertplay.compat.recorderRouteTypeCompat
 import com.shilapi.xcertplay.airplay.MicrophoneConfig
 import com.shilapi.xcertplay.airplay.MicrophoneCounters
 import com.shilapi.xcertplay.airplay.MicrophonePacketizer
@@ -77,17 +79,24 @@ internal class MicrophoneUplink(
         }
         val bufferSize = maxOf(minBuffer * 2, config.frameBytes * 4)
         val nextRecorder = try {
-            AudioRecord.Builder()
-                .setAudioSource(source)
-                .setAudioFormat(
-                    AndroidAudioFormat.Builder()
-                        .setEncoding(AndroidAudioFormat.ENCODING_PCM_16BIT)
-                        .setSampleRate(config.sampleRate)
-                        .setChannelMask(channelMask)
-                        .build(),
-                )
-                .setBufferSizeInBytes(bufferSize)
-                .build()
+            if (Build.VERSION.SDK_INT >= 23) {
+                AudioRecord.Builder()
+                    .setAudioSource(source)
+                    .setAudioFormat(
+                        AndroidAudioFormat.Builder()
+                            .setEncoding(AndroidAudioFormat.ENCODING_PCM_16BIT)
+                            .setSampleRate(config.sampleRate)
+                            .setChannelMask(channelMask)
+                            .build(),
+                    )
+                    .setBufferSizeInBytes(bufferSize)
+                    .build()
+            } else {
+                // CS11: AudioRecord.Builder 是 API23+；4.4 走 legacy 构造
+                @Suppress("DEPRECATION")
+                AudioRecord(source, config.sampleRate, channelMask,
+                    AndroidAudioFormat.ENCODING_PCM_16BIT, bufferSize)
+            }
         } catch (error: Exception) {
             Log.e(TAG, "microphone recorder creation failed", error)
             stats.failure(MicrophoneFailureStage.RECORDER_CREATION, error)
@@ -186,7 +195,12 @@ internal class MicrophoneUplink(
         try {
             while (running.get()) {
                 stats.reading()
-                val count = recorder.read(readBuffer, 0, readBuffer.size, AudioRecord.READ_BLOCKING)
+                // CS11: read(…,mode) 是 API23+；4.4 的 3 参 read 即阻塞
+                val count = if (Build.VERSION.SDK_INT >= 23) {
+                    recorder.read(readBuffer, 0, readBuffer.size, AudioRecord.READ_BLOCKING)
+                } else {
+                    recorder.read(readBuffer, 0, readBuffer.size)
+                }
                 stats.read(count)
                 if (count < 0) {
                     if (running.get()) {
@@ -263,7 +277,7 @@ internal class MicrophoneUplink(
         }
     }
 
-    private fun routeType(recorder: AudioRecord): Int? = runCatching { recorder.routedDevice?.type }.getOrNull()
+    private fun routeType(recorder: AudioRecord): Int? = runCatching { recorderRouteTypeCompat(recorder) }.getOrNull()
 
     override fun close() {
         if (!running.compareAndSet(true, false)) {
