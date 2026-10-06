@@ -10,6 +10,8 @@ android {
 
     defaultConfig {
         minSdk = 19
+        // CS11: core library desugaring 要求 multidex（AGP 硬性检查）
+        multiDexEnabled = true
     }
 
     compileOptions {
