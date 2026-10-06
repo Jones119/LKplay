@@ -7,6 +7,10 @@
         <item name="android:statusBarColor">#0C111B</item>
         <item name="android:windowBackground">#0C111B</item>
         <item name="android:windowActionModeOverlay">true</item>
+        <!-- CS11: Theme.Material does not exist before API 21; the fallback theme would show the
+             legacy title/action bar. These two flags strip it regardless of the resolved parent. -->
+        <item name="android:windowActionBar">false</item>
+        <item name="android:windowNoTitle">true</item>
     </style>
     <style name="Theme.AdbCluster" parent="android:Theme.Material.NoActionBar">
         <item name="android:windowIsTranslucent">true</item>

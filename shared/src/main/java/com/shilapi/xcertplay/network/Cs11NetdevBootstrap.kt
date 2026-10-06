@@ -147,6 +147,11 @@ object Cs11NetdevBootstrap {
         done
         ifconfig $INTERFACE_NAME up 2>/dev/null
         ip -6 addr add $advertised/64 dev $INTERFACE_NAME 2>/dev/null
+        # CS11: USB controller IRQs default to CPU0 (the busiest core); completion jitter there
+        # overflows the phone's NCM TX queue and drops ~10 % of the audio datagrams. Spread them.
+        for n in ${'$'}(busybox awk '/usb/{gsub(":","",${'$'}1); print ${'$'}1}' /proc/interrupts 2>/dev/null); do
+          echo e > /proc/irq/${'$'}n/smp_affinity 2>/dev/null
+        done
         busybox sleep 1
         for addr in ${'$'}(ip -6 addr show dev $INTERFACE_NAME scope link 2>/dev/null | busybox grep inet6 | busybox awk '{print ${'$'}2}'); do
           case "${'$'}addr" in

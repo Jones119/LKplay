@@ -527,6 +527,9 @@ class CarPlayHostActivity : ComponentActivity() {
         airPlayIdentity = AirPlayPersistence.loadIdentity(this)
         loadPersistedSettings()
         locationPermissionAvailable = hasFineLocationPermission()
+        // CS11: strip the legacy title/action bar the API 19 fallback theme would otherwise show.
+        @Suppress("DEPRECATION")
+        requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
         setContentView(buildContentView())
         applyFullscreenMode()
         onBackPressedDispatcher.addCallback(
@@ -4694,7 +4697,8 @@ class CarPlayHostActivity : ComponentActivity() {
             WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
     }
 
-    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).roundToInt()
+    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).roundToInt()
+
 
     // CS11: backgroundTintList 是 API21+；4.4 退化为纯色背景
     private fun View.tintBackgroundCompat(color: Int) {

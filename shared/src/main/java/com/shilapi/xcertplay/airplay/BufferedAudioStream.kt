@@ -143,6 +143,9 @@ internal class BufferedAudioStream(
                     log("Buffered audio: rejected sender outside the control session")
                     false
                 } else {
+                    // CS11: same pacing trick as the video socket — a tight receive window keeps
+                    // this TCP stream from bursting into the NCM link.
+                    runCatching { socket.receiveBufferSize = 64 * 1024 }
                     client = socket
                     true
                 }

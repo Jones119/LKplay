@@ -59,6 +59,15 @@ class ScreenStream(private val key: ByteArray, private val onDiagnostic: (String
         try {
             val accepted = bound.accept()
             socket = accepted
+            // CS11: TCP flow control is our only throttle on the phone's video sender. A big
+            // receive window lets it dump multi-megabit bursts into the NCM link, and those
+            // bursts are what evict the audio datagrams (Udp6InErrors spikes while scrolling).
+            // 64 KiB keeps the pipe full while pacing the sender.
+            runCatching { accepted.receiveBufferSize = VIDEO_RECEIVE_BUFFER_BYTES }
+            runCatching { accepted.tcpNoDelay = true }
+            onDiagnostic(
+                "video socket accepted rcvbuf=${runCatching { accepted.receiveBufferSize }.getOrDefault(0)}",
+            )
             run(accepted)
         } catch (error: Exception) {
             if (!closed.get()) listener.onClosed(error)
@@ -136,6 +145,8 @@ class ScreenStream(private val key: ByteArray, private val onDiagnostic: (String
         const val OP_VIDEO_FRAME = 0
         const val OP_VIDEO_CONFIG = 1
         const val MAX_BODY = 8 * 1024 * 1024
+        /** Cap on the TCP receive window for the video stream (see accept()). */
+        const val VIDEO_RECEIVE_BUFFER_BYTES = 64 * 1024
     }
 }
 

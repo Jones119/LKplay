@@ -21,6 +21,47 @@ object AirPlayCrypto {
     private const val LABEL_SIZE = 8
     private val random = SecureRandom()
 
+    // CS11: every video frame and audio packet is ChaCha20-Poly1305 decrypted on this device.
+    // BouncyCastle's pure-Java implementation is a leading CPU cost on the i.MX6 (load peaks
+    // while scrolling and starves the kernel network path, which drops audio datagrams).
+    // Prefer the Conscrypt (BoringSSL) native AEAD that already ships in this APK; fall back
+    // to BouncyCastle only if the provider cannot be created.
+    private val nativeProvider: java.security.Provider? by lazy {
+        try {
+            org.conscrypt.Conscrypt.newProvider().also {
+                android.util.Log.i("xcertplay", "AirPlayCrypto: native ChaCha20-Poly1305 active")
+            }
+        } catch (error: Throwable) {
+            android.util.Log.w("xcertplay", "AirPlayCrypto: native AEAD unavailable, BouncyCastle fallback", error)
+            null
+        }
+    }
+    private val nativeSealCiphers = ThreadLocal<javax.crypto.Cipher>()
+    private val nativeOpenCiphers = ThreadLocal<javax.crypto.Cipher>()
+
+    private fun nativeAead(
+        mode: Int,
+        cache: ThreadLocal<javax.crypto.Cipher>,
+        key: ByteArray,
+        nonce: ByteArray,
+        aad: ByteArray,
+        input: ByteArray,
+    ): ByteArray {
+        val provider = nativeProvider ?: throw IllegalStateException("native AEAD unavailable")
+        var cipher = cache.get()
+        if (cipher == null) {
+            cipher = javax.crypto.Cipher.getInstance("ChaCha20-Poly1305", provider)
+            cache.set(cipher)
+        }
+        cipher.init(
+            mode,
+            javax.crypto.spec.SecretKeySpec(key, "ChaCha20"),
+            javax.crypto.spec.IvParameterSpec(nonce),
+        )
+        cipher.updateAAD(aad)
+        return cipher.doFinal(input)
+    }
+
     data class X25519KeyPair(val privateKey: ByteArray, val publicKey: ByteArray)
     data class Ed25519KeyPair(val privateKey: ByteArray, val publicKey: ByteArray)
 
@@ -79,6 +120,15 @@ object AirPlayCrypto {
         plaintext: ByteArray,
         aad: ByteArray = ByteArray(0),
     ): ByteArray {
+        if (nativeProvider != null) {
+            try {
+                return nativeAead(
+                    javax.crypto.Cipher.ENCRYPT_MODE, nativeSealCiphers, key, nonce, aad, plaintext,
+                )
+            } catch (error: java.security.GeneralSecurityException) {
+                android.util.Log.w("xcertplay", "AirPlayCrypto: native seal failed, using BouncyCastle", error)
+            }
+        }
         val cipher = ChaCha20Poly1305()
         cipher.init(true, AEADParameters(KeyParameter(key), MAC_BITS, nonce, aad))
         val output = ByteArray(cipher.getOutputSize(plaintext.size))
@@ -93,6 +143,19 @@ object AirPlayCrypto {
         ciphertextAndTag: ByteArray,
         aad: ByteArray = ByteArray(0),
     ): ByteArray {
+        if (nativeProvider != null) {
+            // Auth failures (AEADBadTagException) must propagate to the caller unchanged; only
+            // setup-level problems fall through to BouncyCastle.
+            try {
+                return nativeAead(
+                    javax.crypto.Cipher.DECRYPT_MODE, nativeOpenCiphers, key, nonce, aad, ciphertextAndTag,
+                )
+            } catch (error: javax.crypto.AEADBadTagException) {
+                throw error
+            } catch (error: java.security.GeneralSecurityException) {
+                android.util.Log.w("xcertplay", "AirPlayCrypto: native open failed, using BouncyCastle", error)
+            }
+        }
         val cipher = ChaCha20Poly1305()
         cipher.init(false, AEADParameters(KeyParameter(key), MAC_BITS, nonce, aad))
         val output = ByteArray(cipher.getOutputSize(ciphertextAndTag.size))

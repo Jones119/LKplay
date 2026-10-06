@@ -476,9 +476,12 @@ private class VideoDecoder(
                     when (job) {
                         is VideoJob.Config -> configureDecoder(job)
                         is VideoJob.Frame -> {
-                            if (System.nanoTime() - job.receivedNs > MAX_FRAME_AGE_NS) {
+                            // CS11: at 50 fps the old discard+recreate recovery fired every ~1.5 s and
+                            // visibly stuttered. Feed every frame and let drainOutput drop stale displays
+                            // instead; only a real one-second stall recreates the decoder.
+                            if (System.nanoTime() - job.receivedNs > STALL_RECOVERY_NS) {
                                 queue.discardFrames()
-                                recover("video backlog exceeded 250 ms")
+                                recover("video backlog exceeded 1 s")
                             } else feed(job.nalus)
                         }
                         is VideoJob.SurfaceChanged -> changeSurface(job.surface)
@@ -715,7 +718,12 @@ private class VideoDecoder(
                 index == MediaCodec.INFO_TRY_AGAIN_LATER -> return
                 index == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> logOutputFormat(codec.outputFormat)
                 index >= 0 -> {
-                    val render = outputSurface != null
+                    // Decode-but-drop: when a frame's display is far behind (input burst or decoder
+                    // catch-up), skip presenting it but keep decoding the reference chain, so the
+                    // surface stays current without decoder re-creation or keyframe waits.
+                    val ageUs = if (info.presentationTimeUs <= 0L) 0L
+                    else (System.nanoTime() / 1000) - info.presentationTimeUs
+                    val render = outputSurface != null && ageUs <= RENDER_MAX_AGE_US
                     codec.releaseOutputBuffer(index, render)
                     if (render) stats.onRendered()
                     if (render && !renderedFrameLogged) {
@@ -780,7 +788,8 @@ private class VideoDecoder(
         const val TAG = "xcertplay-usb"
         const val MAX_INPUT_SIZE = 8 * 1024 * 1024
         const val INPUT_TIMEOUT_US = 10_000L
-        const val MAX_FRAME_AGE_NS = 250_000_000L
+        const val STALL_RECOVERY_NS = 1_000_000_000L
+        const val RENDER_MAX_AGE_US = 250_000L
         val START_CODE = byteArrayOf(0x00, 0x00, 0x00, 0x01)
     }
 }
