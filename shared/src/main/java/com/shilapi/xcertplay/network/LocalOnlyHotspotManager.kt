@@ -49,6 +49,10 @@ class LocalOnlyHotspotManager(context: Context, private val onDiagnostic: (Strin
      * interface. The returned credentials are not retained by this manager.
      */
     override fun start(timeoutMillis: Long): WirelessHotspotInfo {
+        // CS11: 本地热点（LocalOnlyHotspot）API 是 26+；4.4 上明确不支持（无线 CarPlay 在此版本不可用）
+        if (Build.VERSION.SDK_INT < 26) {
+            throw IOException("Local-only hotspot requires Android 8.0+; wireless CarPlay is unavailable on this Android version")
+        }
         check(Looper.myLooper() != Looper.getMainLooper()) {
             "LocalOnlyHotspotManager.start must not run on the main thread"
         }
@@ -606,8 +610,11 @@ class LocalOnlyHotspotManager(context: Context, private val onDiagnostic: (Strin
         }
 
     @Suppress("DEPRECATION")
-    private fun upstreamInterfaceNames(): Set<String> = connectivityManager?.allNetworks.orEmpty()
-        .mapNotNull { connectivityManager?.getLinkProperties(it)?.interfaceName }.toSet()
+    private fun upstreamInterfaceNames(): Set<String> =
+        // CS11: ConnectivityManager.allNetworks / getLinkProperties 是 API21+
+        if (Build.VERSION.SDK_INT < 21) emptySet()
+        else connectivityManager?.allNetworks.orEmpty()
+            .mapNotNull { connectivityManager?.getLinkProperties(it)?.interfaceName }.toSet()
 
     private fun NetworkInterface.siteLocalIpv4Addresses(): Set<String> =
         Collections.list(inetAddresses).filterIsInstance<Inet4Address>()

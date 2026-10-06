@@ -40,14 +40,19 @@ class ExistingWifiManager(
     @Volatile private var interfaceName: String? = null
     private var callbackRegistered = false
 
-    private val callback = object : ConnectivityManager.NetworkCallback() {
-        override fun onLost(network: Network) {
-            if (network == selected) invalidate("network lost")
-        }
+    // CS11: NetworkCallback 是 API21+；4.4 上为 null（无线后端不可用，start() 会提前抛出可读错误）
+    private val callback: ConnectivityManager.NetworkCallback? = if (Build.VERSION.SDK_INT >= 21) {
+        object : ConnectivityManager.NetworkCallback() {
+            override fun onLost(network: Network) {
+                if (network == selected) invalidate("network lost")
+            }
 
-        override fun onLinkPropertiesChanged(network: Network, properties: LinkProperties) {
-            if (network == selected && !sameLink(properties)) invalidate("interface or address changed")
+            override fun onLinkPropertiesChanged(network: Network, properties: LinkProperties) {
+                if (network == selected && !sameLink(properties)) invalidate("interface or address changed")
+            }
         }
+    } else {
+        null
     }
 
     init {
@@ -62,6 +67,10 @@ class ExistingWifiManager(
         }
         require(timeoutMillis > 0) { "timeoutMillis must be positive" }
         check(selected == null) { "ExistingWifiManager has already started" }
+        // CS11: 该后端依赖 ConnectivityManager 现代 API（21+）；4.4 上明确不支持
+        if (Build.VERSION.SDK_INT < 21) {
+            throw IOException("Existing Wi-Fi attachment requires Android 5.0+; wireless CarPlay is unavailable on this Android version")
+        }
         val started = System.nanoTime()
         while (!closed) {
             // INTERNET/VALIDATED and the default route do not identify the CarPlay LAN.
@@ -116,9 +125,13 @@ class ExistingWifiManager(
                     hosts = addresses
                     interfaceIndex = iface.index
                     interfaceName = name
-                    connectivity.registerNetworkCallback(NetworkRequest.Builder().clearCapabilities()
-                        .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
-                        .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN).build(), callback)
+                    val cb = callback ?: throw IOException("Existing Wi-Fi attachment requires Android 5.0+")
+                    val request = NetworkRequest.Builder()
+                    // CS11: clearCapabilities 是 API30+
+                    if (Build.VERSION.SDK_INT >= 30) request.clearCapabilities()
+                    request.addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
+                        .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
+                    connectivity.registerNetworkCallback(request.build(), cb)
                     callbackRegistered = true
                 }
                 // Close the gap between reading the link and registering the callback.
@@ -178,7 +191,7 @@ class ExistingWifiManager(
         synchronized(lock) {
             closed = true
             if (callbackRegistered) {
-                connectivity.unregisterNetworkCallback(callback)
+                callback?.let { connectivity.unregisterNetworkCallback(it) }
                 callbackRegistered = false
             }
         }
