@@ -3108,11 +3108,7 @@ class DiPlayActivity : ComponentActivity() {
         val target = channelButtons.getOrNull(index) ?: return
         target.isSelected = selected
         target.setTextColor(if (selected) BG else TEXT)
-        target.background = android.graphics.drawable.RippleDrawable(
-            ColorStateList.valueOf(0x336F9FD9),
-            rounded(if (selected) ACCENT else SURFACE, if (selected) ACCENT else BORDER),
-            null
-        )
+        target.background = ripple(rounded(if (selected) ACCENT else SURFACE, if (selected) ACCENT else BORDER))
     }
 
     private fun channelSelector(): ViewGroup {
@@ -3166,7 +3162,8 @@ class DiPlayActivity : ComponentActivity() {
         val card = card()
         val heading = row().apply { gravity = Gravity.CENTER_VERTICAL; setPadding(0, 0, 0, dp(16)) }
         if (icon != null) heading.addView(ImageView(this).apply {
-            setImageResource(icon); imageTintList = ColorStateList.valueOf(ACCENT)
+            setImageResource(icon)
+            if (Build.VERSION.SDK_INT >= 21) imageTintList = ColorStateList.valueOf(ACCENT)
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
         }, LinearLayout.LayoutParams(dp(28), dp(28)).apply { marginEnd = dp(12) })
         heading.addView(label(title, 22, TEXT, true), LinearLayout.LayoutParams(0, -2, 1f))
@@ -3221,11 +3218,14 @@ class DiPlayActivity : ComponentActivity() {
     private fun button(title: String, primary: Boolean, click: () -> Unit) = Button(this).apply {
         text = title; isAllCaps = false; textSize = 18f; setTextColor(if (primary) BG else TEXT)
         typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-        background = android.graphics.drawable.RippleDrawable(ColorStateList.valueOf(0x336F9FD9), rounded(if (primary) ACCENT else BUTTON, if (primary) ACCENT else BORDER), null)
+        background = ripple(rounded(if (primary) ACCENT else BUTTON, if (primary) ACCENT else BORDER))
         setPadding(dp(16), 0, dp(16), 0); minHeight = dp(56); stateListAnimator = null
         setOnClickListener { click() }
     }
     private fun rounded(color: Int, stroke: Int) = GradientDrawable().apply { setColor(color); cornerRadius = dp(20).toFloat(); setStroke(dp(1), stroke) }
+    // CS11: RippleDrawable 是 API21+；4.4 回退为静态圆角底
+    private fun ripple(content: android.graphics.drawable.Drawable): android.graphics.drawable.Drawable =
+        if (Build.VERSION.SDK_INT >= 21) android.graphics.drawable.RippleDrawable(ColorStateList.valueOf(0x336F9FD9), content, null) else content
     private fun matchButton(top: Int = 0, height: Int = 68) = LinearLayout.LayoutParams(-1, dp(height)).apply { topMargin = dp(top) }
     private fun space(height: Int) = View(this).apply { layoutParams = LinearLayout.LayoutParams(1, dp(height)) }
     // Rounded, not truncated: below 160 dpi dp(1) became 0 and every border vanished.

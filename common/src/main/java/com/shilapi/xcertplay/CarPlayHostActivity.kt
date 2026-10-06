@@ -1882,7 +1882,7 @@ class CarPlayHostActivity : ComponentActivity() {
             isAllCaps = false
             textSize = 17f
             setTextColor(MENU_BUTTON_TEXT)
-            backgroundTintList = ColorStateList.valueOf(MENU_ACCENT)
+            tintBackgroundCompat(MENU_ACCENT)
             minHeight = dp(52)
             setOnClickListener { saveSettingsAndReconnect() }
         }
@@ -1899,7 +1899,7 @@ class CarPlayHostActivity : ComponentActivity() {
             isAllCaps = false
             textSize = 17f
             setTextColor(Color.WHITE)
-            backgroundTintList = ColorStateList.valueOf(MENU_DANGER)
+            tintBackgroundCompat(MENU_DANGER)
             minHeight = dp(52)
             setOnClickListener { exitApplication() }
         }
@@ -1932,7 +1932,7 @@ class CarPlayHostActivity : ComponentActivity() {
             isAllCaps = false
             textSize = 17f
             setTextColor(Color.WHITE)
-            backgroundTintList = ColorStateList.valueOf(MENU_TRACK_OFF)
+            tintBackgroundCompat(MENU_TRACK_OFF)
             minHeight = dp(52)
             setOnClickListener {
                 cancelSettingsEdits()
@@ -1970,7 +1970,7 @@ class CarPlayHostActivity : ComponentActivity() {
                 isAllCaps = false
                 textSize = 22f
                 setTextColor(Color.WHITE)
-                backgroundTintList = ColorStateList.valueOf(MENU_TRACK_OFF)
+                tintBackgroundCompat(MENU_TRACK_OFF)
                 contentDescription = getString(R.string.discard_changes_and_exit_settings)
                 minWidth = 0
                 minHeight = 0
@@ -2410,8 +2410,7 @@ class CarPlayHostActivity : ComponentActivity() {
             max = (values.size - 1).coerceAtLeast(0)
             progress = selectedIndex
             splitTrack = false
-            progressTintList = ColorStateList.valueOf(MENU_ACCENT)
-            thumbTintList = ColorStateList.valueOf(MENU_ACCENT)
+            if (Build.VERSION.SDK_INT >= 21) { progressTintList = ColorStateList.valueOf(MENU_ACCENT); thumbTintList = ColorStateList.valueOf(MENU_ACCENT) }
             setOnSeekBarChangeListener(
                 object : SeekBar.OnSeekBarChangeListener {
                     override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
@@ -2808,7 +2807,7 @@ class CarPlayHostActivity : ComponentActivity() {
                 textSize = 18f
                 setTextColor(Color.WHITE)
                 setHintTextColor(MENU_SECONDARY)
-                backgroundTintList = ColorStateList.valueOf(MENU_ACCENT)
+                tintBackgroundCompat(MENU_ACCENT)
                 minHeight = dp(48)
                 isSingleLine = true
                 inputType = when {
@@ -4666,7 +4665,12 @@ class CarPlayHostActivity : ComponentActivity() {
             WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
     }
 
-    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).roundToInt()
+    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).roundToInt()
+
+    // CS11: backgroundTintList 是 API21+；4.4 退化为纯色背景
+    private fun View.tintBackgroundCompat(color: Int) {
+        if (Build.VERSION.SDK_INT >= 21) backgroundTintList = ColorStateList.valueOf(color) else setBackgroundColor(color)
+    }
 
     private fun CarPlayStatus.describe(): String = when (this) {
         CarPlayStatus.DiscoveringMfi -> getString(R.string.preparing_mfi_authentication)
