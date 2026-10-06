@@ -22,6 +22,7 @@ import android.widget.FrameLayout
 import kotlin.math.abs
 import kotlin.math.hypot
 import com.shilapi.xcertplay.compat.systemService
+import android.os.Build
 
 /**
  * The dashboard map (CarPlay stream 111) as a floating card on the centre screen while DiPlay is in
@@ -133,11 +134,13 @@ internal object CenterMapOverlay {
         }
         val card = FrameLayout(context).apply {
             setBackgroundColor(Color.BLACK)
-            outlineProvider = object : ViewOutlineProvider() {
-                override fun getOutline(view: View, outline: Outline) =
-                    outline.setRoundRect(0, 0, view.width, view.height, radius)
+            if (Build.VERSION.SDK_INT >= 21) {
+                outlineProvider = object : ViewOutlineProvider() {
+                    override fun getOutline(view: View, outline: Outline) =
+                        outline.setRoundRect(0, 0, view.width, view.height, radius)
+                }
+                clipToOutline = true
             }
-            clipToOutline = true
             addView(video, FrameLayout.LayoutParams(-1, -1))
         }
         val slop = ViewConfiguration.get(context).scaledTouchSlop
