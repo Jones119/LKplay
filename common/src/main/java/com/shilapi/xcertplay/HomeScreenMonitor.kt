@@ -11,6 +11,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
 import com.shilapi.xcertplay.compat.systemService
+import android.os.Build
 
 /**
  * Whether a home screen is in front (BYD's normal home, map home or MyCar, or whichever
@@ -76,6 +77,8 @@ internal class HomeScreenMonitor(context: Context, private val onChange: (Boolea
     private fun isHomePackage(pkg: String): Boolean = pkg in homePackages
 
     private fun poll() {
+        // CS11: UsageStatsManager 是 API21+；4.4 上该监控停用（前台包检测不可用）
+        if (Build.VERSION.SDK_INT < 21) return
         val now = System.currentTimeMillis()
         val events = runCatching { context.systemService(UsageStatsManager::class.java).queryEvents(since, now) }
             .getOrNull() ?: return

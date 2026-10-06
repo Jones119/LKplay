@@ -46,8 +46,19 @@ object CarPlayRotation {
         val limit = picture.maxSide?.let { minOf(it, longSide) } ?: longSide
         val mime = if (hevc) MediaFormat.MIMETYPE_VIDEO_HEVC else MediaFormat.MIMETYPE_VIDEO_AVC
         val decoders = runCatching {
-            MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos.filter { info ->
-                !info.isEncoder && info.supportedTypes.any { it.equals(mime, ignoreCase = true) }
+            // CS11: codecInfos 是 API21+；4.4 走已废弃的计数枚举
+            if (Build.VERSION.SDK_INT >= 21) {
+                MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos.filter { info ->
+                    !info.isEncoder && info.supportedTypes.any { it.equals(mime, ignoreCase = true) }
+                }
+            } else {
+                // CS11: 4.4 的 getCodecCount/getCodecInfoAt 已从新 SDK 移除；用 createDecoderByType 探测默认解码器
+                val codec = android.media.MediaCodec.createDecoderByType(mime)
+                try {
+                    listOf(codec.codecInfo)
+                } finally {
+                    runCatching { codec.release() }
+                }
             }
         }.getOrDefault(emptyList())
         // Match AndroidMediaSink's explicit software-HEVC preference or default decoder. A later
@@ -59,9 +70,15 @@ object CarPlayRotation {
             if (Build.VERSION.SDK_INT >= 29) it.isHardwareAccelerated
             else !it.name.startsWith("OMX.google.") && !it.name.startsWith("c2.android.")
         } == true
-        val video = if (decoder != null && (hardware || software != null))
+        val video = if (decoder != null && Build.VERSION.SDK_INT >= 21 && (hardware || software != null))
             runCatching { decoder.getCapabilitiesForType(mime).videoCapabilities }.getOrNull() else null
         val alignedLimit = limit and 1.inv()
+        // CS11: 4.4 没有 VideoCapabilities 尺寸探测；按对齐上限直接采用
+        if (Build.VERSION.SDK_INT < 21) {
+            val side = if (decoder != null && alignedLimit >= 2) alignedLimit else null
+            Log.i(TAG, "square ${side ?: "unsupported"} (api<21 fallback) for a $longSide px screen, decoder=${decoder?.name}")
+            return side
+        }
         var probed = false
         val side = (listOf(alignedLimit) + SIDES.filter { it < alignedLimit }).firstOrNull { candidate ->
             if (candidate < 2 || video == null || decoder == null) return@firstOrNull false

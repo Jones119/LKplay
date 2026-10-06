@@ -24,15 +24,29 @@ class DiPlaySessionService : Service() {
             return START_NOT_STICKY
         }
         val manager = systemService(NotificationManager::class.java)
-        manager.createNotificationChannel(NotificationChannel(CHANNEL, "CarPlay connection", NotificationManager.IMPORTANCE_LOW))
-        val open = PendingIntent.getActivity(this, 0, Intent(this, CarPlayHostActivity::class.java), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-        val stop = PendingIntent.getService(this, 1, Intent(this, DiPlaySessionService::class.java).setAction(ACTION_STOP), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-        val notification = Notification.Builder(this, CHANNEL)
-            .setSmallIcon(R.drawable.ic_diplay_notification)
+        // CS11: 通知渠道是 API26+；4.4 直接跳过
+        if (Build.VERSION.SDK_INT >= 26) {
+            manager.createNotificationChannel(NotificationChannel(CHANNEL, "CarPlay connection", NotificationManager.IMPORTANCE_LOW))
+        }
+        // CS11: FLAG_IMMUTABLE 是 API23 常量；4.4 传 0
+        val immutable = if (Build.VERSION.SDK_INT >= 23) PendingIntent.FLAG_IMMUTABLE else 0
+        val open = PendingIntent.getActivity(this, 0, Intent(this, CarPlayHostActivity::class.java), PendingIntent.FLAG_UPDATE_CURRENT or immutable)
+        val stop = PendingIntent.getService(this, 1, Intent(this, DiPlaySessionService::class.java).setAction(ACTION_STOP), PendingIntent.FLAG_UPDATE_CURRENT or immutable)
+        val builder = if (Build.VERSION.SDK_INT >= 26) {
+            Notification.Builder(this, CHANNEL)
+        } else {
+            @Suppress("DEPRECATION")
+            Notification.Builder(this)
+        }
+        builder.setSmallIcon(R.drawable.ic_diplay_notification)
             .setContentTitle("DiPlay")
             .setContentText("CarPlay connection running")
             .setContentIntent(open).setOngoing(true)
-            .addAction(Notification.Action.Builder(null, "Disconnect", stop).build()).build()
+        // CS11: Notification.Action.Builder 是 API23+；4.4 通知不带断开动作
+        if (Build.VERSION.SDK_INT >= 23) {
+            builder.addAction(Notification.Action.Builder(null, "Disconnect", stop).build())
+        }
+        val notification = builder.build()
         if (Build.VERSION.SDK_INT >= 29) {
             var types = ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
             if (Build.VERSION.SDK_INT >= 30 && checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
