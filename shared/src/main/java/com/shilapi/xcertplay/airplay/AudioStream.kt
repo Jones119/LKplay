@@ -64,7 +64,10 @@ class AudioStream(
         val control = bindAnyPort()
         dataSocket = data
         controlSocket = control
-        dataThread = Thread({ runData(data, listener) }, "airplay-audio-rx").apply {
+        dataThread = Thread({
+            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO)
+            runData(data, listener)
+        }, "airplay-audio-rx").apply {
             isDaemon = true
             start()
         }
@@ -185,7 +188,7 @@ class AudioStream(
     private fun bindAnyPort(): DatagramSocket {
         val socket = DatagramSocket(null)
         socket.reuseAddress = true
-        socket.bind(InetSocketAddress(InetAddress.getByName("::"), 0))
+        socket.bind(InetSocketAddress(serverBindAddress(), 0))
         return socket
     }
 

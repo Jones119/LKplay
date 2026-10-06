@@ -67,6 +67,7 @@ import com.shilapi.xcertplay.transport.Iap2IdentificationConfig
 import com.shilapi.xcertplay.transport.Iap2LocationProvider
 import com.shilapi.xcertplay.transport.Iap2UsbMuxHost
 import com.shilapi.xcertplay.transport.Iap2UsbSession
+import com.shilapi.xcertplay.network.Cs11NetdevBootstrap
 import com.shilapi.xcertplay.transport.Iap2WiredCarPlayEndpoint
 import com.shilapi.xcertplay.transport.Iap2WiredControlClient
 import com.shilapi.xcertplay.transport.Iap2WiredControlTerminal
@@ -334,7 +335,11 @@ class CarPlayController(
                 "AirPlay device info name=${info.name} deviceId=${info.deviceId} " +
                     "wifiMac=${info.wifiMac} model=${info.model}",
             )
-            uiListener?.onDeviceInfo(session, info)
+            try {
+                uiListener?.onDeviceInfo(session, info)
+            } catch (error: Exception) {
+                debugLog("UI device info callback failed ${error.javaClass.name}: ${error.message}")
+            }
         }
 
         // The user tapped the car icon in CarPlay: show the head unit's own menu, like its Home button.
@@ -1839,15 +1844,22 @@ class CarPlayController(
             when (result) {
                 is IphoneUsbHost.Iap2SessionResult.Connected -> {
                     try {
-                        // CS11: 4.4 上 NCM 可能不可用（内核占用/alt 设定限制）→ 降级为空，先验证控制通道
-                        val ncm = try {
-                            openNcm(device)
-                        } catch (error: Throwable) {
-                            if (Build.VERSION.SDK_INT < 21) {
-                                debugLog("CS11 degraded: NCM unavailable (${error.message}); continuing without media bridge")
-                                null
-                            } else {
-                                throw error
+                        // CS11: the kernel cannot create TUN interfaces, so the raw-USB NCM bridge can
+                        // never carry media. On API 19 the kernel cdc_ncm netdev + system network
+                        // stack replace it end to end (see Cs11NetdevBootstrap).
+                        val ncm = if (Build.VERSION.SDK_INT < 21 && Cs11NetdevBootstrap.supported) {
+                            debugLog("CS11: kernel netdev transport selected; skipping raw NCM bridge")
+                            null
+                        } else {
+                            try {
+                                openNcm(device)
+                            } catch (error: Throwable) {
+                                if (Build.VERSION.SDK_INT < 21) {
+                                    debugLog("CS11 degraded: NCM unavailable (${error.message}); continuing without media bridge")
+                                    null
+                                } else {
+                                    throw error
+                                }
                             }
                         }
                         runStack(result.session, ncm)
@@ -1926,38 +1938,9 @@ class CarPlayController(
             )
             onStatus(CarPlayStatus.ConnectingControl)
             val carKitClient = LockdownCarKitClient(mux)
-            // Temporary lab capture, limited to accessory/authentication messages and two minutes.
-            try {
-                val relay = carKitClient.openService(pairRecord, config.label, "com.apple.syslog_relay")
-                Thread({
-                    try {
-                        relay.use {
-                            val deadline = System.nanoTime() + 120_000_000_000L
-                            val pending = StringBuilder()
-                            val relevant = Regex(" (accessoryd|ACCCarPlayService|iap2d|CarPlay)([\\[(])", RegexOption.IGNORE_CASE)
-                            while (!closed && System.nanoTime() < deadline) {
-                                val bytes = relay.recv(8192, 1000) ?: continue
-                                if (bytes.isEmpty()) break
-                                pending.append(bytes.toString(Charsets.UTF_8).replace('\u0000', '\n'))
-                                while (true) {
-                                    val end = pending.indexOf("\n")
-                                    if (end < 0) break
-                                    val line = pending.substring(0, end)
-                                    pending.delete(0, end + 1)
-                                    if (relevant.containsMatchIn(line)) debugLog("PHONE ${line.take(2000)}")
-                                }
-                                if (pending.length > 65536) pending.clear()
-                            }
-                        }
-                        debugLog("phone authentication diagnostic capture ended")
-                    } catch (error: Exception) {
-                        debugLog("phone authentication diagnostic capture ended: ${error.javaClass.simpleName}")
-                    }
-                }, "carplay-lab-phone-diagnostics").apply { isDaemon = true; start() }
-                debugLog("phone authentication diagnostic capture started")
-            } catch (error: Exception) {
-                debugLog("phone authentication diagnostics unavailable: ${error.message}")
-            }
+            // CS11 perf: the phone syslog relay capture was removed here — its two-minute stream
+            // flooded the log pipeline and starved the media threads on the i.MX6.
+
             val carkit = try {
                 carKitClient.open(pairRecord, config.label)
             } catch (error: Throwable) {
@@ -1969,26 +1952,13 @@ class CarPlayController(
                 carKitClient.open(pairRecord, config.label)
             }
             debugLog("wired com.apple.carkit.service stream opened")
-            // Lab transport diagnostics: packet headers only, never certificate or challenge data.
-            fun wireSummary(bytes: ByteArray): String {
-                if (bytes.size < 9 || bytes[0].toInt() and 0xff != 0xff ||
-                    bytes[1].toInt() and 0xff != 0x5a) return "bytes=${bytes.size}"
-                fun value(index: Int) = bytes[index].toInt() and 0xff
-                return "bytes=${bytes.size} length=${(value(2) shl 8) or value(3)} " +
-                    "flags=${value(4)} seq=${value(5)} ack=${value(6)} session=${value(7)}"
-            }
             val tracedCarkit = object : com.shilapi.xcertplay.transport.BlockingDuplexByteStream {
                 private val io = ConnectionIoDiagnostics(::connectionDiagnostic)
                 override fun send(data: ByteArray) {
                     val started = System.nanoTime()
                     var result = ConnectionIoDiagnostics.Result.FAILED
                     try {
-                        debugLog("wired link TX begin ${wireSummary(data)}")
-                        // Bound each TLS write while diagnosing the stalled certificate transfer.
-                        for (offset in data.indices step 256) {
-                            carkit.send(data.copyOfRange(offset, minOf(offset + 256, data.size)))
-                        }
-                        debugLog("wired link TX completed bytes=${data.size}")
+                        carkit.send(data)
                         result = ConnectionIoDiagnostics.Result.COMPLETED
                     } finally {
                         io.record(ConnectionIoDiagnostics.Operation.WRITE, result, elapsedMillis(started))
@@ -2004,7 +1974,6 @@ class CarPlayController(
                                 bytes.isEmpty() -> ConnectionIoDiagnostics.Result.ENDED
                                 else -> ConnectionIoDiagnostics.Result.COMPLETED
                             }
-                            if (bytes != null) debugLog("wired link RX ${wireSummary(bytes)}")
                         }
                     } finally {
                         io.record(ConnectionIoDiagnostics.Operation.READ, result, elapsedMillis(started))
@@ -2025,14 +1994,28 @@ class CarPlayController(
 
             val ncmHostMac = ncm?.hostMac ?: config.hostMac
             debugLog("ncm using hostMac=${ncmHostMac.macString()}")
-            // CS11: 4.4 无 VPN 组件——完全跳过 VPN 附着（媒体通道后续处理），先验证控制通道
-            if (Build.VERSION.SDK_INT < 21) {
-                debugLog("CS11 degraded mode: skipping VPN attach entirely; control channel only")
-            } else if (ncm != null && !attachVpn(ncm, ncmHostMac)) {
-                throw IphoneUsbException.DeviceUnavailable("Could not attach the NCM/VPN AirPlay transport")
+            // CS11: the kernel has no TUN driver, so the classic VpnService/NCM bridge cannot
+            // attach ("Cannot create interface"). When the root-assisted kernel netdev path is
+            // available, the AirPlay listener binds on the cdc_ncm interface address instead and
+            // the phone reaches it over the kernel NCM link; otherwise degrade to control-only.
+            val directNetdev = Build.VERSION.SDK_INT < 21 && Cs11NetdevBootstrap.supported &&
+                attachSystemNetdev()
+            if (!directNetdev) {
+                if (ncm == null) {
+                    if (Build.VERSION.SDK_INT >= 21) {
+                        throw IphoneUsbException.DeviceUnavailable("Could not attach the NCM/VPN AirPlay transport")
+                    }
+                    debugLog("CS11 degraded mode: no NCM bridge; control channel only")
+                } else if (!attachVpn(ncm, ncmHostMac)) {
+                    if (Build.VERSION.SDK_INT < 21) {
+                        debugLog("CS11 degraded mode: VPN attach failed; control channel only")
+                    } else {
+                        throw IphoneUsbException.DeviceUnavailable("Could not attach the NCM/VPN AirPlay transport")
+                    }
+                }
             }
             ncmOwnedLocally = false
-            debugLog("wired NCM/VPN AirPlay transport attached")
+            debugLog("wired AirPlay transport attached kernelNetdev=$directNetdev")
             if (closed) {
                 vpnService?.detach()
                 return
@@ -2421,6 +2404,68 @@ class CarPlayController(
         config.transport == CarPlayTransport.WIRED -> Iap2WiredControlClient.NO_TIMEOUT_MILLIS
         config.locationReportingEnabled -> LOCATION_CONTROL_LOOP_TIMEOUT_MILLIS
         else -> CONTROL_LOOP_TIMEOUT_MILLIS
+    }
+
+    /**
+     * CS11: binds the AirPlay listener on the kernel cdc_ncm netdev address (usb1) with no VPN
+     * tunnel and no raw-USB NCM bridge; the kernel network stack carries all IPv6 traffic.
+     * Returns false when the netdev path is unavailable so the caller can fall back.
+     */
+    private fun attachSystemNetdev(): Boolean {
+        val service = awaitVpnService() ?: run {
+            debugLog("CS11 netdev: VPN service bind failed")
+            return false
+        }
+        val netdev = Cs11NetdevBootstrap.ensure(config.linkLocal, log = ::debugLog) ?: return false
+        val bindAddress = Cs11NetdevBootstrap.scopedAddress(config.linkLocal, netdev.linkLocal.scopeId)
+            ?: netdev.linkLocal
+        onStatus(CarPlayStatus.AttachingNetwork)
+        var attempt = 0
+        while (attempt < 4) {
+            attempt++
+            val result = try {
+                service.attachSystemNetdev(
+                    bindAddress = bindAddress,
+                    config = airPlayConfig,
+                    identity = identity,
+                    pairings = pairings,
+                    mfi = mfiSession?.client,
+                    listener = sessionListener,
+                    media = media,
+                )
+            } catch (error: Throwable) {
+                debugLog("CS11 netdev: attach error ${error.message}")
+                return false
+            }
+            when (result) {
+                CarPlayVpnService.AttachResult.Started -> {
+                    debugLog(
+                        "CS11 netdev: AirPlay listener on ${bindAddress.hostAddress}" +
+                            " port=${service.boundPort()} (attempt $attempt)",
+                    )
+                    return true
+                }
+                CarPlayVpnService.AttachResult.AlreadyStarted -> {
+                    debugLog("CS11 netdev: attach reported already-started")
+                    return false
+                }
+                is CarPlayVpnService.AttachResult.Failed -> {
+                    debugLog("CS11 netdev: attach failed ${result.message} (attempt $attempt)")
+                    // EADDRNOTAVAIL: the link-local address is still in DAD (tentative) right
+                    // after the netdev comes up; the kernel rejects binds until it settles.
+                    val transient = result.message?.contains("EADDRNOTAVAIL") == true ||
+                        result.message?.contains("Cannot assign") == true
+                    if (!transient) return false
+                }
+            }
+            try {
+                Thread.sleep(1500)
+            } catch (_: InterruptedException) {
+                return false
+            }
+        }
+        debugLog("CS11 netdev: attach failed after $attempt attempts")
+        return false
     }
 
     private fun attachVpn(ncm: NcmUsbBridge, hostMac: ByteArray): Boolean {

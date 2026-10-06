@@ -32,3 +32,4 @@ include(":common")
 include(":mobile")
 include(":shared")
 // CS11 移植: automotive / samples 暂不参与构建（API 要求高、与手机端场景无关）
+include(":vpndialogs-stub")

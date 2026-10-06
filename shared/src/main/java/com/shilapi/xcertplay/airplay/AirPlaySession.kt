@@ -104,7 +104,7 @@ class AirPlaySession(
     private val eventThreads = CopyOnWriteArrayList<Thread>()
 
     val host: String = socket.inetAddress?.hostAddress ?: ""
-    val localAddress: InetAddress? = socket.localAddress
+    val localAddress: InetAddress? = withLinkLocalScope(socket.localAddress)
     private val peerAddress: InetAddress? = socket.inetAddress
     internal val remoteAddress: InetAddress?
         get() = (socket.remoteSocketAddress as? InetSocketAddress)?.address
@@ -489,6 +489,11 @@ class AirPlaySession(
                             "airplay handler failed ${request.method} ${request.path} cseq=$cseq",
                             error,
                         )
+                        debugLog(
+                            "airplay handler failed ${request.method} ${request.path} cseq=$cseq " +
+                                "error=${error.javaClass.name}: ${error.message} at " +
+                                error.stackTrace.take(8).joinToString(" <- ") { it.toString() },
+                        )
                         RtspMessage.Response(status = 500)
                     }
                     debugLog(
@@ -651,13 +656,35 @@ class AirPlaySession(
         debugLog(AirPlayPeerDiagnostics.summary(model, string(dict["osVersion"]), string(dict["sourceVersion"])))
         if (deviceId.isNotEmpty()) deviceBtMac = deviceId
         if (name.isNotEmpty() || deviceId.isNotEmpty() || wifiMac.isNotEmpty()) {
-            listener.onDeviceInfo(this, AirPlayDeviceInfo(name, deviceId, wifiMac, model))
+            try {
+                listener.onDeviceInfo(this, AirPlayDeviceInfo(name, deviceId, wifiMac, model))
+            } catch (error: Exception) {
+                debugLog("airplay onDeviceInfo callback failed ${error.javaClass.name}: ${error.message}")
+            }
         }
 
         val peerTimingPort = long(dict["timingPort"])?.toInt() ?: 0
+        val timingPort = try {
+            openTiming(peerTimingPort)
+        } catch (error: Exception) {
+            debugLog(
+                "airplay openTiming failed ${error.javaClass.name}: ${error.message} at " +
+                    error.stackTrace.take(6).joinToString(" <- ") { it.toString() },
+            )
+            throw error
+        }
+        val eventPort = try {
+            openEvent()
+        } catch (error: Exception) {
+            debugLog(
+                "airplay openEvent failed ${error.javaClass.name}: ${error.message} at " +
+                    error.stackTrace.take(6).joinToString(" <- ") { it.toString() },
+            )
+            throw error
+        }
         val response = linkedMapOf<String, Any?>(
-            "timingPort" to openTiming(peerTimingPort),
-            "eventPort" to openEvent(),
+            "timingPort" to timingPort,
+            "eventPort" to eventPort,
         )
         if (dict["keepAliveLowPower"] == true || dict["keepAliveLowPower"] == 1L) {
             response["keepAlivePort"] = openKeepAlive()
@@ -789,7 +816,7 @@ class AirPlaySession(
     private fun openKeepAlive(): Int {
         val socket = DatagramSocket(null)
         socket.reuseAddress = true
-        socket.bind(InetSocketAddress(InetAddress.getByName("::"), 0))
+        socket.bind(InetSocketAddress(serverBindAddress(), 0))
         keepAliveSocket = socket
         keepAliveThread = Thread({ runKeepAlive(socket) }, "airplay-keepalive").apply {
             isDaemon = true
@@ -810,7 +837,8 @@ class AirPlaySession(
     }
 
     private fun openEvent(): Int {
-        val server = ServerSocket(0, 50, InetAddress.getByName("::"))
+        val server = ServerSocket()
+        server.bind(InetSocketAddress(serverBindAddress(), 0), 50)
         eventServer = server
         spawnEvent("airplay-event-accept") { acceptEvent(server) }
         return server.localPort

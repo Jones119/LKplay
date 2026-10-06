@@ -7,6 +7,7 @@ import java.math.BigInteger
 import java.net.ServerSocket
 import java.net.Socket
 import java.net.InetAddress
+import java.net.InetSocketAddress
 import java.util.ArrayDeque
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -37,7 +38,10 @@ internal class BufferedAudioStream(
     private var cleanupStarted = false // guarded by lock; permits reentrant close without recursion
     @Volatile internal var outputCleanupComplete = false
         private set
-    private val server = ServerSocket(0)
+    private val server = ServerSocket().apply {
+        reuseAddress = true
+        bind(InetSocketAddress(serverBindAddress(), 0))
+    }
     private val boundPort = server.localPort
     @Volatile private var client: Socket? = null
     private val lock = Object()

@@ -116,7 +116,7 @@ internal class MicrophoneUplink(
         val nextSocket = try {
             DatagramSocket(null).apply {
                 reuseAddress = true
-                bind(InetSocketAddress(InetAddress.getByName("::"), 0))
+                bind(InetSocketAddress(serverBindAddress(), 0))
             }
         } catch (error: Exception) {
             Log.e(TAG, "microphone socket creation failed", error)

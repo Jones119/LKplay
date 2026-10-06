@@ -47,7 +47,7 @@ class IapTunnel(
         val secondaryAddress = if (bindAddress is java.net.Inet6Address) {
             InetAddress.getByName("0.0.0.0")
         } else {
-            InetAddress.getByName("::")
+            serverBindAddress()
         }
         val secondary = ServerSocket()
         runCatching {

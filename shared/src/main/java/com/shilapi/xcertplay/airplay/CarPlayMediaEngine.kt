@@ -325,7 +325,7 @@ class CarPlayMediaEngine(
             readKey = key,
             bindAddress = session.localAddress
                 ?: when (session.remoteAddress) {
-                    is Inet6Address -> InetAddress.getByName("::")
+                    is Inet6Address -> serverBindAddress()
                     is Inet4Address -> InetAddress.getByName("0.0.0.0")
                     else -> InetAddress.getByName("0.0.0.0")
                 },

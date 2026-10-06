@@ -357,9 +357,13 @@ class NcmUsbBridge internal constructor(
                     }
                     claimed.add(function.data)
                 }
-                // CS11: setInterface 是 API21+；4.4 无法切换备用设定（默认设定即当前），跳过并记录
-                val altDataSel = if (Build.VERSION.SDK_INT >= 21) function.data.alternateSetting else -1
-                val altSelected = if (Build.VERSION.SDK_INT >= 21) connection.setInterface(function.data) else true
+                // CS11: setInterface 是 API21+；4.4 用 controlTransfer 发标准 SET_INTERFACE(0x0B) 激活 alt1
+                val altDataSel = if (Build.VERSION.SDK_INT >= 21) function.data.alternateSetting else DATA_ALTERNATE_SETTING_HINT
+                val altSelected = if (Build.VERSION.SDK_INT >= 21) {
+                    connection.setInterface(function.data)
+                } else {
+                    selectDataAlternatesViaControlTransfer(connection)
+                }
                 Log.i(
                     IphoneCarPlayConfiguration.TAG,
                     "setInterface iface=api${Build.VERSION.SDK_INT} alt=$altDataSel ok=$altSelected",
@@ -443,6 +447,48 @@ class NcmUsbBridge internal constructor(
 
         private const val USB_INTERFACE_DESCRIPTOR_TYPE = 0x04
         private const val USB_REQUEST_GET_DESCRIPTOR = 0x06
+        private const val DATA_ALTERNATE_SETTING_HINT = 1
+        private const val USB_REQUEST_TYPE_SET_INTERFACE = 0x01
+        private const val USB_REQUEST_SET_INTERFACE = 0x0B
+
+        /**
+         * CS11: 4.4 没有 setInterface API——用 controlTransfer 对全部 CDC 数据接口(class 0x0a)
+         * 发送标准 SET_INTERFACE(备用设定 1)，激活其 bulk 端点。接口号从 rawDescriptors 解析。
+         */
+        private fun selectDataAlternatesViaControlTransfer(connection: UsbDeviceConnection): Boolean {
+            val raw = connection.rawDescriptors ?: return false
+            val numbers = dataInterfaceNumbers(raw)
+            if (numbers.isEmpty()) return false
+            var any = false
+            for (number in numbers) {
+                val result = connection.controlTransfer(
+                    USB_REQUEST_TYPE_SET_INTERFACE, USB_REQUEST_SET_INTERFACE,
+                    DATA_ALTERNATE_SETTING_HINT, number, null, 0, USB_CONTROL_TIMEOUT_MILLIS,
+                )
+                Log.i(IphoneCarPlayConfiguration.TAG, "CS11 SET_INTERFACE(alt=1, iface=$number) -> $result")
+                if (result >= 0) any = true
+            }
+            return any
+        }
+
+        private fun dataInterfaceNumbers(raw: ByteArray): List<Int> {
+            val numbers = ArrayList<Int>(2)
+            var offset = 0
+            while (offset + 2 <= raw.size) {
+                val length = raw[offset].toInt() and 0xff
+                val type = raw[offset + 1].toInt() and 0xff
+                if (length < 2 || offset + length > raw.size) break
+                if (type == USB_INTERFACE_DESCRIPTOR_TYPE && length >= 9) {
+                    val ifaceClass = raw[offset + 5].toInt() and 0xff
+                    val ifaceNumber = raw[offset + 2].toInt() and 0xff
+                    if (ifaceClass == NcmFunctionDiscovery.DATA_CLASS && !numbers.contains(ifaceNumber)) {
+                        numbers.add(ifaceNumber)
+                    }
+                }
+                offset += length
+            }
+            return numbers
+        }
         private const val USB_STRING_DESCRIPTOR_TYPE = 0x03
         private const val CDC_FUNCTIONAL_DESCRIPTOR_TYPE = 0x24
         private const val CDC_ETHERNET_SUBTYPE = 0x0f

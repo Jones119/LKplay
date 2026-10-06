@@ -145,7 +145,10 @@ class Iap2UsbMuxHost private constructor(
         // Optional reply padding is handled by the incremental framer. Retain a possible
         // fragmented/coalesced next frame instead of discarding the entire remainder.
         sendFrame(PROTOCOL_SETUP, byteArrayOf(SETUP_VALUE.toByte()))
-        readerThread = Thread(::readerLoop, "iap2-usbmux-reader").apply {
+        readerThread = Thread({
+            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO)
+            readerLoop()
+        }, "iap2-usbmux-reader").apply {
             isDaemon = true
             start()
         }
@@ -160,11 +163,7 @@ class Iap2UsbMuxHost private constructor(
                 receiveFrames.takeFrame()?.let { frame ->
                     // LIVI only trusts the length field on receive: iPhone replies do not
                     // carry the 0xFEEDFACE word in the header's fourth field.
-                    Log.i(
-                        "xcertplay-usb",
-                        "usbmux rx proto=${frame.protocol} length=${frame.length} word8=0x" +
-                            frame.word8.toUInt().toString(16),
-                    )
+                    // CS11 perf: per-frame logging removed — runs at hundreds of frames/s.
                     nextMuxAcknowledgement = frame.sequence
                     return frame
                 }

@@ -39,9 +39,12 @@ class ScreenStream(private val key: ByteArray, private val onDiagnostic: (String
         this.listener = listener
         val bound = ServerSocket()
         bound.reuseAddress = true
-        bound.bind(InetSocketAddress(InetAddress.getByName("::"), 0))
+        bound.bind(InetSocketAddress(serverBindAddress(), 0))
         server = bound
-        thread = Thread({ accept(bound) }, "airplay-screen").apply { isDaemon = true; start() }
+        thread = Thread({
+            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_DISPLAY)
+            accept(bound)
+        }, "airplay-screen").apply { isDaemon = true; start() }
         return bound.localPort
     }
 
