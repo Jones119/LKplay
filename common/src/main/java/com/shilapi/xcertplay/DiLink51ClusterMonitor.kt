@@ -11,6 +11,7 @@ import android.os.SystemClock
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import com.shilapi.xcertplay.compat.systemService
+import android.os.Build
 
 /** Uses the owner's standard Android Usage Access grant, never the privileged BYD API. */
 internal class DiLink51ClusterMonitor(context: Context, private val onState: (ClusterActivityState.Snapshot) -> Unit) {
@@ -27,6 +28,8 @@ internal class DiLink51ClusterMonitor(context: Context, private val onState: (Cl
     private data class EventKey(val pkg: String?, val name: String?, val id: Int, val type: Int, val time: Long)
 
     fun start() {
+        // CS11: UsageStatsManager 是 API21+；4.4 停用该监控
+        if (Build.VERSION.SDK_INT < 21) return
         executor.scheduleWithFixedDelay({ poll() }, 0, 500, TimeUnit.MILLISECONDS)
     }
 

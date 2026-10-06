@@ -13,6 +13,7 @@ import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.locks.ReentrantLock
 import com.shilapi.xcertplay.compat.systemService
+import android.os.Build
 
 /** Uses the car's saved hotspot configuration. This never stops or reconfigures the hotspot. */
 object CarHotspotTethering {
@@ -26,7 +27,9 @@ object CarHotspotTethering {
         CANCELLED("Hotspot startup was cancelled"),
     }
 
-    fun permitted(context: Context): Boolean = Settings.System.canWrite(context)
+    fun permitted(context: Context): Boolean =
+        // CS11: Settings.System.canWrite 是 API23+；4.4 上 WRITE_SETTINGS 安装即授予
+        if (Build.VERSION.SDK_INT < 23) true else Settings.System.canWrite(context)
 
     /** Blocking; serialize startup and connection requests, checking cancellation after acquiring the lock. */
     fun enable(

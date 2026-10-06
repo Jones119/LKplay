@@ -102,6 +102,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 import com.shilapi.xcertplay.compat.systemService
+import com.shilapi.xcertplay.compat.noBackupFilesDirCompat
 
 sealed class CarPlayStatus {
     data object DiscoveringMfi : CarPlayStatus()
@@ -251,7 +252,7 @@ class CarPlayController(
     @Volatile private var firstTcpWatchdog: FirstTcpWatchdog? = null
     private val startupTimer = java.util.concurrent.ScheduledThreadPoolExecutor(1) { task ->
         Thread(task, "diplay-first-tcp-timeout").apply { isDaemon = true }
-    }.apply { removeOnCancelPolicy = true }
+    }.apply { if (Build.VERSION.SDK_INT >= 21) removeOnCancelPolicy = true } // CS11: setRemoveOnCancelPolicy 是 API21+
     @Volatile private var wirelessDiagnostics: WirelessStartupDiagnostics? = null
     @Volatile private var bluetoothSocket: BluetoothSocket? = null
     @Volatile private var bluetoothStream: BluetoothRfcommDuplexStream? = null
@@ -758,7 +759,7 @@ class CarPlayController(
         availabilityPollGeneration.incrementAndGet()
         phase = Phase.MFI
         onStatus(CarPlayStatus.DiscoveringMfi)
-        val offlineDirectory = java.io.File(appContext.noBackupFilesDir, LocalMfiAuthenticationClient.DIRECTORY)
+        val offlineDirectory = java.io.File(appContext.noBackupFilesDirCompat(), LocalMfiAuthenticationClient.DIRECTORY)
         when (config.mfiTarget) {
             MfiTarget.LOCAL -> openLocalMfi(offlineDirectory)
             MfiTarget.USB_CH341 -> {
@@ -1723,9 +1724,12 @@ class CarPlayController(
                 when (phase) {
                     Phase.REENUMERATION, Phase.IPHONE -> {
                         val configuration = IphoneCarPlayConfiguration.find(result.device)
+                        // CS11: UsbConfiguration.getId 是 API21+
+                        val configurationId = if (configuration != null && Build.VERSION.SDK_INT >= 21)
+                            configuration.id.toString() else "none"
                         connectionDiagnostic(
                             "USB configuration ready=${configuration != null} " +
-                                "configurationId=${configuration?.id ?: "none"} " +
+                                "configurationId=$configurationId " +
                                 "reenumerationAttempts=$reenumerationAttempts " +
                                 "action=${when {
                                     configuration != null -> "reuse-descriptors"
@@ -1850,9 +1854,13 @@ class CarPlayController(
             )
         val function = NcmFunctionDiscovery.find(configuration)
             ?: throw IphoneUsbException.Protocol("iPhone configuration does not expose an NCM function")
+        // CS11: UsbConfiguration.getId / UsbInterface.getAlternateSetting 是 API21+ 属性
+        val ncmConfigId = if (Build.VERSION.SDK_INT >= 21) configuration.id else -1
+        val controlAlt = if (Build.VERSION.SDK_INT >= 21) function.control.alternateSetting else -1
+        val dataAlt = if (Build.VERSION.SDK_INT >= 21) function.data.alternateSetting else -1
         debugLog(
-            "ncm config=${configuration.id} control=${function.control.id}/${function.control.alternateSetting}" +
-                " data=${function.data.id}/${function.data.alternateSetting}" +
+            "ncm config=$ncmConfigId control=${function.control.id}/$controlAlt" +
+                " data=${function.data.id}/$dataAlt" +
                 " status=${function.statusIn?.address?.let { "0x${it.toString(16)}" } ?: "none"}" +
                 " in=0x${function.bulkIn.address.toString(16)} out=0x${function.bulkOut.address.toString(16)}",
         )

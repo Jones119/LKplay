@@ -65,3 +65,8 @@ fun Context.hasPermissionCompat(permission: String): Boolean =
     } else {
         packageManager.checkPermission(permission, packageName) == android.content.pm.PackageManager.PERMISSION_GRANTED
     }
+
+/** `Context.getNoBackupFilesDir` 需要 API 21；低版本退到 filesDir/no_backup。 */
+fun Context.noBackupFilesDirCompat(): java.io.File =
+    if (Build.VERSION.SDK_INT >= 21) noBackupFilesDir
+    else java.io.File(filesDir, "no_backup").apply { mkdirs() }

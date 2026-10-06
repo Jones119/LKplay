@@ -6,6 +6,7 @@ import com.shilapi.xcertplay.mfi.LocalMfiAuthenticationClient
 import com.shilapi.xcertplay.orchestration.MfiTarget
 import java.io.File
 import java.security.MessageDigest
+import com.shilapi.xcertplay.compat.noBackupFilesDirCompat
 
 /** Installs the private beta's experimental identity. It has no remote fallback. */
 internal object DiPlayBootstrap {
@@ -14,9 +15,9 @@ internal object DiPlayBootstrap {
     @Synchronized fun ensure(context: Context, mfiTarget: MfiTarget) {
         if (mfiTarget != MfiTarget.LOCAL) return
         if (ready) return
-        val target = File(context.noBackupFilesDir, LocalMfiAuthenticationClient.DIRECTORY)
+        val target = File(context.noBackupFilesDirCompat(), LocalMfiAuthenticationClient.DIRECTORY)
         if (!target.exists()) {
-            val staging = File(context.noBackupFilesDir, "offline-mfi-staging")
+            val staging = File(context.noBackupFilesDirCompat(), "offline-mfi-staging")
             staging.deleteRecursively()
             check(staging.mkdirs()) { "Could not prepare local authentication" }
             staging.setReadable(false, false); staging.setReadable(true, true)

@@ -62,6 +62,7 @@ import java.util.Date
 import java.util.Locale
 import kotlin.math.roundToInt
 import com.shilapi.xcertplay.compat.systemService
+import com.shilapi.xcertplay.compat.hasPermissionCompat
 
 /** DiAuto's visual language, with a connection flow for an independent CarPlay receiver. */
 class DiPlayActivity : ComponentActivity() {
@@ -1399,7 +1400,7 @@ class DiPlayActivity : ComponentActivity() {
             slider = SeekBar(context).apply {
                 max = steps.lastIndex
                 progress = steps.indexOf(current).coerceIn(steps.indices)
-                minHeight = dp(44)
+                minimumHeight = dp(44) // CS11: ProgressBar.setMinHeight 是 API29；改用 View.setMinimumHeight
                 setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                     override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
                         val value = steps[progress.coerceIn(steps.indices)]
@@ -2367,7 +2368,7 @@ class DiPlayActivity : ComponentActivity() {
         BydOutputSettings.wheelSpeedToIphone(this) || BydOutputSettings.videoWhileParked(this)
 
     private fun hasPreciseLocation() =
-        checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        hasPermissionCompat(Manifest.permission.ACCESS_FINE_LOCATION)
 
     // The cluster screen is described at connection time, so a running session reconnects over
     // its current link. The position choices need no call: getString(R.string.apply_and_reconnect) already does it.
@@ -2856,22 +2857,27 @@ class DiPlayActivity : ComponentActivity() {
             }.setNegativeButton(getString(R.string.cancel), null).show()
     }
 
+    // CS11: WifiP2pManager.Channel.close 是 API27+；低版本无法关闭（句柄随进程释放）
+    private fun closeP2pChannel(channel: android.net.wifi.p2p.WifiP2pManager.Channel) {
+        if (Build.VERSION.SDK_INT >= 27) channel.close()
+    }
+
     private fun resetWirelessGroup() {
         val manager = systemService(android.net.wifi.p2p.WifiP2pManager::class.java)
         if (manager == null) { toast(getString(R.string.this_head_unit_does_not_support_wi_fi_direct)); return }
         val channel = manager.initialize(this, mainLooper, null)
         try {
             manager.requestGroupInfo(channel) { group ->
-                if (group == null) { channel.close(); connect(true); return@requestGroupInfo }
+                if (group == null) { closeP2pChannel(channel); connect(true); return@requestGroupInfo }
                 manager.removeGroup(channel, object : android.net.wifi.p2p.WifiP2pManager.ActionListener {
                     override fun onSuccess() {
                         val deadline = android.os.SystemClock.elapsedRealtime() + 4000
                         fun waitUntilRemoved() {
                             manager.requestGroupInfo(channel) { remaining ->
                                 when {
-                                    remaining == null -> { channel.close(); if (!isFinishing && !isDestroyed) connect(true) }
+                                    remaining == null -> { closeP2pChannel(channel); if (!isFinishing && !isDestroyed) connect(true) }
                                     android.os.SystemClock.elapsedRealtime() >= deadline -> {
-                                        channel.close(); toast(getString(R.string.wi_fi_direct_is_still_busy_close_the_other_projection_app))
+                                        closeP2pChannel(channel); toast(getString(R.string.wi_fi_direct_is_still_busy_close_the_other_projection_app))
                                     }
                                     else -> handler.postDelayed({ waitUntilRemoved() }, 200)
                                 }
@@ -2879,11 +2885,11 @@ class DiPlayActivity : ComponentActivity() {
                         }
                         waitUntilRemoved()
                     }
-                    override fun onFailure(reason: Int) { channel.close(); toast(getString(R.string.could_not_reset_wi_fi_direct_close_the_other_projection_ap)) }
+                    override fun onFailure(reason: Int) { closeP2pChannel(channel); toast(getString(R.string.could_not_reset_wi_fi_direct_close_the_other_projection_ap)) }
                 })
             }
         } catch (_: SecurityException) {
-            channel.close(); permissionHelp(getString(R.string.wireless_permissions), getString(R.string.allow_nearby_devices_and_on_older_android_versions_locatio))
+            closeP2pChannel(channel); permissionHelp(getString(R.string.wireless_permissions), getString(R.string.allow_nearby_devices_and_on_older_android_versions_locatio))
         }
     }
 
@@ -3138,7 +3144,8 @@ class DiPlayActivity : ComponentActivity() {
             val params = GridLayout.LayoutParams().apply {
                 width = 0
                 height = dp(48)
-                columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1f)
+                columnSpec = if (Build.VERSION.SDK_INT >= 21) GridLayout.spec(GridLayout.UNDEFINED, 1f)
+                else GridLayout.spec(GridLayout.UNDEFINED, 1, 1f) // CS11: spec(int,float) 是 API21+
                 setMargins(dp(4), dp(4), dp(4), dp(4))
             }
             grid.addView(btn, params)

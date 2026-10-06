@@ -15,6 +15,7 @@ import java.security.interfaces.RSAPublicKey
 import java.security.spec.PKCS8EncodedKeySpec
 import java.security.spec.X509EncodedKeySpec
 import java.util.Base64
+import com.shilapi.xcertplay.compat.noBackupFilesDirCompat
 
 /** DiPlay's own ADB key: adbd remembers it after the driver approves it once. */
 object AdbKeys {
@@ -32,7 +33,7 @@ object AdbKeys {
     /** Loads the key from app-private storage, or makes one on first use. */
     @Synchronized
     fun load(context: Context): KeyPair {
-        val dir = File(context.noBackupFilesDir, DIR)
+        val dir = File(context.noBackupFilesDirCompat(), DIR)
         val privateFile = File(dir, PRIVATE)
         val publicFile = File(dir, PUBLIC)
         runCatching {
