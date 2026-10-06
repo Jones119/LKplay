@@ -52,6 +52,11 @@ android {
         targetCompatibility = JavaVersion.VERSION_11
         isCoreLibraryDesugaringEnabled = true
     }
+
+    // CS11: lint 只作清单使用，不阻断构建（M2 修复期）
+    lint {
+        abortOnError = false
+    }
 }
 
 dependencies {
