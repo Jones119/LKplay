@@ -14,6 +14,7 @@ bouncycastle = "1.79"
 jmdns = "3.6.3"
 media3 = "1.11.1"
 annotation = "1.9.1"
+conscrypt = "2.5.2"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -39,6 +40,8 @@ androidx-multidex = { group = "androidx.multidex", name = "multidex", version = 
 androidx-media3-exoplayer = { group = "androidx.media3", name = "media3-exoplayer", version.ref = "media3" }
 androidx-media3-exoplayer-hls = { group = "androidx.media3", name = "media3-exoplayer-hls", version.ref = "media3" }
 androidx-media3-ui = { group = "androidx.media3", name = "media3-ui", version.ref = "media3" }
+# CS11: 4.4 平台 TLS 仅 TLSv1/SSLv3——打包 Conscrypt 以支持 TLS1.2/1.3
+conscrypt = { group = "org.conscrypt", name = "conscrypt-android", version.ref = "conscrypt" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

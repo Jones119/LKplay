@@ -35,6 +35,7 @@ dependencies {
     implementation libs.androidx.core.ktx
     implementation libs.bouncycastle
     implementation libs.jmdns
+    implementation libs.conscrypt // CS11: 现代 TLS（TLS1.2/1.3）
     coreLibraryDesugaring libs.desugarJdkLibs
     testImplementation libs.junit
     testImplementation 'org.robolectric:robolectric:4.17'

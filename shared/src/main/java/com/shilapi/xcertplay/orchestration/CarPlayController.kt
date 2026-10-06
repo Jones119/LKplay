@@ -1724,20 +1724,24 @@ class CarPlayController(
                 when (phase) {
                     Phase.REENUMERATION, Phase.IPHONE -> {
                         val configuration = IphoneCarPlayConfiguration.find(result.device)
+                        // CS11: API19 无配置枚举——检查活动配置是否已含 USBMUX 接口
+                        val configurationReady = configuration != null ||
+                            (Build.VERSION.SDK_INT < 21 &&
+                                IphoneCarPlayConfiguration.activeConfigCarPlayReady(result.device))
                         // CS11: UsbConfiguration.getId 是 API21+
                         val configurationId = if (configuration != null && Build.VERSION.SDK_INT >= 21)
                             configuration.id.toString() else "none"
                         connectionDiagnostic(
-                            "USB configuration ready=${configuration != null} " +
+                            "USB configuration ready=$configurationReady " +
                                 "configurationId=$configurationId " +
                                 "reenumerationAttempts=$reenumerationAttempts " +
                                 "action=${when {
-                                    configuration != null -> "reuse-descriptors"
+                                    configurationReady -> "reuse-descriptors"
                                     reenumerationAttempts < MAXIMUM_REENUMERATION_ATTEMPTS -> "request-transition"
                                     else -> "reject-missing-configuration"
                                 }}",
                         )
-                        if (configuration != null) {
+                        if (configurationReady) {
                             openDataPaths(result.device)
                         } else if (reenumerationAttempts < MAXIMUM_REENUMERATION_ATTEMPTS) {
                             beginReenumeration(result.device)
@@ -1835,7 +1839,17 @@ class CarPlayController(
             when (result) {
                 is IphoneUsbHost.Iap2SessionResult.Connected -> {
                     try {
-                        val ncm = openNcm(device)
+                        // CS11: 4.4 上 NCM 可能不可用（内核占用/alt 设定限制）→ 降级为空，先验证控制通道
+                        val ncm = try {
+                            openNcm(device)
+                        } catch (error: Throwable) {
+                            if (Build.VERSION.SDK_INT < 21) {
+                                debugLog("CS11 degraded: NCM unavailable (${error.message}); continuing without media bridge")
+                                null
+                            } else {
+                                throw error
+                            }
+                        }
                         runStack(result.session, ncm)
                     } catch (error: Throwable) {
                         result.session.close()
@@ -1848,6 +1862,28 @@ class CarPlayController(
     }
 
     private fun openNcm(device: UsbDevice): NcmUsbBridge {
+        // CS11: API19 无配置枚举——在活动配置上枚举全部 NCM 对，逐一尝试声明（被内核占用时自动跳下一对）
+        if (Build.VERSION.SDK_INT < 21) {
+            val functions = NcmFunctionDiscovery.findAllActive(device)
+            if (functions.isEmpty()) {
+                throw IphoneUsbException.Protocol("Active iPhone configuration exposes no NCM function")
+            }
+            var lastError: Throwable? = null
+            for ((index, function) in functions.withIndex()) {
+                val connection = requireUsbManager().openDevice(device)
+                    ?: throw IphoneUsbException.DeviceUnavailable("Could not open the iPhone NCM connection")
+                try {
+                    debugLog("ncm (api<21) trying function#$index class=${function.control.interfaceClass}/${function.control.interfaceSubclass}")
+                    return NcmUsbBridge.open(connection, function)
+                } catch (error: Throwable) {
+                    lastError = error
+                    debugLog("ncm (api<21) function#$index not claimable: ${error.message}")
+                }
+            }
+            throw IphoneUsbException.DeviceUnavailable(
+                "No claimable NCM function on the active iPhone configuration", lastError,
+            )
+        }
         val configuration = IphoneCarPlayConfiguration.find(device)
             ?: throw IphoneUsbException.Protocol(
                 "iPhone exposes no CarPlay configuration for NCM",
@@ -1869,7 +1905,7 @@ class CarPlayController(
         return NcmUsbBridge.open(connection, function)
     }
 
-    private fun runStack(usbSession: Iap2UsbSession, ncm: NcmUsbBridge) {
+    private fun runStack(usbSession: Iap2UsbSession, ncm: NcmUsbBridge?) {
         phase = Phase.CONTROL
         var ncmOwnedLocally = true
         try {
@@ -1987,9 +2023,12 @@ class CarPlayController(
             this.csm = csm
             debugLog("wired iAP2 CSM channel opened")
 
-            val ncmHostMac = ncm.hostMac ?: config.hostMac
+            val ncmHostMac = ncm?.hostMac ?: config.hostMac
             debugLog("ncm using hostMac=${ncmHostMac.macString()}")
-            if (!attachVpn(ncm, ncmHostMac)) {
+            // CS11: 4.4 无 VPN 组件——完全跳过 VPN 附着（媒体通道后续处理），先验证控制通道
+            if (Build.VERSION.SDK_INT < 21) {
+                debugLog("CS11 degraded mode: skipping VPN attach entirely; control channel only")
+            } else if (ncm != null && !attachVpn(ncm, ncmHostMac)) {
                 throw IphoneUsbException.DeviceUnavailable("Could not attach the NCM/VPN AirPlay transport")
             }
             ncmOwnedLocally = false
@@ -2036,7 +2075,7 @@ class CarPlayController(
             if (!ncmOwnedLocally) vpnService?.detach()
             fail(error)
         } finally {
-            if (ncmOwnedLocally) ncm.close()
+            if (ncmOwnedLocally) ncm?.close()
         }
     }
 

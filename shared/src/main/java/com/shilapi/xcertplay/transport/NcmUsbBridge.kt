@@ -315,40 +315,44 @@ class NcmUsbBridge internal constructor(
         fun open(connection: UsbDeviceConnection, function: NcmFunctionDiscovery.NcmFunction): NcmUsbBridge {
             val claimed = ArrayList<UsbInterface>(2)
             try {
-                val descriptorHostMac = readNcmHostMac(connection, function.control.id)
+                // CS11: UsbInterface.getId 是 API21+；4.4 以 -1 表示"任意 CDC Ethernet 描述符"（读错则回退配置值）
+                val controlInterfaceId = if (Build.VERSION.SDK_INT >= 21) function.control.id else -1
+                val descriptorHostMac = readNcmHostMac(connection, controlInterfaceId)
                 Log.i(
                     IphoneCarPlayConfiguration.TAG,
-                    "ncm descriptor hostMac=${descriptorHostMac?.macString() ?: "unavailable"}",
+                    "ncm descriptor hostMac=${descriptorHostMac?.macString() ?: "unavailable"} controlId=$controlInterfaceId",
                 )
                 // Apple's Ethernet function exposes control and data as alternate settings of the
                 // same interface id, so it must be claimed once and switched with setInterface.
-                val sameInterface = function.control.id == function.data.id
+                val sameInterface = if (Build.VERSION.SDK_INT >= 21) function.control.id == function.data.id else false
                 val first = if (sameInterface) function.data else function.control
                 val firstClaimed = connection.claimInterface(first, true)
-                // CS11: alternateSetting 是 API21+ 属性
+                // CS11: alternateSetting / getId 是 API21+ 属性
                 val altFirst = if (Build.VERSION.SDK_INT >= 21) first.alternateSetting else -1
+                val firstId = if (Build.VERSION.SDK_INT >= 21) first.id else -1
                 Log.i(
                     IphoneCarPlayConfiguration.TAG,
-                    "claim iface=${first.id}/$altFirst class=${first.interfaceClass}" +
+                    "claim iface=$firstId/$altFirst class=${first.interfaceClass}" +
                         " subclass=${first.interfaceSubclass} proto=${first.interfaceProtocol} ok=$firstClaimed",
                 )
                 if (!firstClaimed) {
                     throw IphoneUsbException.DeviceUnavailable(
-                        "Android could not claim the NCM interface ${first.id}",
+                        "Android could not claim the NCM interface $firstId",
                     )
                 }
                 claimed.add(first)
                 if (!sameInterface) {
                     val dataClaimed = connection.claimInterface(function.data, true)
                     val altDataClaim = if (Build.VERSION.SDK_INT >= 21) function.data.alternateSetting else -1
+                    val dataId = if (Build.VERSION.SDK_INT >= 21) function.data.id else -1
                     Log.i(
                         IphoneCarPlayConfiguration.TAG,
-                        "claim iface=${function.data.id}/$altDataClaim" +
+                        "claim iface=$dataId/$altDataClaim" +
                             " class=${function.data.interfaceClass} ok=$dataClaimed",
                     )
                     if (!dataClaimed) {
                         throw IphoneUsbException.DeviceUnavailable(
-                            "Android could not claim the NCM data interface ${function.data.id}",
+                            "Android could not claim the NCM data interface $dataId",
                         )
                     }
                     claimed.add(function.data)
@@ -358,7 +362,7 @@ class NcmUsbBridge internal constructor(
                 val altSelected = if (Build.VERSION.SDK_INT >= 21) connection.setInterface(function.data) else true
                 Log.i(
                     IphoneCarPlayConfiguration.TAG,
-                    "setInterface iface=${function.data.id}/$altDataSel ok=$altSelected (api=${Build.VERSION.SDK_INT})",
+                    "setInterface iface=api${Build.VERSION.SDK_INT} alt=$altDataSel ok=$altSelected",
                 )
                 if (!altSelected) {
                     throw IphoneUsbException.DeviceUnavailable(
@@ -424,7 +428,7 @@ class NcmUsbBridge internal constructor(
                 } else if (
                     type == CDC_FUNCTIONAL_DESCRIPTOR_TYPE &&
                     length >= 4 &&
-                    currentInterface == controlInterfaceId &&
+                    (controlInterfaceId < 0 || currentInterface == controlInterfaceId) &&
                     (raw[offset + 2].toInt() and 0xff) == CDC_ETHERNET_SUBTYPE
                 ) {
                     return (raw[offset + 3].toInt() and 0xff).takeIf { it != 0 }

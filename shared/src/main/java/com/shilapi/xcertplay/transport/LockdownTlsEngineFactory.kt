@@ -15,6 +15,7 @@ import javax.net.ssl.SSLContext
 import javax.net.ssl.SSLEngine
 import javax.net.ssl.X509TrustManager
 import android.os.Build
+import android.util.Log
 
 /**
  * Builds an unstarted client TLS engine for the dedicated USB Lockdown channel.
@@ -44,7 +45,19 @@ object LockdownTlsEngineFactory {
             val keyManagers = KeyManagerFactory.getInstance("PKIX").apply {
                 init(keyStore, password)
             }.keyManagers
-            val context = SSLContext.getInstance("TLS").apply {
+            // CS11: 本车机 ROM 的 SSLEngine 仅支持 TLSv1/SSLv3（现代 iOS 拒绝）——
+            // 4.4 上改用打包的 Conscrypt（自带 TLS1.2/1.3 与 armeabi-v7a 原生库）；失败则退回平台实现
+            val tlsContext = if (Build.VERSION.SDK_INT >= 21) {
+                SSLContext.getInstance("TLS")
+            } else {
+                try {
+                    SSLContext.getInstance("TLS", org.conscrypt.Conscrypt.newProvider())
+                } catch (error: Throwable) {
+                    Log.w("xcertplay-tls", "conscrypt unavailable; falling back to platform TLS", error)
+                    SSLContext.getInstance("TLS")
+                }
+            }
+            val context = tlsContext.apply {
                 init(keyManagers, arrayOf(UsbLockdownTrustManager), null)
             }
             return context.createSSLEngine(PEER_HOST, PEER_PORT).apply {

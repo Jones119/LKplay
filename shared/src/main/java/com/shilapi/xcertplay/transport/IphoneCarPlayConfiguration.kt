@@ -29,9 +29,9 @@ object IphoneCarPlayConfiguration {
     private const val PREFERRED_USBMUX_IN = 0x85
 
     fun find(device: UsbDevice): UsbConfiguration? {
-        // CS11: UsbConfiguration 是 API21+；4.4 无法按配置枚举 → 使用系统 usbmuxd 桥接方案
+        // CS11: UsbConfiguration 是 API21+；4.4 无法按配置枚举 → 走 activeConfigCarPlayReady 活动配置检查
         if (Build.VERSION.SDK_INT < 21) {
-            Log.w(TAG, "configuration enumeration requires API 21; use the system usbmuxd bridge on this device")
+            Log.d(TAG, "configuration enumeration skipped (api<21); active-configuration checks are used instead")
             return null
         }
         val configurations = (0 until device.configurationCount).map(device::getConfiguration)
@@ -57,6 +57,39 @@ object IphoneCarPlayConfiguration {
 
     fun usbMuxInterface(configuration: UsbConfiguration): UsbInterface? =
         (0 until configuration.interfaceCount).map(configuration::getInterface).firstOrNull {
+            it.interfaceClass == USBMUX_CLASS &&
+                it.interfaceSubclass == USBMUX_SUBCLASS &&
+                it.interfaceProtocol == USBMUX_PROTOCOL
+        }
+
+    /**
+     * CS11: API19 没有 UsbConfiguration——直接检查"当前活动配置"是否已含 iPhone 的 USBMUX 接口。
+     * iPhone 收到 CarPlay 配置请求后自行切到含 USBMUX+NCM 的配置；NCM 由内核 cdc_ncm 接管。
+     */
+    fun activeConfigCarPlayReady(device: UsbDevice): Boolean {
+        // 同时要求 USBMUX 与 NCM：config 4 里也有 USBMUX（iAP2），只看它会把"非 CarPlay 配置"误判成就绪
+        var hasMux = false
+        var hasNcm = false
+        for (index in 0 until device.interfaceCount) {
+            val usbInterface = device.getInterface(index)
+            if (usbInterface.interfaceClass == USBMUX_CLASS &&
+                usbInterface.interfaceSubclass == USBMUX_SUBCLASS &&
+                usbInterface.interfaceProtocol == USBMUX_PROTOCOL
+            ) {
+                hasMux = true
+            }
+            if (usbInterface.interfaceClass == NCM_CONTROL_CLASS &&
+                usbInterface.interfaceSubclass == NCM_CONTROL_SUBCLASS
+            ) {
+                hasNcm = true
+            }
+        }
+        return hasMux && hasNcm
+    }
+
+    /** CS11: 从活动配置接口列表直取 USBMUX 接口（UsbDevice#getInterface 是 API12）。 */
+    fun activeUsbMuxInterface(device: UsbDevice): UsbInterface? =
+        (0 until device.interfaceCount).map(device::getInterface).firstOrNull {
             it.interfaceClass == USBMUX_CLASS &&
                 it.interfaceSubclass == USBMUX_SUBCLASS &&
                 it.interfaceProtocol == USBMUX_PROTOCOL

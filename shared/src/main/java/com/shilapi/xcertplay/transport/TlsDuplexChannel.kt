@@ -4,6 +4,8 @@ import java.nio.ByteBuffer
 import java.security.GeneralSecurityException
 import javax.net.ssl.SSLEngine
 import javax.net.ssl.SSLEngineResult
+import android.os.Build
+import android.util.Log
 
 /**
  * Blocking plaintext stream carried by one client-mode TLS engine and one owned byte stream.
@@ -409,11 +411,23 @@ class TlsDuplexChannel private constructor(
             try {
                 val engine = LockdownTlsEngineFactory.create(pairRecord)
                 val supported = engine.supportedProtocols.toSet()
+                Log.i(
+                    "xcertplay-tls",
+                    "engine supported=${engine.supportedProtocols.joinToString()} " +
+                        "defaultEnabled=${engine.enabledProtocols.joinToString()}",
+                )
                 val enabled = ALLOWED_PROTOCOLS.filter(supported::contains).toTypedArray()
                 if (enabled.isEmpty()) {
-                    throw IphoneUsbException.Protocol("TLS engine supports neither TLSv1.2 nor TLSv1.3")
+                    // CS11: KitKat（含本车机 ROM）的 SSLEngine 默认集不含 TLS1.2，但底层 OpenSSL 支持——
+                    // 显式启用 TLSv1.2；若运行时确实不支持会抛 IllegalArgumentException（由外层捕获）
+                    if (Build.VERSION.SDK_INT < 21) {
+                        engine.enabledProtocols = arrayOf("TLSv1.2")
+                    } else {
+                        throw IphoneUsbException.Protocol("TLS engine supports neither TLSv1.2 nor TLSv1.3")
+                    }
+                } else {
+                    engine.enabledProtocols = enabled
                 }
-                engine.enabledProtocols = enabled
                 return TlsDuplexChannel(underlying, engine).also {
                     it.performHandshake(handshakeTimeoutMillis)
                 }
