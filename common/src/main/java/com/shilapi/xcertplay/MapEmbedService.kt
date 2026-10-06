@@ -24,6 +24,7 @@ import android.widget.FrameLayout
 import android.widget.TextView
 import androidx.annotation.RequiresApi
 import com.shilapi.xcertplay.host.R
+import com.shilapi.xcertplay.compat.systemService
 
 /**
  * Lets another app, such as a car launcher, show the live dashboard map (CarPlay stream 111)
@@ -93,7 +94,7 @@ class MapEmbedService : Service() {
             return
         }
         embeds.remove(client.binder)?.release()
-        val display = getSystemService(DisplayManager::class.java)?.getDisplay(data.getInt(KEY_DISPLAY_ID))
+        val display = systemService(DisplayManager::class.java)?.getDisplay(data.getInt(KEY_DISPLAY_ID))
         if (display == null) {
             send(client, MSG_ERROR, Bundle().apply { putString(KEY_ERROR, ERROR_BAD_REQUEST) })
             return

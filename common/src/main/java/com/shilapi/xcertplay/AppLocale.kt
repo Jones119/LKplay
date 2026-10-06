@@ -10,6 +10,7 @@ import android.content.Context
 import android.content.res.Configuration
 import com.shilapi.xcertplay.host.R
 import java.util.Locale
+import com.shilapi.xcertplay.compat.systemService
 
 /** Platform app locales on Android 13+, with a persisted context override on older Android. */
 object AppLocale {
@@ -31,7 +32,7 @@ object AppLocale {
 
     fun preference(context: Context): String {
         if (Build.VERSION.SDK_INT >= 33) {
-            val locales = context.getSystemService(LocaleManager::class.java).applicationLocales
+            val locales = context.systemService(LocaleManager::class.java).applicationLocales
             if (locales.isEmpty) return SYSTEM
             val selected = locales[0]
             if (selected.language != "zh") return selected.language
@@ -53,7 +54,7 @@ object AppLocale {
     fun save(context: Context, language: String) {
         require(language in ALL)
         if (Build.VERSION.SDK_INT >= 33) {
-            context.getSystemService(LocaleManager::class.java).applicationLocales =
+            context.systemService(LocaleManager::class.java).applicationLocales =
                 locale(language)?.let { LocaleList(it) } ?: LocaleList.getEmptyLocaleList()
             context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
                 .putBoolean(KEY_MIGRATED, true).remove(KEY_LANGUAGE).apply()
@@ -68,7 +69,7 @@ object AppLocale {
         if (Build.VERSION.SDK_INT >= 33) {
             val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             if (!prefs.getBoolean(KEY_MIGRATED, false)) {
-                val manager = context.getSystemService(LocaleManager::class.java)
+                val manager = context.systemService(LocaleManager::class.java)
                 val previous = locale(prefs.getString(KEY_LANGUAGE, SYSTEM) ?: SYSTEM)
                 // Never overwrite a language already chosen through Android Settings.
                 if (manager.applicationLocales.isEmpty && previous != null) {

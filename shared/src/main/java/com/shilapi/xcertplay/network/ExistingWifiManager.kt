@@ -16,6 +16,7 @@ import java.io.IOException
 import java.net.InetAddress
 import java.net.NetworkInterface
 import java.util.concurrent.atomic.AtomicBoolean
+import com.shilapi.xcertplay.compat.systemService
 
 /** Attaches to an existing station network. Never creates an AP, joins Wi-Fi or changes routing. */
 class ExistingWifiManager(
@@ -25,9 +26,9 @@ class ExistingWifiManager(
     private val onDiagnostic: (String) -> Unit = {},
     private val onNetworkChanged: () -> Unit = {},
 ) : WirelessHotspotManager {
-    private val connectivity = context.applicationContext.getSystemService(ConnectivityManager::class.java)
+    private val connectivity = context.applicationContext.systemService(ConnectivityManager::class.java)
         ?: throw IllegalStateException("ConnectivityManager is unavailable")
-    private val wifi = context.applicationContext.getSystemService(WifiManager::class.java)
+    private val wifi = context.applicationContext.systemService(WifiManager::class.java)
         ?: throw IllegalStateException("WifiManager is unavailable")
     private val lock = Any()
     private val invalidated = AtomicBoolean()

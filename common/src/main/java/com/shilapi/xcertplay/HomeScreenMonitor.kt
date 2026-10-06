@@ -10,6 +10,7 @@ import android.os.Looper
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
+import com.shilapi.xcertplay.compat.systemService
 
 /**
  * Whether a home screen is in front (BYD's normal home, map home or MyCar, or whichever
@@ -76,7 +77,7 @@ internal class HomeScreenMonitor(context: Context, private val onChange: (Boolea
 
     private fun poll() {
         val now = System.currentTimeMillis()
-        val events = runCatching { context.getSystemService(UsageStatsManager::class.java).queryEvents(since, now) }
+        val events = runCatching { context.systemService(UsageStatsManager::class.java).queryEvents(since, now) }
             .getOrNull() ?: return
         val event = UsageEvents.Event()
         while (events.hasNextEvent()) {

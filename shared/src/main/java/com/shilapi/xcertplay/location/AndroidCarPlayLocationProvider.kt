@@ -13,6 +13,7 @@ import com.shilapi.xcertplay.transport.CarPlayLocationFix
 import com.shilapi.xcertplay.transport.Iap2LocationProvider
 import com.shilapi.xcertplay.transport.NmeaLocationEncoder
 import java.util.concurrent.ConcurrentHashMap
+import com.shilapi.xcertplay.compat.systemService
 
 /**
  * Foreground Android location source for iAP2 LocationInformation.
@@ -24,7 +25,7 @@ class AndroidCarPlayLocationProvider(
     private val preferredLocationAgeMillis: Long = DEFAULT_PREFERRED_LOCATION_AGE_MILLIS,
 ) : Iap2LocationProvider {
     private val locationManager =
-        context.applicationContext.getSystemService(LocationManager::class.java)
+        context.applicationContext.systemService(LocationManager::class.java)
     private val stateLock = Any()
     private val preferredProviders = buildList {
         add(LocationManager.GPS_PROVIDER)

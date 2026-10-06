@@ -21,6 +21,7 @@ import java.util.Collections
 import java.util.UUID
 import java.util.concurrent.Executor
 import java.util.concurrent.TimeUnit
+import com.shilapi.xcertplay.compat.systemService
 
 /**
  * Owns one Android LocalOnlyHotspot reservation and reports its live configuration.
@@ -31,8 +32,8 @@ import java.util.concurrent.TimeUnit
  */
 class LocalOnlyHotspotManager(context: Context, private val onDiagnostic: (String) -> Unit = {}) : WirelessHotspotManager {
     private val connectivityManager =
-        context.applicationContext.getSystemService(ConnectivityManager::class.java)
-    private val wifiManager = context.applicationContext.getSystemService(WifiManager::class.java)
+        context.applicationContext.systemService(ConnectivityManager::class.java)
+    private val wifiManager = context.applicationContext.systemService(WifiManager::class.java)
         ?: throw IllegalStateException("WifiManager is unavailable")
     private val stateLock = Object()
 

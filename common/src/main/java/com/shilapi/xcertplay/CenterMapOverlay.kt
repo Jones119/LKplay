@@ -21,6 +21,7 @@ import android.view.WindowManager
 import android.widget.FrameLayout
 import kotlin.math.abs
 import kotlin.math.hypot
+import com.shilapi.xcertplay.compat.systemService
 
 /**
  * The dashboard map (CarPlay stream 111) as a floating card on the centre screen while DiPlay is in
@@ -72,7 +73,7 @@ internal object CenterMapOverlay {
         if (root != null) return true
         if (!aspect.isFinite() || aspect <= 0) return false
         if (!permitted(context)) return false
-        val windows = context.getSystemService(WindowManager::class.java) ?: return false
+        val windows = context.systemService(WindowManager::class.java) ?: return false
         val metrics = context.resources.displayMetrics
         val screenWidth = metrics.widthPixels
         val screenHeight = metrics.heightPixels
@@ -253,7 +254,7 @@ internal object CenterMapOverlay {
     fun hide() {
         val view = root ?: return
         root = null
-        runCatching { view.context.getSystemService(WindowManager::class.java)?.removeViewImmediate(view) }
+        runCatching { view.context.systemService(WindowManager::class.java)?.removeViewImmediate(view) }
         Log.i(TAG, "card hidden")
     }
 

@@ -7,6 +7,7 @@ import android.util.Log
 import com.shilapi.xcertplay.iap2.wire.Iap2Frame
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import com.shilapi.xcertplay.compat.systemService
 
 /**
  * Publishes CarPlay arrows and distance to the BYD instrument cluster through the stock
@@ -180,7 +181,7 @@ internal object BydClusterBridge {
     }
 
     private fun projectionDisplayPresent(appContext: Context): Boolean =
-        appContext.getSystemService(android.hardware.display.DisplayManager::class.java)
+        appContext.systemService(android.hardware.display.DisplayManager::class.java)
             ?.displays?.any { it.name == DILINK3_DISPLAY } == true
 
     private const val DILINK3_DISPLAY = "fission_bg_xdjaVirtualSurface"
