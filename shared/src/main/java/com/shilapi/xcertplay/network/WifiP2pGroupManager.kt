@@ -30,6 +30,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 import com.shilapi.xcertplay.compat.systemService
+import com.shilapi.xcertplay.compat.hasPermissionCompat
 
 /**
  * Creates a temporary Wi-Fi Direct group owner, preferring 5 GHz, that can also be joined as a legacy AP.
@@ -319,7 +320,7 @@ class WifiP2pGroupManager(
         }
         synchronized(legacyChannelLock) {
             if (activeChannel != null) releaseLegacyChannelRestriction(activeChannel)
-            activeChannel?.close()
+            if (Build.VERSION.SDK_INT >= 27) activeChannel?.close() // CS11: Channel.close 是 API27+
         }
         activeThread?.quitSafely()
     }
@@ -713,19 +714,22 @@ class WifiP2pGroupManager(
     @Suppress("DEPRECATION")
     private fun readStation(): Station = runCatching {
         val info = appContext.systemService(WifiManager::class.java)?.connectionInfo
-        Station(info?.supplicantState, info?.frequency?.takeIf { it > 0 })
+        // CS11: WifiInfo.getFrequency 是 API21+
+        Station(info?.supplicantState, if (Build.VERSION.SDK_INT >= 21) info?.frequency?.takeIf { it > 0 } else null)
     }.getOrDefault(Station(null, null))
 
     private fun checkPrerequisites(station: Station) {
         val wifi = appContext.systemService(WifiManager::class.java)
-        val fiveGhzSupported = runCatching { wifi?.is5GHzBandSupported }.getOrNull()
+        // CS11: is5GHzBandSupported 是 API21+
+        val fiveGhzSupported = if (Build.VERSION.SDK_INT >= 21) runCatching { wifi?.is5GHzBandSupported }.getOrNull() else null
         val wifiEnabled = runCatching { wifi?.isWifiEnabled }.getOrNull()
         val locationEnabled = runCatching {
-            appContext.systemService(LocationManager::class.java)?.isLocationEnabled
+            // CS11: LocationManager.isLocationEnabled 是 API28+
+            if (Build.VERSION.SDK_INT >= 28) appContext.systemService(LocationManager::class.java)?.isLocationEnabled else null
         }.getOrNull()
         val required = if (Build.VERSION.SDK_INT >= 33) Manifest.permission.NEARBY_WIFI_DEVICES
             else Manifest.permission.ACCESS_FINE_LOCATION
-        val granted = appContext.checkSelfPermission(required) == PackageManager.PERMISSION_GRANTED
+        val granted = appContext.hasPermissionCompat(required)
         val locationAccessMode = if (Build.VERSION.SDK_INT in 29..32) runCatching {
             appContext.systemService(AppOpsManager::class.java)?.unsafeCheckOpNoThrow(
                 AppOpsManager.OPSTR_FINE_LOCATION, android.os.Process.myUid(), appContext.packageName)
@@ -828,7 +832,7 @@ class WifiP2pGroupManager(
         }
         synchronized(legacyChannelLock) {
             if (failedChannel != null) releaseLegacyChannelRestriction(failedChannel)
-            failedChannel?.close()
+            if (Build.VERSION.SDK_INT >= 27) failedChannel?.close() // CS11: Channel.close 是 API27+
         }
         failedThread?.quitSafely()
     }

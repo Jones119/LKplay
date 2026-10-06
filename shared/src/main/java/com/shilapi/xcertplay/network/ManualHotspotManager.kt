@@ -222,6 +222,8 @@ class ManualHotspotManager(
             null
         } ?: return null
         if (unquote(connectionInfo.ssid) != expectedSsid) return null
+        // CS11: WifiInfo.getFrequency 是 API21+；4.4 返回 null（上层按未知处理）
+        if (Build.VERSION.SDK_INT < 21) return null
         return connectionInfo.frequency.takeIf { it > 0 }
     }
 

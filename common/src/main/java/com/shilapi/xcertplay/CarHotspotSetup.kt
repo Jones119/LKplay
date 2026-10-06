@@ -9,6 +9,7 @@ import com.shilapi.xcertplay.adb.LocalAdb
 import com.shilapi.xcertplay.hud.BydOutputSettings
 import com.shilapi.xcertplay.network.CarHotspotSettings
 import com.shilapi.xcertplay.orchestration.ManualHotspotValidation
+import android.os.Build
 
 /** Each grant is requested explicitly from settings; startup never calls this authorization path. */
 internal object CarHotspotSetup {
@@ -21,8 +22,9 @@ internal object CarHotspotSetup {
         HOTSPOT("WRITE_SETTINGS"), BOOT_LAUNCH("SYSTEM_ALERT_WINDOW");
 
         fun granted(context: Context): Boolean = when (this) {
-            HOTSPOT -> Settings.System.canWrite(context)
-            BOOT_LAUNCH -> Settings.canDrawOverlays(context)
+            // CS11: canWrite/canDrawOverlays 是 API23+；4.4 上这两项权限安装即授予
+            HOTSPOT -> if (Build.VERSION.SDK_INT < 23) true else Settings.System.canWrite(context)
+            BOOT_LAUNCH -> if (Build.VERSION.SDK_INT < 23) true else Settings.canDrawOverlays(context)
         }
     }
 

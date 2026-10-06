@@ -29,6 +29,8 @@ android {
     // CS11: lint 只作清单使用，不阻断构建（M2 修复期）
     lint {
         abortOnError = false
+        // lint 自身 bug：ExperimentalDetector 在 CarPlayController 解析崩溃
+        disable += listOf("UnsafeOptInUsageError", "UnsafeOptInUsageWarning")
     }
 }
 
