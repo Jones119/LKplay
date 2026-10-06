@@ -4,6 +4,7 @@ import android.hardware.usb.UsbDeviceConnection
 import android.hardware.usb.UsbEndpoint
 import android.hardware.usb.UsbInterface
 import android.hardware.usb.UsbConstants
+import android.os.Build
 import android.hardware.usb.UsbRequest
 import android.util.Log
 import java.io.Closeable
@@ -232,7 +233,14 @@ class NcmUsbBridge internal constructor(
                 }
                 if (!readQueued) {
                     directReadBuffer.clear()
-                    if (!current.queue(directReadBuffer)) throw failSession("Android could not queue the NCM read request")
+                    // CS11: UsbRequest.queue(ByteBuffer) 是 API26+；4.4 走 queue(buffer, length)
+                    val queued = if (Build.VERSION.SDK_INT >= 26) {
+                        current.queue(directReadBuffer)
+                    } else {
+                        @Suppress("DEPRECATION")
+                        current.queue(directReadBuffer, directReadBuffer.remaining())
+                    }
+                    if (!queued) throw failSession("Android could not queue the NCM read request")
                     readQueued = true
                 }
                 current
@@ -242,7 +250,13 @@ class NcmUsbBridge internal constructor(
         }
         try {
             val completed = try {
-                connection.requestWait(timeoutMillis.coerceAtLeast(1))
+                // CS11: requestWait(long) 是 API26+；4.4 走无参阻塞版
+                if (Build.VERSION.SDK_INT >= 26) {
+                    connection.requestWait(timeoutMillis.coerceAtLeast(1))
+                } else {
+                    @Suppress("DEPRECATION")
+                    connection.requestWait()
+                }
             } catch (_: TimeoutException) {
                 // Nothing arrived yet; the request stays queued for the next call. USBMUX owns
                 // authoritative detach/failure detection for the same phone.
@@ -311,9 +325,11 @@ class NcmUsbBridge internal constructor(
                 val sameInterface = function.control.id == function.data.id
                 val first = if (sameInterface) function.data else function.control
                 val firstClaimed = connection.claimInterface(first, true)
+                // CS11: alternateSetting 是 API21+ 属性
+                val altFirst = if (Build.VERSION.SDK_INT >= 21) first.alternateSetting else -1
                 Log.i(
                     IphoneCarPlayConfiguration.TAG,
-                    "claim iface=${first.id}/${first.alternateSetting} class=${first.interfaceClass}" +
+                    "claim iface=${first.id}/$altFirst class=${first.interfaceClass}" +
                         " subclass=${first.interfaceSubclass} proto=${first.interfaceProtocol} ok=$firstClaimed",
                 )
                 if (!firstClaimed) {
@@ -324,9 +340,10 @@ class NcmUsbBridge internal constructor(
                 claimed.add(first)
                 if (!sameInterface) {
                     val dataClaimed = connection.claimInterface(function.data, true)
+                    val altDataClaim = if (Build.VERSION.SDK_INT >= 21) function.data.alternateSetting else -1
                     Log.i(
                         IphoneCarPlayConfiguration.TAG,
-                        "claim iface=${function.data.id}/${function.data.alternateSetting}" +
+                        "claim iface=${function.data.id}/$altDataClaim" +
                             " class=${function.data.interfaceClass} ok=$dataClaimed",
                     )
                     if (!dataClaimed) {
@@ -336,10 +353,12 @@ class NcmUsbBridge internal constructor(
                     }
                     claimed.add(function.data)
                 }
-                val altSelected = connection.setInterface(function.data)
+                // CS11: setInterface 是 API21+；4.4 无法切换备用设定（默认设定即当前），跳过并记录
+                val altDataSel = if (Build.VERSION.SDK_INT >= 21) function.data.alternateSetting else -1
+                val altSelected = if (Build.VERSION.SDK_INT >= 21) connection.setInterface(function.data) else true
                 Log.i(
                     IphoneCarPlayConfiguration.TAG,
-                    "setInterface iface=${function.data.id}/${function.data.alternateSetting} ok=$altSelected",
+                    "setInterface iface=${function.data.id}/$altDataSel ok=$altSelected (api=${Build.VERSION.SDK_INT})",
                 )
                 if (!altSelected) {
                     throw IphoneUsbException.DeviceUnavailable(

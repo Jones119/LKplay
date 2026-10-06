@@ -243,19 +243,27 @@ class IphoneUsbHost(
                 ?: throw IphoneUsbException.Protocol(
                     "Re-enumerated iPhone exposes no USBMUX CarPlay configuration",
                 )
-            if (!connection.setConfiguration(configuration)) {
-                Log.w(
-                    IphoneCarPlayConfiguration.TAG,
-                    "setConfiguration ${configuration.id} reported failure; claiming anyway",
-                )
+            // CS11: setConfiguration/getId 是 API21+；4.4 单配置设备无需（也无法）切换
+            if (Build.VERSION.SDK_INT >= 21) {
+                if (!connection.setConfiguration(configuration)) {
+                    Log.w(
+                        IphoneCarPlayConfiguration.TAG,
+                        "setConfiguration ${configuration.id} reported failure; claiming anyway",
+                    )
+                }
+            } else {
+                Log.i(IphoneCarPlayConfiguration.TAG, "setConfiguration skipped (api<21)")
             }
             val usbMux = IphoneCarPlayConfiguration.usbMuxInterface(configuration)
                 ?: throw IphoneUsbException.Protocol("CarPlay configuration exposes no USBMUX interface")
             val endpoints = IphoneCarPlayConfiguration.usbMuxEndpoints(usbMux)
                 ?: throw IphoneUsbException.Protocol("USBMUX interface exposes no bulk endpoint pair")
+            // CS11: configuration.id / alternateSetting 是 API21+ 属性
+            val configId = if (Build.VERSION.SDK_INT >= 21) configuration.id else -1
+            val altSetting = if (Build.VERSION.SDK_INT >= 21) usbMux.alternateSetting else -1
             Log.i(
                 IphoneCarPlayConfiguration.TAG,
-                "usbmux config=${configuration.id} iface=${usbMux.id} alt=${usbMux.alternateSetting} " +
+                "usbmux config=$configId iface=${usbMux.id} alt=$altSetting " +
                     "class=${usbMux.interfaceClass}/${usbMux.interfaceSubclass}/${usbMux.interfaceProtocol} " +
                     "endpoints=${usbMux.endpointCount} " +
                     "out=${describeUsbEndpoint(endpoints.first)} " +
@@ -368,13 +376,26 @@ class Iap2UsbSession internal constructor(
                 pendingRead = request
             }
             val buffer = ByteBuffer.allocateDirect(USBMUX_READ_CHUNK_BYTES)
-            if (!request.queue(buffer)) {
+            // CS11: UsbRequest.queue(ByteBuffer) 是 API26+；4.4 走 queue(buffer, length)
+            val queued = if (Build.VERSION.SDK_INT >= 26) {
+                request.queue(buffer)
+            } else {
+                @Suppress("DEPRECATION")
+                request.queue(buffer, buffer.remaining())
+            }
+            if (!queued) {
                 throw IphoneUsbException.DeviceUnavailable(
                     "Android could not queue USBMUX read request (${requestDiagnostics(timeoutMillis, buffer.capacity())})",
                 )
             }
             val completed = try {
-                connection.requestWait(timeoutMillis)
+                // CS11: requestWait(long) 是 API26+；4.4 走无参阻塞版（由 cancel 路径负责退出）
+                if (Build.VERSION.SDK_INT >= 26) {
+                    connection.requestWait(timeoutMillis)
+                } else {
+                    @Suppress("DEPRECATION")
+                    connection.requestWait()
+                }
             } catch (_: TimeoutException) {
                 drainCancelledRead(request)
                 return@synchronized null
@@ -426,7 +447,13 @@ class Iap2UsbSession internal constructor(
             throw failSession("Android could not cancel timed out USBMUX read request")
         }
         val completed = try {
-            connection.requestWait(CANCEL_DRAIN_TIMEOUT_MILLIS)
+            // CS11: requestWait(long) 是 API26+；4.4 走无参版
+            if (Build.VERSION.SDK_INT >= 26) {
+                connection.requestWait(CANCEL_DRAIN_TIMEOUT_MILLIS)
+            } else {
+                @Suppress("DEPRECATION")
+                connection.requestWait()
+            }
         } catch (_: TimeoutException) {
             throw failSession("Timed out draining cancelled USBMUX read request")
         }
