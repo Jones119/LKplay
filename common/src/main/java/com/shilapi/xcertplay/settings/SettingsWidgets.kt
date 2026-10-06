@@ -14,6 +14,7 @@ import android.widget.Switch
 import android.widget.TextView
 import com.shilapi.xcertplay.airplay.CarPlayDisplayScale
 import com.shilapi.xcertplay.host.R
+import android.os.Build
 
 object SettingsWidgets {
 
@@ -75,18 +76,20 @@ object SettingsWidgets {
             this.contentDescription = contentDescription
             isEnabled = enabled
             if (theme.isOverlay) {
-                showText = false
-                thumbTintList = ColorStateList(
-                    arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
-                    intArrayOf(theme.accent, theme.textSecondary),
-                )
-                trackTintList = ColorStateList(
-                    arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
-                    intArrayOf(theme.accentTrack, theme.trackOff),
-                )
+                if (Build.VERSION.SDK_INT >= 21) {
+                    showText = false
+                    thumbTintList = ColorStateList(
+                        arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
+                        intArrayOf(theme.accent, theme.textSecondary),
+                    )
+                    trackTintList = ColorStateList(
+                        arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
+                        intArrayOf(theme.accentTrack, theme.trackOff),
+                    )
+                }
             } else {
                 minHeight = theme.dp(context, 56)
-                buttonTintList = ColorStateList.valueOf(theme.accent)
+                if (Build.VERSION.SDK_INT >= 21) buttonTintList = ColorStateList.valueOf(theme.accent)
             }
             setOnCheckedChangeListener { _, isChecked -> onChanged(isChecked) }
         }
@@ -162,7 +165,7 @@ object SettingsWidgets {
                 this.text = text
                 textSize = 17f
                 setTextColor(theme.textSecondary)
-                buttonTintList = ColorStateList(
+                if (Build.VERSION.SDK_INT >= 21) buttonTintList = ColorStateList(
                     arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
                     intArrayOf(theme.accent, theme.textSecondary),
                 )
@@ -245,9 +248,11 @@ object SettingsWidgets {
         val seekBar = SeekBar(context).apply {
             max = CarPlayDisplayScale.MAX_PERCENT - CarPlayDisplayScale.MIN_PERCENT
             progress = initial - CarPlayDisplayScale.MIN_PERCENT
-            splitTrack = false
-            progressTintList = ColorStateList.valueOf(theme.accent)
-            thumbTintList = ColorStateList.valueOf(theme.accent)
+            if (Build.VERSION.SDK_INT >= 21) {
+                splitTrack = false
+                progressTintList = ColorStateList.valueOf(theme.accent)
+                thumbTintList = ColorStateList.valueOf(theme.accent)
+            }
             setOnSeekBarChangeListener(
                 object : SeekBar.OnSeekBarChangeListener {
                     override fun onProgressChanged(sb: SeekBar, progress: Int, fromUser: Boolean) {
