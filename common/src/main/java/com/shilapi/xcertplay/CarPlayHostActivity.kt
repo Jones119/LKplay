@@ -105,6 +105,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.roundToInt
 import com.shilapi.xcertplay.compat.systemService
+import com.shilapi.xcertplay.compat.hasPermissionCompat
 
 /**
  * Full-screen CarPlay host. It renders decoded video through a [TextureView], forwards touch to
@@ -548,7 +549,7 @@ class CarPlayHostActivity : ComponentActivity() {
         )
         val reusedBackgroundSession = adoptBackgroundSession()
         microphoneAvailable =
-            checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+            hasPermissionCompat(Manifest.permission.RECORD_AUDIO)
         microphonePermissionResolved = microphoneAvailable
         if (reusedBackgroundSession) {
             updateDebugOverlays()
@@ -651,8 +652,7 @@ class CarPlayHostActivity : ComponentActivity() {
     }
 
     private fun hasFineLocationPermission(): Boolean =
-        checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) ==
-            PackageManager.PERMISSION_GRANTED
+        hasPermissionCompat(Manifest.permission.ACCESS_FINE_LOCATION)
 
     private fun requestVpnConsent() {
         if (awaitingVpnConsent) return
@@ -669,7 +669,7 @@ class CarPlayHostActivity : ComponentActivity() {
 
     private fun requestWirelessPermissions() {
         val permissions = requiredWirelessPermissions()
-        if (permissions.all { checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }) {
+        if (permissions.all { hasPermissionCompat(it) }) {
             wirelessPermissionsReady = true
             updateHotspotStatusBlock()
             maybeStartCarPlay()
@@ -683,7 +683,7 @@ class CarPlayHostActivity : ComponentActivity() {
 
     private fun hasRequiredWirelessPermissions(): Boolean =
         requiredWirelessPermissions().all {
-            checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED
+            hasPermissionCompat(it)
         }
 
     private fun requiredWirelessPermissions(): List<String> = when {
@@ -2305,15 +2305,17 @@ class CarPlayHostActivity : ComponentActivity() {
             val switch = Switch(this@CarPlayHostActivity).apply {
                 isChecked = locationReportingEnabled
                 contentDescription = getString(R.string.report_android_location_to_the_iphone)
-                showText = false
-                thumbTintList = ColorStateList(
-                    arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
-                    intArrayOf(MENU_ACCENT, MENU_SECONDARY),
-                )
-                trackTintList = ColorStateList(
-                    arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
-                    intArrayOf(MENU_ACCENT_TRACK, MENU_TRACK_OFF),
-                )
+                if (Build.VERSION.SDK_INT >= 21) showText = false
+                if (Build.VERSION.SDK_INT >= 23) {
+                    thumbTintList = ColorStateList(
+                        arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
+                        intArrayOf(MENU_ACCENT, MENU_SECONDARY),
+                    )
+                    trackTintList = ColorStateList(
+                        arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
+                        intArrayOf(MENU_ACCENT_TRACK, MENU_TRACK_OFF),
+                    )
+                }
                 setOnCheckedChangeListener { _, checked ->
                     onLocationReportingChanged(checked)
                 }
@@ -2409,7 +2411,7 @@ class CarPlayHostActivity : ComponentActivity() {
         val seekBar = SeekBar(this).apply {
             max = (values.size - 1).coerceAtLeast(0)
             progress = selectedIndex
-            splitTrack = false
+            if (Build.VERSION.SDK_INT >= 21) splitTrack = false
             if (Build.VERSION.SDK_INT >= 21) { progressTintList = ColorStateList.valueOf(MENU_ACCENT); thumbTintList = ColorStateList.valueOf(MENU_ACCENT) }
             setOnSeekBarChangeListener(
                 object : SeekBar.OnSeekBarChangeListener {
@@ -2894,7 +2896,7 @@ class CarPlayHostActivity : ComponentActivity() {
                 text = label
                 textSize = 18f
                 setTextColor(MENU_SECONDARY)
-                buttonTintList = ColorStateList(
+                if (Build.VERSION.SDK_INT >= 21) buttonTintList = ColorStateList(
                     arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
                     intArrayOf(MENU_ACCENT, MENU_SECONDARY),
                 )
@@ -3268,8 +3270,23 @@ class CarPlayHostActivity : ComponentActivity() {
             CanvasSupport(false, "canvas_4k_limit", "Decoder capability check skipped: canvas exceeds enlargement limit")
         } else decoderCanvasSupport(display)
 
-    private fun decoderCanvasSupport(display: AirPlayDisplayConfig): CanvasSupport = try {
+    private fun decoderCanvasSupport(display: AirPlayDisplayConfig): CanvasSupport {
+        return try {
         val mime = if (hevcEnabled) MediaFormat.MIMETYPE_VIDEO_HEVC else MediaFormat.MIMETYPE_VIDEO_AVC
+        // CS11: 4.4 没有 VideoCapabilities 探测；确认默认解码器可创建即可
+        if (Build.VERSION.SDK_INT < 21) {
+            val probe = runCatching { android.media.MediaCodec.createDecoderByType(mime) }.getOrNull()
+            return if (probe == null) {
+                CanvasSupport(false, "no_decoder", "Decoder capability mime=$mime result=no_decoder (api<21)")
+            } else {
+                try {
+                    CanvasSupport(true, "api<21_unverified",
+                        "Decoder capability codec=${probe.name} mime=$mime result=api<21_unverified")
+                } finally {
+                    runCatching { probe.release() }
+                }
+            }
+        }
         // Match MediaCodec.createDecoderByType's first suitable decoder; do not silently force
         // an enlarged stream through a software decoder on a slower head unit.
         val decoder = MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos.firstOrNull {
@@ -3302,6 +3319,7 @@ class CarPlayHostActivity : ComponentActivity() {
     } catch (error: Exception) {
         CanvasSupport(false, "capability_query_${error.javaClass.simpleName}",
             "Decoder capability query failed error=${error.javaClass.simpleName}")
+        }
     }
 
     private fun createAirPlayConfig(size: DisplaySize): AirPlayConfig {
@@ -4405,7 +4423,7 @@ class CarPlayHostActivity : ComponentActivity() {
     private fun exitApplication() {
         if (shuttingDown.get()) return
         restoreSettingsBaseline()
-        finishAndRemoveTask()
+        if (Build.VERSION.SDK_INT >= 21) finishAndRemoveTask() else finish() // CS11: finishAndRemoveTask 是 API21+
         shutdown(terminateProcess = true, reason = "settings exit application")
     }
 

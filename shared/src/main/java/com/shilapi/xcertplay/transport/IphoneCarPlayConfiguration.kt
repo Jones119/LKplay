@@ -1,6 +1,7 @@
 package com.shilapi.xcertplay.transport
 
 import android.hardware.usb.UsbConfiguration
+import android.os.Build
 import android.hardware.usb.UsbConstants
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbEndpoint
@@ -28,6 +29,11 @@ object IphoneCarPlayConfiguration {
     private const val PREFERRED_USBMUX_IN = 0x85
 
     fun find(device: UsbDevice): UsbConfiguration? {
+        // CS11: UsbConfiguration 是 API21+；4.4 无法按配置枚举 → 使用系统 usbmuxd 桥接方案
+        if (Build.VERSION.SDK_INT < 21) {
+            Log.w(TAG, "configuration enumeration requires API 21; use the system usbmuxd bridge on this device")
+            return null
+        }
         val configurations = (0 until device.configurationCount).map(device::getConfiguration)
         val chosen = configurations.firstOrNull { usbMuxInterface(it) != null && hasCdcNcm(it) && hasAppleEthernet(it) }
             ?: configurations.firstOrNull { usbMuxInterface(it) != null && hasCdcNcm(it) }

@@ -57,3 +57,11 @@ fun recorderRouteTypeCompat(recorder: AudioRecord): Int? =
 @Suppress("DEPRECATION")
 fun Context.getDrawableCompat(id: Int): android.graphics.drawable.Drawable? =
     if (Build.VERSION.SDK_INT >= 21) getDrawable(id) else resources.getDrawable(id)
+
+/** `Context.checkSelfPermission` 需要 API 23；低版本用 PackageManager 静态判定。 */
+fun Context.hasPermissionCompat(permission: String): Boolean =
+    if (Build.VERSION.SDK_INT >= 23) {
+        checkSelfPermission(permission) == android.content.pm.PackageManager.PERMISSION_GRANTED
+    } else {
+        packageManager.checkPermission(permission, packageName) == android.content.pm.PackageManager.PERMISSION_GRANTED
+    }
