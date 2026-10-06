@@ -10,6 +10,7 @@ import android.media.AudioManager
 import android.media.MediaMetadata
 import android.media.session.MediaSession
 import android.media.session.PlaybackState
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -24,6 +25,7 @@ import com.shilapi.xcertplay.orchestration.CarPlayController
 import java.util.concurrent.Executors
 import java.util.concurrent.Executor
 import com.shilapi.xcertplay.compat.systemService
+import com.shilapi.xcertplay.compat.getDrawableCompat
 
 /**
  * Steering-wheel and other hardware media buttons for CarPlay.
@@ -39,6 +41,11 @@ internal object CarPlayMediaKeys {
         PlaybackState.ACTION_PLAY_PAUSE or PlaybackState.ACTION_SKIP_TO_NEXT or PlaybackState.ACTION_SKIP_TO_PREVIOUS
 
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val focusChangeListener = AudioManager.OnAudioFocusChangeListener { change ->
+        Log.i(TAG, "audio focus change=$change")
+        // Only a permanent loss moves the car's media keys elsewhere; transient losses come back.
+        if (change == AudioManager.AUDIOFOCUS_LOSS) synchronized(this) { focusHeld = false }
+    }
     private val artworkQueue = NowPlayingArtworkQueue(
         worker = Executors.newSingleThreadExecutor { task ->
             Thread(task, "diplay-now-playing-artwork").apply { isDaemon = true }
@@ -146,10 +153,16 @@ internal object CarPlayMediaKeys {
     // keys. When CarPlay starts playing again it becomes the car's media source again, as any player
     // would; only the start counts, so a car source picked while the iPhone plays on is not undone.
     private fun regainFocusLocked() {
-        val request = focusRequest ?: return
+        if (Build.VERSION.SDK_INT < 21) return
         if (focusHeld) return
         val audio = appContext?.systemService(AudioManager::class.java) ?: return
-        focusHeld = audio.requestAudioFocus(request) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+        // CS11: 焦点请求对象式 API 是 26+；21–25 走遗留重载，<21 直接不启用
+        focusHeld = if (Build.VERSION.SDK_INT >= 26) {
+            val request = focusRequest ?: return
+            audio.requestAudioFocus(request) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+        } else {
+            audio.requestAudioFocus(focusChangeListener, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+        }
         Log.i(TAG, "audio focus regained=$focusHeld")
     }
 
@@ -162,25 +175,37 @@ internal object CarPlayMediaKeys {
     }
 
     private fun start(context: Context) {
+        // CS11: MediaSession 是 API21+；4.4 上整块功能停用（不崩溃、不打日志噪音）
+        if (Build.VERSION.SDK_INT < 21) {
+            Log.i(TAG, "media keys unavailable before API 21")
+            return
+        }
         val audio = context.systemService(AudioManager::class.java)
-        val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
-            .setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_MEDIA)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                    .build(),
-            )
-            .setOnAudioFocusChangeListener({ change ->
-                Log.i(TAG, "audio focus change=$change")
-                // Only a permanent loss moves the car's media keys elsewhere; transient losses come back.
-                if (change == AudioManager.AUDIOFOCUS_LOSS) synchronized(this) { focusHeld = false }
-            }, mainHandler)
-            .build()
-        val granted = audio?.requestAudioFocus(request) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
-        focusRequest = request
+        val granted: Boolean
+        if (Build.VERSION.SDK_INT >= 26) {
+            val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+                .setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                        .build(),
+                )
+                .setOnAudioFocusChangeListener(focusChangeListener, mainHandler)
+                .build()
+            granted = audio?.requestAudioFocus(request) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+            focusRequest = request
+        } else {
+            granted = audio?.requestAudioFocus(
+                focusChangeListener, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN,
+            ) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+        }
         focusHeld = granted
+        val cb = callback ?: CarPlayMediaCallback(
+            experimentalDiLink3Keys = { appContext?.let(BydOutputSettings::carPlayCallControls) == true },
+            send = ::send,
+        ).also { callback = it }
         session = MediaSession(context, "DiPlay CarPlay").apply {
-            setCallback(callback, mainHandler)
+            setCallback(cb, mainHandler)
             setMetadata(androidMetadata(nowPlaying, shownArtworkLocked()))
             isActive = true
         }
@@ -199,7 +224,12 @@ internal object CarPlayMediaKeys {
         nowPlaying = CarPlayNowPlaying()
         artwork = null
         artworkCache.clear()
-        focusRequest?.let { request -> appContext?.systemService(AudioManager::class.java)?.abandonAudioFocusRequest(request) }
+        // CS11: abandonAudioFocusRequest 是 26+；21–25 走遗留 abandon
+        if (Build.VERSION.SDK_INT >= 26) {
+            focusRequest?.let { request -> appContext?.systemService(AudioManager::class.java)?.abandonAudioFocusRequest(request) }
+        } else if (Build.VERSION.SDK_INT >= 21) {
+            appContext?.systemService(AudioManager::class.java)?.abandonAudioFocus(focusChangeListener)
+        }
         focusRequest = null
         focusHeld = false
     }
@@ -236,10 +266,8 @@ internal object CarPlayMediaKeys {
         Log.i(TAG, "media key $source -> CarPlay $index sent=$sent")
     }
 
-    private val callback = CarPlayMediaCallback(
-        experimentalDiLink3Keys = { appContext?.let(BydOutputSettings::carPlayCallControls) == true },
-        send = ::send,
-    )
+    // CS11: MediaSession.Callback 是 API21+；回调改为在 start() 里懒创建（<21 永不触碰该类）
+    private var callback: CarPlayMediaCallback? = null
 
     /** Whether [next] changes what the media session's metadata shows; position and play state do not. */
     internal fun metadataChanged(previous: CarPlayNowPlaying, next: CarPlayNowPlaying): Boolean =
@@ -269,7 +297,7 @@ internal object CarPlayMediaKeys {
         artwork ?: placeholder ?: appContext?.let(::placeholderArt)?.also { placeholder = it }
 
     internal fun placeholderArt(context: Context): Bitmap? = context
-        .getDrawable(R.drawable.art_now_playing_placeholder)
+        .getDrawableCompat(R.drawable.art_now_playing_placeholder)
         ?.toBitmap(MAX_ARTWORK_DIMENSION, MAX_ARTWORK_DIMENSION)
 
     /**

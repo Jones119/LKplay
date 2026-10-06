@@ -52,3 +52,8 @@ fun trackBufferSizeFramesCompat(track: AudioTrack): Int =
 /** `AudioRecord.getRoutedDevice`（AudioDeviceInfo）需要 API 23。 */
 fun recorderRouteTypeCompat(recorder: AudioRecord): Int? =
     if (Build.VERSION.SDK_INT >= 23) recorder.routedDevice?.type else null
+
+/** `Context.getDrawable` 需要 API 21；低版本走 resources.getDrawable。 */
+@Suppress("DEPRECATION")
+fun Context.getDrawableCompat(id: Int): android.graphics.drawable.Drawable? =
+    if (Build.VERSION.SDK_INT >= 21) getDrawable(id) else resources.getDrawable(id)
