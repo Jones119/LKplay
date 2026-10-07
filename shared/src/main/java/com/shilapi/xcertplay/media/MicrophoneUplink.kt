@@ -78,36 +78,59 @@ internal class MicrophoneUplink(
             return false
         }
         val bufferSize = maxOf(minBuffer * 2, config.frameBytes * 4)
-        val nextRecorder = try {
-            if (Build.VERSION.SDK_INT >= 23) {
-                AudioRecord.Builder()
-                    .setAudioSource(source)
-                    .setAudioFormat(
-                        AndroidAudioFormat.Builder()
-                            .setEncoding(AndroidAudioFormat.ENCODING_PCM_16BIT)
-                            .setSampleRate(config.sampleRate)
-                            .setChannelMask(channelMask)
-                            .build(),
-                    )
-                    .setBufferSizeInBytes(bufferSize)
-                    .build()
-            } else {
-                // CS11: AudioRecord.Builder 是 API23+；4.4 走 legacy 构造
-                @Suppress("DEPRECATION")
-                AudioRecord(source, config.sampleRate, channelMask,
-                    AndroidAudioFormat.ENCODING_PCM_16BIT, bufferSize)
+        // The car keeps its own always-on voice assistant on the microphone, and this 4.4 audio HAL
+        // answers a competing capture with ERROR_INVALID_OPERATION (-3) on the first read. Walk the
+        // source ladder and keep the first source that actually returns samples.
+        val probe = ByteArray(minOf(config.frameBytes, MIN_READ_BYTES))
+        var chosen: AudioRecord? = null
+        for (candidate in sourceLadder(source)) {
+            val candidateRecorder = try {
+                if (Build.VERSION.SDK_INT >= 23) {
+                    AudioRecord.Builder()
+                        .setAudioSource(candidate)
+                        .setAudioFormat(
+                            AndroidAudioFormat.Builder()
+                                .setEncoding(AndroidAudioFormat.ENCODING_PCM_16BIT)
+                                .setSampleRate(config.sampleRate)
+                                .setChannelMask(channelMask)
+                                .build(),
+                        )
+                        .setBufferSizeInBytes(bufferSize)
+                        .build()
+                } else {
+                    // CS11: AudioRecord.Builder 是 API23+；4.4 走 legacy 构造
+                    @Suppress("DEPRECATION")
+                    AudioRecord(candidate, config.sampleRate, channelMask,
+                        AndroidAudioFormat.ENCODING_PCM_16BIT, bufferSize)
+                }
+            } catch (error: Exception) {
+                Log.e(TAG, "microphone recorder creation failed source=$candidate", error)
+                continue
             }
-        } catch (error: Exception) {
-            Log.e(TAG, "microphone recorder creation failed", error)
-            stats.failure(MicrophoneFailureStage.RECORDER_CREATION, error)
-            nextEncoder?.close()
-            running.set(false)
-            return false
+            if (candidateRecorder.state != AudioRecord.STATE_INITIALIZED) {
+                Log.w(TAG, "microphone recorder not initialized source=$candidate state=${candidateRecorder.state}")
+                candidateRecorder.release()
+                continue
+            }
+            val read = try {
+                candidateRecorder.startRecording()
+                candidateRecorder.read(probe, 0, probe.size)
+            } catch (error: Exception) {
+                Log.e(TAG, "microphone probe failed source=$candidate", error)
+                -1
+            }
+            Log.i(TAG, "microphone probe source=$candidate rate=${config.sampleRate} result=$read")
+            if (read >= 0) {
+                chosen = candidateRecorder
+                break
+            }
+            runCatching { candidateRecorder.stop() }
+            candidateRecorder.release()
         }
-        if (nextRecorder.state != AudioRecord.STATE_INITIALIZED) {
-            Log.w(TAG, "microphone recorder failed to initialize")
-            stats.failure(MicrophoneFailureStage.RECORDER_INITIALIZATION, code = nextRecorder.state)
-            nextRecorder.release()
+        val nextRecorder = chosen
+        if (nextRecorder == null) {
+            Log.w(TAG, "microphone unavailable on every source rate=${config.sampleRate}")
+            stats.failure(MicrophoneFailureStage.RECORDER_INITIALIZATION)
             nextEncoder?.close()
             running.set(false)
             return false
@@ -146,6 +169,9 @@ internal class MicrophoneUplink(
             false
         }
     }
+
+    private fun sourceLadder(primary: Int): List<Int> =
+        listOf(primary, MediaRecorder.AudioSource.MIC, MediaRecorder.AudioSource.DEFAULT).distinct()
 
     private fun voiceEffects(sessionId: Int): List<AudioEffect> = listOfNotNull(
         enabledEffect("AEC") {

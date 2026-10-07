@@ -35,19 +35,35 @@ internal class OpusEncoder(bitrate: Int) : Closeable {
         Log.w(TAG, "Opus microphone encoder unavailable", error)
         null
     }
+    // The CS11 has no Opus encoder in MediaCodec, and wireless CarPlay still requires Opus on the
+    // microphone, so the bundled libopus encodes the uplink whenever the platform codec is missing.
+    private var native: LegacyNativeOpus.Encoder? =
+        if (codec == null) LegacyNativeOpus.Encoder(bitrate).takeIf { it.isAvailable } else null
     private val bufferInfo = MediaCodec.BufferInfo()
     private var presentationTimeUs = 0L
     private var closed = false
     private var outputPackets = 0
 
-    val available: Boolean get() = codec != null && !closed
+    init {
+        if (native != null) Log.i(TAG, "Opus microphone encoder started on libopus bitrate=$bitrate")
+    }
+
+    val available: Boolean get() = !closed && (codec != null || native?.isAvailable == true)
 
     /**
      * Queues one 20 ms PCM frame and returns all Opus access units made available by the codec.
      */
     fun encode(pcm: ByteArray): List<ByteArray> {
-        val codec = codec ?: return emptyList()
         if (closed) return emptyList()
+        native?.let { encoder ->
+            val packet = encoder.encode(pcm)
+            outputPackets++
+            if (packet != null && outputPackets <= FIRST_PACKET_LOG_COUNT) {
+                Log.i(TAG, "libopus microphone packet=$outputPackets bytes=${packet.size}")
+            }
+            return if (packet != null) listOf(packet) else emptyList()
+        }
+        val codec = codec ?: return emptyList()
         val inputIndex = try {
             codec.dequeueInputBuffer(INPUT_TIMEOUT_US)
         } catch (error: Exception) {
@@ -118,6 +134,8 @@ internal class OpusEncoder(bitrate: Int) : Closeable {
     override fun close() {
         if (closed) return
         closed = true
+        native?.close()
+        native = null
         val codec = codec ?: return
         try {
             codec.stop()
