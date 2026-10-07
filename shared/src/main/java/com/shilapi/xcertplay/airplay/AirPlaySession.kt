@@ -131,6 +131,9 @@ class AirPlaySession(
     internal fun logTrace(message: String) = trace(message)
 
     fun start() {
+        // Data/NTP/event servers bind whatever address the phone reached the control channel on: the
+        // wired netdev link-local or the wireless soft-AP IPv4 address (see serverBindAddress()).
+        publishSessionBindAddress(localAddress)
         Thread(::runControl, "airplay-control").apply {
             isDaemon = true
             start()
@@ -847,6 +850,7 @@ class AirPlaySession(
     private fun teardown() {
         videoPlaybackAvailability.setEventReady(false)
         videoPlaybackAvailability.setFeatureEnabled(false)
+        clearSessionBindAddress()
         ntp.close()
         safeClose(keepAliveSocket)
         keepAliveSocket = null

@@ -3,6 +3,26 @@ package com.shilapi.xcertplay.airplay
 import java.net.Inet6Address
 import java.net.InetAddress
 import java.net.NetworkInterface
+import java.util.concurrent.atomic.AtomicReference
+
+/**
+ * Address the AirPlay data/NTP/event servers bind for the current session.
+ *
+ * The wired CS11 path reaches the iPhone over the kernel netdev's link-local (fe80::2 on usb1); the
+ * wireless path reaches it over the soft-AP's IPv4 address. Publishing the address the control
+ * channel was accepted on keeps every server on the interface the phone actually used: this ROM
+ * rejects unscoped IPv6 binds ("Can't bind to a link-local address without a scope id"), so the
+ * wireless session must not fall back to the all-zero wildcard.
+ */
+private val sessionBindAddress = AtomicReference<InetAddress?>(null)
+
+internal fun publishSessionBindAddress(address: InetAddress?) {
+    sessionBindAddress.set(address?.takeUnless { it.isAnyLocalAddress })
+}
+
+internal fun clearSessionBindAddress() {
+    sessionBindAddress.set(null)
+}
 
 /**
  * The address the AirPlay servers bind on the CS11 kernel netdev: fe80::2 scoped to usb1.
@@ -14,6 +34,7 @@ import java.net.NetworkInterface
  * to the all-zero wildcard for environments without the netdev (standard ROMs accept that).
  */
 internal fun serverBindAddress(): InetAddress {
+    sessionBindAddress.get()?.let { return it }
     try {
         val nif = NetworkInterface.getByName("usb1")
         if (nif != null) {
