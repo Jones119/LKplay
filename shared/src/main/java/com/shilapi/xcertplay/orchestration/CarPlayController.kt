@@ -198,6 +198,7 @@ class CarPlayController(
     }
     private val executor: ExecutorService = Executors.newSingleThreadExecutor()
     private val touchExecutor: ExecutorService = Executors.newSingleThreadExecutor()
+    private val touchGate = com.shilapi.xcertplay.airplay.TouchDispatchGate()
     private val tunnelExecutor: ExecutorService = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
     private val hostId = UUID.randomUUID().toString().uppercase(Locale.US)
@@ -300,6 +301,7 @@ class CarPlayController(
                 }
             }
             activeSession = session
+            touchGate.reset()
             if (replacement) restoreDashboardContent(session)
             debugLog(
                 "AirPlay session active controller=${session.controllerId ?: "unknown"} " +
@@ -311,6 +313,7 @@ class CarPlayController(
         override fun onSessionEnded(session: AirPlaySession) {
             if (activeSession === session) {
                 activeSession = null
+                touchGate.reset()
                 BydNavigationOutputs.endNow(preserveTurnOverlay = !closed && config.transport == CarPlayTransport.WIRELESS)
                 com.shilapi.xcertplay.glance.CarPlayGlance.setConnected(false)
                 videoListener?.onVideoSessionEnded()
@@ -464,12 +467,28 @@ class CarPlayController(
 
     fun sendTouch(contacts: List<AirPlayContact>): Boolean {
         if (closed) return false
-        val session = activeSession ?: return false
+        if (activeSession == null) return false
+        // Touch reports are absolute snapshots: while the encrypted event channel stalls, replaying
+        // every queued position makes the pointer trail the finger, so only the newest move is kept
+        // (finger down/up transitions are always delivered in order).
+        if (!touchGate.enqueue(contacts)) return true
         return try {
-            touchExecutor.execute { session.sendTouch(contacts) }
+            touchExecutor.execute(::drainTouch)
             true
         } catch (_: Exception) {
             false
+        }
+    }
+
+    private fun drainTouch() {
+        while (true) {
+            val contacts = touchGate.next() ?: return
+            val session = activeSession
+            if (session == null) {
+                touchGate.reset()
+                return
+            }
+            session.sendTouch(contacts)
         }
     }
 
