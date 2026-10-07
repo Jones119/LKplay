@@ -15,7 +15,6 @@
     <string name="built_in_car_hotspot">车载热点</string>
     <string name="wifi_direct">Wi-Fi Direct</string>
     <string name="hotspot_hint_manual">车载热点 · 保持车载热点、蓝牙和 iPhone 的 Wi-Fi 开启。</string>
-    <string name="hotspot_hint_local">打开“连接设置”以保存车载热点信息。</string>
     <string name="hotspot_hint_p2p">Wi-Fi Direct · 保持车机 Wi-Fi 开关、蓝牙和 iPhone 的 Wi-Fi 开启。</string>
     <string name="cluster_size_standard">标准 · 最清晰</string>
     <string name="cluster_size_larger">更大 · 默认</string>
@@ -86,7 +85,7 @@
     <string name="audio_stream_unavailable">流类型 %1$d 在此不可用（状态=%2$s）</string>
     <string name="resolution_handshake_prefix">握手分辨率：</string>
     <string name="safe_area_full_screen_at">安全区域：全屏，</string>
-    <string name="settings_android9_compat">以下设置在 Android 9（API 28）上不可用且已隐藏：\n• Wi-Fi P2P（5 GHz）— 将改用 LocalOnlyHotspot。\n• HEVC 软解码器 — 将改用硬件解码。</string>
+    <string name="settings_android9_compat">以下设置在 Android 9（API 28）上不可用且已隐藏：\n• Wi-Fi P2P（5 GHz）— 将改用内置车载热点。\n• HEVC 软解码器 — 将改用硬件解码。</string>
     <string name="settings_mfi_address_hint">地址必须以 http:// 或 https:// 开头。令牌为可选项，将作为 Authorization bearer token 发送。</string>
     <string name="a_familiar_drive">熟悉的驾乘体验。</string>
     <string name="a_previous_wi_fi_direct_connection_is_still_running_reset">之前的 Wi-Fi Direct 连接仍在运行。请重置后再连接。</string>
@@ -226,10 +225,6 @@
     <string name="hotspot_ssid_is_required">必须填写热点 SSID</string>
     <string name="hotspot_ssid_must_be_at_most_32_utf_8_bytes">热点 SSID 最多为 32 个 UTF-8 字节</string>
     <string name="hotspot_status">热点状态</string>
-    <string name="i2c">I2C</string>
-    <string name="i2c_device">I2C 设备</string>
-    <string name="i2c_device_path_contains_u_0000">I2C 设备路径包含 U+0000</string>
-    <string name="i2c_device_path_is_required">必须填写 I2C 设备路径</string>
     <string name="identity_appearance">身份与外观</string>
     <string name="image_is_not_ready">图片尚未准备好</string>
     <string name="in_carplay_swipe_down_with_three_fingers_to_open_diplay_se">在 CarPlay 界面用三指向下滑动，可打开 DiPlay 设置。</string>
@@ -244,10 +239,8 @@
     <string name="language_system_default">跟随系统</string>
     <string name="later">稍后</string>
     <string name="left_hand_drive">左舵</string>
-    <string name="linux_device_path_for_example_dev_i2c_1">Linux 设备路径，例如 /dev/i2c-1。</string>
     <string name="loading_image">正在加载图片</string>
     <string name="local_offline">本地离线</string>
-    <string name="localonlyhotspot">LocalOnlyHotspot</string>
     <string name="location">位置</string>
     <string name="longest_height">较长边</string>
     <string name="looking_for_your_paired_iphone">正在查找已配对的 iPhone…</string>
@@ -383,7 +376,6 @@
     <string name="usage_access_enabled">使用访问权限：已启用</string>
     <string name="usage_access_lets_diplay_follow_the_instrument_theme_and_m">使用访问权限让 DiPlay 跟随仪表盘主题和地图卡片。仅在本地处理 BYD 仪表盘活动事件。本车机没有可用的权限设置页面。</string>
     <string name="usage_access_setup_needed_for_automatic_mode">使用访问权限：自动模式需要设置</string>
-    <string name="usb_ch341">USB/CH341</string>
     <string name="use_a_usb_data_cable_and_the_car_s_usb_data_port_unlock_yo">使用 USB 数据线连接车机的 USB 数据接口。解锁 iPhone 并允许 CarPlay。无需设置热点。</string>
     <string name="use_a_usb_data_cable_and_unlock_your_iphone_allow_trust_an">请使用 USB 数据线并解锁 iPhone。\niPhone 出现提示时允许“信任”和使用 CarPlay。</string>
     <string name="use_hevc_leave_off_for_the_widest_head_unit_compatibility">使用 HEVC。关闭后可兼容更多车机。</string>
@@ -555,8 +547,6 @@
     <string name="center_map_usage_allowed">使用情况访问权限：已允许，卡片只在主屏幕上显示</string>
     <string name="center_map_usage_missing">使用情况访问权限：未允许，因此卡片会显示在所有应用上层。通过 ADB：adb shell appops set %1$s GET_USAGE_STATS allow</string>
     <string name="center_map_no_permission_screen">此车机没有该权限的设置界面，请通过 ADB 允许。</string>
-    <string name="launcher_map_sharing">与其他启动器共享实时地图</string>
-    <string name="launcher_map_sharing_description">支持 DiPlay 的启动器可以在自己的主屏幕中显示实时仪表盘地图。默认关闭，因为开启后车机上的任何应用都可以请求该地图。详见 docs/LAUNCHER_INTEGRATION.md。</string>
     <string name="usb_auto_confirm_status_on">USB 弹窗自动确认：已开启</string>
     <string name="usb_auto_confirm_dialog_msg">开启自动确认需要无障碍服务支持。比亚迪车机通常无法直接从系统设置中开启。\n\n此次设置还会为桌面地图申请使用情况访问权限和悬浮窗权限，并保留现有无障碍服务。\n\n是否通过车机本地 ADB 申请这三项权限？</string>
     <string name="usb_auto_confirm_active_hint">✓ 无障碍服务已激活（连接 iPhone 时将自动确认）</string>

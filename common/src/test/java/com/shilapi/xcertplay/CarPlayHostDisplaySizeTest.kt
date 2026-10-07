@@ -48,7 +48,8 @@ class CarPlayHostDisplaySizeTest {
         activity = Robolectric.buildActivity(CarPlayHostActivity::class.java).get()
         AirPlayPersistence.saveAdaptPipResolution(activity, false)
         // Source-only tests have no provisioned local authentication identity.
-        AirPlayPersistence.saveMfiTarget(activity, MfiTarget.USB_CH341)
+        AirPlayPersistence.saveMfiTarget(activity, MfiTarget.REMOTE)
+        AirPlayPersistence.saveRemoteMfiServer(activity, "https://mfi.example.test")
         // Exercise host startup without launching vendor-service workers or real transports.
         controllerConstruction = mockConstruction(CarPlayController::class.java)
         (getField("teardownExecutor") as ExecutorService).shutdownNow()

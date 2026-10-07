@@ -15,7 +15,6 @@
     <string name="wifi_direct_channel_choice">Channel %1$d · %2$s</string>
     <string name="wifi_direct_channel_description">Auto chooses a channel for you. Manual channels depend on what your car supports. Changes apply to the next Wi-Fi Direct connection.</string>
     <string name="hotspot_hint_manual">Built-in car hotspot · Keep the car hotspot, Bluetooth and your iPhone’s Wi-Fi on.</string>
-    <string name="hotspot_hint_local">Open Connection setup to save your built-in car hotspot details.</string>
     <string name="hotspot_hint_p2p">Wi-Fi Direct · Keep the car’s Wi-Fi switch, Bluetooth and your iPhone’s Wi-Fi on.</string>
     <string name="cluster_size_standard">Standard · sharpest</string>
     <string name="cluster_size_larger">Larger · default</string>
@@ -87,7 +86,7 @@
     <string name="resolution_handshake_prefix">Handshake resolution:\u0020</string>
     <string name="safe_area_full_screen_at">Safe area: full screen at\u0020</string>
     <string name="safe_area_mapping_summary">Safe area: %1$d x %2$d at (%3$d, %4$d) in %5$d x %6$d</string>
-    <string name="settings_android9_compat">The following settings are unavailable and hidden on Android 9 (API 28):\n• Wi-Fi P2P (5 GHz) — LocalOnlyHotspot is used instead.\n• HEVC software decoder — hardware decoding is used instead.</string>
+    <string name="settings_android9_compat">The following settings are unavailable and hidden on Android 9 (API 28):\n• Wi-Fi P2P (5 GHz) — the built-in car hotspot is used instead.\n• HEVC software decoder — hardware decoding is used instead.</string>
     <string name="settings_mfi_address_hint">Address must start with http:// or https://. Token is optional and sent as an Authorization bearer token.</string>
     <string name="app_name">DiPlay</string>
     <string name="language_section_title">Language</string>
@@ -232,10 +231,6 @@
     <string name="hotspot_ssid_is_required">Hotspot SSID is required</string>
     <string name="hotspot_ssid_must_be_at_most_32_utf_8_bytes">Hotspot SSID must be at most 32 UTF-8 bytes</string>
     <string name="hotspot_status">Hotspot status</string>
-    <string name="i2c">I2C</string>
-    <string name="i2c_device">I2C device</string>
-    <string name="i2c_device_path_contains_u_0000">I2C device path contains U+0000</string>
-    <string name="i2c_device_path_is_required">I2C device path is required</string>
     <string name="identity_appearance">Identity &amp; appearance</string>
     <string name="image_is_not_ready">Image is not ready</string>
     <string name="in_carplay_swipe_down_with_three_fingers_to_open_diplay_se">In CarPlay, swipe down with three fingers to open DiPlay settings.</string>
@@ -245,10 +240,8 @@
     <string name="keep_your_iphone_nearby_with_bluetooth_and_wi_fi_on_allow">Keep your iPhone nearby with Bluetooth and Wi-Fi on.\nAllow CarPlay if your iPhone asks.</string>
     <string name="later">Later</string>
     <string name="left_hand_drive">Left-hand drive</string>
-    <string name="linux_device_path_for_example_dev_i2c_1">Linux device path, for example /dev/i2c-1.</string>
     <string name="loading_image">Loading image</string>
     <string name="local_offline">Local offline</string>
-    <string name="localonlyhotspot">LocalOnlyHotspot</string>
     <string name="location">Location</string>
     <string name="longest_height">Longest height</string>
     <string name="looking_for_your_paired_iphone">Looking for your paired iPhone…</string>
@@ -384,7 +377,6 @@
     <string name="usage_access_enabled">Usage Access: enabled</string>
     <string name="usage_access_lets_diplay_follow_the_instrument_theme_and_m">Usage Access lets DiPlay follow the instrument theme and map card. Only BYD cluster activity events are processed locally. This car does not provide a working permission settings page.</string>
     <string name="usage_access_setup_needed_for_automatic_mode">Usage Access: setup needed for automatic mode</string>
-    <string name="usb_ch341">USB/CH341</string>
     <string name="use_a_usb_data_cable_and_the_car_s_usb_data_port_unlock_yo">Use a USB data cable and the car’s USB data port. Unlock your iPhone and allow CarPlay. No hotspot setup is needed.</string>
     <string name="use_a_usb_data_cable_and_unlock_your_iphone_allow_trust_an">Use a USB data cable and unlock your iPhone.\nAllow Trust and CarPlay if your iPhone asks.</string>
     <string name="use_hevc_leave_off_for_the_widest_head_unit_compatibility">Use HEVC. Leave off for the widest head-unit compatibility.</string>
@@ -555,8 +547,6 @@
     <string name="center_map_usage_allowed">Usage Access: allowed, the card shows only on the home screen</string>
     <string name="center_map_usage_missing">Usage Access: not allowed, so the card shows over every app. Over ADB: adb shell appops set %1$s GET_USAGE_STATS allow</string>
     <string name="center_map_no_permission_screen">This head unit has no settings screen for this permission. Allow it over ADB.</string>
-    <string name="launcher_map_sharing">Share the live map with other launchers</string>
-    <string name="launcher_map_sharing_description">Launchers that support DiPlay can show the live dashboard map inside their own home screen. Off by default, because any app on the head unit could then ask for the map. See docs/LAUNCHER_INTEGRATION.md.</string>
     <string name="usb_auto_confirm_status_on">USB Dialog Auto-Confirm: Enabled</string>
     <string name="usb_auto_confirm_dialog_msg">Auto-confirm requires the Accessibility Service. Many car head units do not expose the system accessibility settings.\n\nThis setup also requests Usage Access and permission to draw over other apps for the home-screen map. Existing accessibility services are preserved.\n\nApply these three permissions via local ADB?</string>
     <string name="usb_auto_confirm_active_hint">✓ Accessibility Service is active (USB prompt will be auto-confirmed)</string>

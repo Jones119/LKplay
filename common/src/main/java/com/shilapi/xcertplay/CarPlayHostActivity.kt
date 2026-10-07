@@ -93,7 +93,6 @@ import com.shilapi.xcertplay.settings.SettingsWidgets
 import com.shilapi.xcertplay.transport.Iap2IdentificationConfig
 import com.shilapi.xcertplay.transport.Iap2LocationProvider
 import com.shilapi.xcertplay.transport.IphoneUsbMatcher
-import com.shilapi.xcertplay.transport.UsbDeviceId
 import com.shilapi.xcertplay.transport.VehicleSpeedLocationProvider
 import java.io.File
 import java.text.SimpleDateFormat
@@ -113,7 +112,7 @@ import android.content.ActivityNotFoundException
  * the active AirPlay session, and drives the complete wired or wireless bring-up through
  * [CarPlayController].
  *
- * Apple devices are discovered by vendor ID; CH341 uses the configured VID/PID below.
+ * Apple devices are discovered by the Apple vendor ID of the attached USB device.
  */
 class CarPlayHostActivity : ComponentActivity() {
     private data class SettingsBaseline(
@@ -135,21 +134,8 @@ class CarPlayHostActivity : ComponentActivity() {
         super.attachBaseContext(AppLocale.wrap(newBase))
     }
 
-    // CH341 USB\VID_1A86&PID_5512&REV_0304 is the deployment-supplied bridge identity.
     private fun createRuntimeConfig(): CarPlayRuntimeConfig = CarPlayRuntimeConfig(
         mfiTarget = mfiTarget,
-        ch341Devices = if (mfiTarget == MfiTarget.USB_CH341) {
-            listOf(UsbDeviceId(0x1a86, 0x5512))
-        } else {
-            emptyList()
-        },
-        // The CP latches its I2C address from the RST level at its own power-up, so the host must
-        // not pulse RST before discovery. Driving D0 re-latches the part onto the alternate
-        // address (0x10), where the accessory certificate is not readable. Leave RST at its
-        // hardware pull (VCC -> 0x11) and let the scanner find the part with its certificate.
-        // Set this back to 0 to restore the D0 pulse.
-        ch341MfiResetGpio = null,
-        linuxI2cPath = if (mfiTarget == MfiTarget.I2C) mfiI2cPath.trim() else null,
         remoteMfiServer = remoteMfiServer.trim().takeIf { it.isNotEmpty() },
         remoteMfiToken = remoteMfiToken.takeIf { it.isNotEmpty() },
         identification = Iap2IdentificationConfig(
@@ -270,10 +256,8 @@ class CarPlayHostActivity : ComponentActivity() {
     private var gestureOverlay: View? = null
     private var settingsMenu: View? = null
     private var mfiTargetGroup: RadioGroup? = null
-    private var mfiI2cFields: View? = null
     private var mfiRemoteFields: View? = null
     private var mfiErrorView: TextView? = null
-    private var mfiI2cPathInput: EditText? = null
     private var remoteMfiServerInput: EditText? = null
     private var remoteMfiTokenInput: EditText? = null
     private var settingsBaseline: SettingsBaseline? = null
@@ -364,7 +348,6 @@ class CarPlayHostActivity : ComponentActivity() {
     private var microphonePermissionResolved = false
     private var wirelessEnabled = false
     private var mfiTarget = MfiTarget.LOCAL
-    private var mfiI2cPath = AirPlayPersistence.DEFAULT_MFI_I2C_PATH
     private var remoteMfiServer = ""
     private var remoteMfiToken = ""
     private var wirelessPermissionsReady = false
@@ -618,7 +601,6 @@ class CarPlayHostActivity : ComponentActivity() {
     private fun loadConnectionSettings() {
         wirelessEnabled = AirPlayPersistence.loadWirelessEnabled(this)
         mfiTarget = AirPlayPersistence.loadMfiTarget(this)
-        mfiI2cPath = AirPlayPersistence.loadMfiI2cPath(this)
         remoteMfiServer = AirPlayPersistence.loadRemoteMfiServer(this)
         remoteMfiToken = AirPlayPersistence.loadRemoteMfiToken(this)
         locationReportingEnabled = AirPlayPersistence.loadLocationReportingEnabled(this)
@@ -1065,7 +1047,7 @@ class CarPlayHostActivity : ComponentActivity() {
             }
         }
         // Fallback for head units without physical cluster projection (e.g. DiLink 3.0/3.5 without digital cluster):
-        // Provide standard virtual cluster stream (1280x720, 16:9 aspect) for CenterMapOverlay and MapEmbedService.
+        // Provide standard virtual cluster stream (1280x720, 16:9 aspect) for CenterMapOverlay.
         MapMirrors.streamAspect = MapMirrors.VIRTUAL_STREAM_ASPECT
         return CarPlayClusterDisplay.config(
             widthPixels = 1280,
@@ -2025,7 +2007,6 @@ class CarPlayHostActivity : ComponentActivity() {
         AirPlayPersistence.saveSettingsGestureFingers(this, gestureFingerCount)
         AirPlayPersistence.saveWirelessEnabled(this, wirelessEnabled)
         AirPlayPersistence.saveMfiTarget(this, mfiTarget)
-        AirPlayPersistence.saveMfiI2cPath(this, mfiI2cPath)
         AirPlayPersistence.saveRemoteMfiServer(this, remoteMfiServer)
         AirPlayPersistence.saveRemoteMfiToken(this, remoteMfiToken)
         AirPlayPersistence.saveWirelessHotspotMode(this, wirelessHotspotMode)
@@ -2135,39 +2116,6 @@ class CarPlayHostActivity : ComponentActivity() {
             ),
         )
 
-        val i2cFields = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            addView(
-                settingsInputRow(
-                    getString(R.string.i2c_device),
-                    mfiI2cPath,
-                    onInputCreated = { mfiI2cPathInput = it },
-                ) { value ->
-                    mfiI2cPath = value
-                    mfiErrorView?.visibility = View.GONE
-                },
-                LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
-                ),
-            )
-            addView(
-                menuText(getString(R.string.linux_device_path_for_example_dev_i2c_1), 14f, MENU_SECONDARY),
-                LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
-                ).apply { topMargin = dp(4) },
-            )
-        }
-        section.addView(
-            i2cFields,
-            LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = dp(8) },
-        )
-        mfiI2cFields = i2cFields
-
         val remoteFields = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             addView(
@@ -2233,7 +2181,6 @@ class CarPlayHostActivity : ComponentActivity() {
     }
 
     private fun updateMfiTargetFields() {
-        mfiI2cFields?.visibility = if (mfiTarget == MfiTarget.I2C) View.VISIBLE else View.GONE
         mfiRemoteFields?.visibility = if (mfiTarget == MfiTarget.REMOTE) View.VISIBLE else View.GONE
         mfiErrorView?.visibility = View.GONE
     }
@@ -2246,9 +2193,6 @@ class CarPlayHostActivity : ComponentActivity() {
                 .firstOrNull { it.tag == mfiTarget }
             button?.let { group.check(it.id) }
         }
-        if (mfiI2cPathInput?.text?.toString() != mfiI2cPath) {
-            mfiI2cPathInput?.setText(mfiI2cPath)
-        }
         if (remoteMfiServerInput?.text?.toString() != remoteMfiServer) {
             remoteMfiServerInput?.setText(remoteMfiServer)
         }
@@ -2260,8 +2204,6 @@ class CarPlayHostActivity : ComponentActivity() {
 
     private fun mfiTargetLabel(target: MfiTarget): String = when (target) {
         MfiTarget.LOCAL -> getString(R.string.local_offline)
-        MfiTarget.USB_CH341 -> getString(R.string.usb_ch341)
-        MfiTarget.I2C -> getString(R.string.i2c)
         MfiTarget.REMOTE -> getString(R.string.remote)
     }
 
@@ -3084,15 +3026,12 @@ class CarPlayHostActivity : ComponentActivity() {
         val error = when {
             mfiTarget == MfiTarget.LOCAL && runCatching { DiPlayBootstrap.ensure(this, mfiTarget) }.isFailure ->
                 getString(R.string.setup_error_auth)
-            mfiTarget == MfiTarget.I2C && mfiI2cPath.isBlank() ->
-                getString(R.string.i2c_device_path_is_required)
             mfiTarget == MfiTarget.REMOTE && remoteMfiServer.isBlank() ->
                 getString(R.string.remote_server_address_is_required)
             mfiTarget == MfiTarget.REMOTE &&
                 !remoteMfiServer.trim().startsWith("http://") &&
                 !remoteMfiServer.trim().startsWith("https://") ->
                 getString(R.string.remote_server_address_must_start_with_http_or_https)
-            '\u0000' in mfiI2cPath -> getString(R.string.i2c_device_path_contains_u_0000)
             '\u0000' in remoteMfiServer -> getString(R.string.remote_server_address_contains_u_0000)
             '\u0000' in remoteMfiToken -> getString(R.string.remote_token_contains_u_0000)
             else -> null
@@ -3135,7 +3074,6 @@ class CarPlayHostActivity : ComponentActivity() {
 
     private fun hotspotModeLabel(mode: WirelessHotspotMode): String = when (mode) {
         WirelessHotspotMode.WIFI_P2P -> getString(R.string.wi_fi_p2p_5_ghz)
-        WirelessHotspotMode.LOCAL_ONLY_HOTSPOT -> getString(R.string.localonlyhotspot)
         WirelessHotspotMode.MANUAL -> getString(R.string.manual_hotspot)
         WirelessHotspotMode.EXISTING_WIFI -> getString(R.string.existing_wifi_title)
     }

@@ -16,7 +16,6 @@
     <string name="built_in_car_hotspot">Вбудована точка доступу автомобіля</string>
     <string name="wifi_direct">Wi-Fi Direct</string>
     <string name="hotspot_hint_manual">Вбудована точка доступу · Тримайте точку доступу автомобіля, Bluetooth і Wi-Fi на iPhone увімкненими.</string>
-    <string name="hotspot_hint_local">Відкрийте налаштування підключення, щоб зберегти дані вбудованої точки доступу.</string>
     <string name="hotspot_hint_p2p">Wi-Fi Direct · Тримайте Wi-Fi автомобіля, Bluetooth і Wi-Fi на iPhone увімкненими.</string>
     <string name="cluster_size_standard">Стандартний · найчіткіший</string>
     <string name="cluster_size_larger">Більший · типовий</string>
@@ -87,7 +86,7 @@
     <string name="resolution_handshake_prefix">Роздільна здатність узгодження:\u0020</string>
     <string name="safe_area_full_screen_at">Безпечна область: увесь екран,\u0020</string>
     <string name="safe_area_mapping_summary">Безпечна область: %1$d x %2$d у точці (%3$d, %4$d) на екрані %5$d x %6$d</string>
-    <string name="settings_android9_compat">Наведені нижче налаштування недоступні та приховані в Android 9 (API 28):\n• Wi-Fi P2P (5 ГГц) — натомість використовується LocalOnlyHotspot.\n• Програмний декодер HEVC — натомість використовується апаратне декодування.</string>
+    <string name="settings_android9_compat">Наведені нижче налаштування недоступні та приховані в Android 9 (API 28):\n• Wi-Fi P2P (5 ГГц) — натомість використовується вбудована точка доступу автомобіля.\n• Програмний декодер HEVC — натомість використовується апаратне декодування.</string>
     <string name="settings_mfi_address_hint">Адреса має починатися з http:// або https://. Токен необов’язковий і надсилається як токен авторизації Bearer.</string>
     <string name="app_name">DiPlay</string>
     <string name="language_section_title">Мова</string>
@@ -229,10 +228,6 @@
     <string name="hotspot_ssid_is_required">Укажіть SSID точки доступу</string>
     <string name="hotspot_ssid_must_be_at_most_32_utf_8_bytes">SSID точки доступу має містити не більше 32 байтів UTF-8</string>
     <string name="hotspot_status">Стан точки доступу</string>
-    <string name="i2c">I2C</string>
-    <string name="i2c_device">Пристрій I2C</string>
-    <string name="i2c_device_path_contains_u_0000">Шлях пристрою I2C містить U+0000</string>
-    <string name="i2c_device_path_is_required">Укажіть шлях пристрою I2C</string>
     <string name="identity_appearance">Ідентичність і вигляд</string>
     <string name="image_is_not_ready">Зображення ще не готове</string>
     <string name="in_carplay_swipe_down_with_three_fingers_to_open_diplay_se">У CarPlay проведіть трьома пальцями вниз, щоб відкрити налаштування DiPlay.</string>
@@ -242,10 +237,8 @@
     <string name="keep_your_iphone_nearby_with_bluetooth_and_wi_fi_on_allow">Тримайте iPhone поблизу з увімкненими Bluetooth і Wi-Fi.\nДозвольте CarPlay, якщо iPhone запитає.</string>
     <string name="later">Пізніше</string>
     <string name="left_hand_drive">Кермо ліворуч</string>
-    <string name="linux_device_path_for_example_dev_i2c_1">Шлях до пристрою Linux, наприклад /dev/i2c-1.</string>
     <string name="loading_image">Завантаження зображення</string>
     <string name="local_offline">Локально, без мережі</string>
-    <string name="localonlyhotspot">LocalOnlyHotspot</string>
     <string name="location">Місцезнаходження</string>
     <string name="longest_height">Найбільша висота</string>
     <string name="looking_for_your_paired_iphone">Пошук спареного iPhone…</string>
@@ -381,7 +374,6 @@
     <string name="usage_access_enabled">Доступ до даних використання: надано</string>
     <string name="usage_access_lets_diplay_follow_the_instrument_theme_and_m">Доступ до даних використання дозволяє DiPlay стежити за темою приборки та карткою карти. Локально обробляються лише події екрана приборки BYD. У цьому автомобілі сторінка налаштування такого дозволу не працює.</string>
     <string name="usage_access_setup_needed_for_automatic_mode">Доступ до даних використання: потрібне налаштування для автоматичного режиму</string>
-    <string name="usb_ch341">USB/CH341</string>
     <string name="use_a_usb_data_cable_and_the_car_s_usb_data_port_unlock_yo">Скористайтеся USB-кабелем для передавання даних і відповідним портом автомобіля. Розблокуйте iPhone та дозвольте CarPlay. Налаштовувати точку доступу не потрібно.</string>
     <string name="use_a_usb_data_cable_and_unlock_your_iphone_allow_trust_an">Скористайтеся USB-кабелем для передавання даних і розблокуйте iPhone.\nПідтвердьте довіру та CarPlay, якщо iPhone запитає.</string>
     <string name="use_hevc_leave_off_for_the_widest_head_unit_compatibility">Використовувати HEVC. Залиште вимкненим для найширшої сумісності з головними пристроями.</string>
@@ -517,8 +509,6 @@
     <string name="center_map_usage_missing">Доступ до даних використання: не дозволено, тому картка показується поверх усіх застосунків. Через ADB: adb shell appops set %1$s GET_USAGE_STATS allow</string>
     <string name="cluster_song">Пісня на приборці</string>
     <string name="cluster_song_description">Назва й виконавець пісні з CarPlay показуються в музичній картці на приборці, разом із відтворенням і паузою. Картка показується як джерело BYD «Інше», бо приборка не малює власне джерело CarPlay. Застосовується одразу. Потрібен ADB через мережу на головному пристрої.</string>
-    <string name="launcher_map_sharing">Ділитися живою картою з іншими лаунчерами</string>
-    <string name="launcher_map_sharing_description">Лаунчери з підтримкою DiPlay можуть показувати живу карту приборки на своєму головному екрані. Типово вимкнено, бо тоді карту зможе запитати будь-який застосунок на головному пристрої. Див. docs/LAUNCHER_INTEGRATION.md.</string>
     <string name="location_reporting_reconnects">Зміна цього налаштування перепідключає активний сеанс CarPlay.</string>
     <string name="navigation_widget_description">Наступний поворот, відстань, прибуття й пісня з CarPlay</string>
     <string name="navigation_widget_label">Навігація CarPlay</string>

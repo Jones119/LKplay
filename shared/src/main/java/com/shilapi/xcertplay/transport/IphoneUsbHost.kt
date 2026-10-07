@@ -491,7 +491,7 @@ private fun describeUsbEndpoint(endpoint: UsbEndpoint): String =
     "0x${endpoint.address.toString(16)}(direction=${endpoint.direction}," +
         "type=${endpoint.type},maxPacket=${endpoint.maxPacketSize})"
 
-/** USB bring-up failures that precede iAP2 and are distinct from MFi I2C failures. */
+/** USB bring-up failures that precede iAP2 and are distinct from MFi authentication failures. */
 sealed class IphoneUsbException(message: String, cause: Throwable? = null) : IOException(message, cause) {
     class PermissionDenied(message: String, cause: Throwable? = null) : IphoneUsbException(message, cause)
     class DeviceUnavailable(message: String, cause: Throwable? = null) : IphoneUsbException(message, cause)

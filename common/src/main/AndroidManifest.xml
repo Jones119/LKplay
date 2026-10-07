@@ -102,16 +102,6 @@
                 android:resource="@xml/navigation_widget_info" />
         </receiver>
 
-        <!-- The live dashboard map for launchers that embed it (docs/LAUNCHER_INTEGRATION.md). -->
-        <service
-            android:name="com.shilapi.xcertplay.MapEmbedService"
-            android:exported="true"
-            tools:ignore="ExportedService">
-            <intent-filter>
-                <action android:name="com.shihab.diplay.action.EMBED_MAP" />
-            </intent-filter>
-        </service>
-
         <!-- Optional: steering-wheel keys for the dashboard map zoom (docs/BYD_NAVIGATION.md). -->
         <service
             android:name="com.shilapi.xcertplay.WheelKeyService"

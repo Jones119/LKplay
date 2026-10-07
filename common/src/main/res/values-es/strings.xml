@@ -15,7 +15,6 @@
     <string name="wifi_direct_channel_description">Auto elige un canal por ti. Los canales manuales dependen de lo que admita tu coche. Los cambios se aplican en la próxima conexión Wi-Fi Direct.</string>
     <string name="built_in_car_hotspot">Punto de acceso integrado del coche</string>
     <string name="hotspot_hint_manual">Punto de acceso integrado · Mantén activos el punto de acceso, el Bluetooth y el Wi‑Fi del iPhone.</string>
-    <string name="hotspot_hint_local">Abre la configuración de conexión para guardar los datos del punto de acceso integrado.</string>
     <string name="hotspot_hint_p2p">Wi-Fi Direct · Mantén activos el interruptor Wi‑Fi del coche, el Bluetooth y el Wi‑Fi del iPhone.</string>
     <string name="cluster_size_standard">Estándar · máxima nitidez</string>
     <string name="cluster_size_larger">Más grande · predeterminado</string>
@@ -85,7 +84,7 @@
     <string name="audio_stream_unavailable">El tipo de flujo %1$d no está disponible aquí (estado=%2$s)</string>
     <string name="resolution_handshake_prefix">Resolución del enlace:\u0020</string>
     <string name="safe_area_full_screen_at">Zona segura: pantalla completa en\u0020</string>
-    <string name="settings_android9_compat">Los siguientes ajustes no están disponibles y están ocultos en Android 9 (API 28):\n• Wi-Fi P2P (5 GHz) — se usa LocalOnlyHotspot en su lugar.\n• Decodificador por software HEVC — se usa la decodificación por hardware en su lugar.</string>
+    <string name="settings_android9_compat">Los siguientes ajustes no están disponibles y están ocultos en Android 9 (API 28):\n• Wi-Fi P2P (5 GHz) — se usa el punto de acceso integrado del coche en su lugar.\n• Decodificador por software HEVC — se usa la decodificación por hardware en su lugar.</string>
     <string name="settings_mfi_address_hint">La dirección debe empezar por http:// o https://. El token es opcional y se envía como Authorization bearer token.</string>
     <string name="language_section_title">Idioma</string>
     <string name="language_app_language">Idioma de la aplicación</string>
@@ -224,9 +223,6 @@
     <string name="hotspot_ssid_is_required">Se requiere el SSID del punto de acceso</string>
     <string name="hotspot_ssid_must_be_at_most_32_utf_8_bytes">El SSID del punto de acceso debe tener como máximo 32 bytes UTF-8</string>
     <string name="hotspot_status">Estado del punto de acceso</string>
-    <string name="i2c_device">Dispositivo I2C</string>
-    <string name="i2c_device_path_contains_u_0000">La ruta del dispositivo I2C contiene U+0000</string>
-    <string name="i2c_device_path_is_required">Se requiere la ruta del dispositivo I2C</string>
     <string name="identity_appearance">Identidad y apariencia</string>
     <string name="image_is_not_ready">La imagen no está lista</string>
     <string name="in_carplay_swipe_down_with_three_fingers_to_open_diplay_se">En CarPlay, desliza hacia abajo con tres dedos para abrir los ajustes de DiPlay.</string>
@@ -236,7 +232,6 @@
     <string name="keep_your_iphone_nearby_with_bluetooth_and_wi_fi_on_allow">Mantén tu iPhone cerca con el Bluetooth y el Wi‑Fi activados.\nPermite CarPlay si tu iPhone lo pide.</string>
     <string name="later">Más tarde</string>
     <string name="left_hand_drive">Volante a la izquierda</string>
-    <string name="linux_device_path_for_example_dev_i2c_1">Ruta del dispositivo Linux, por ejemplo /dev/i2c-1.</string>
     <string name="loading_image">Cargando imagen</string>
     <string name="local_offline">Local sin conexión</string>
     <string name="location">Ubicación</string>
@@ -370,7 +365,6 @@
     <string name="usage_access_enabled">Acceso al uso: activado</string>
     <string name="usage_access_lets_diplay_follow_the_instrument_theme_and_m">El acceso al uso permite que DiPlay siga el tema del cuadro y la tarjeta del mapa. Solo se procesan localmente los eventos de actividad del cuadro BYD. Este coche no ofrece una página de configuración de permisos funcional.</string>
     <string name="usage_access_setup_needed_for_automatic_mode">Acceso al uso: se necesita configuración para el modo automático</string>
-    <string name="usb_ch341">USB/CH341</string>
     <string name="use_a_usb_data_cable_and_the_car_s_usb_data_port_unlock_yo">Usa un cable de datos USB y el puerto de datos USB del coche. Desbloquea tu iPhone y permite CarPlay. No hace falta configurar el punto de acceso.</string>
     <string name="use_a_usb_data_cable_and_unlock_your_iphone_allow_trust_an">Usa un cable de datos USB y desbloquea tu iPhone.\nPermite «Confiar» y CarPlay si tu iPhone lo pide.</string>
     <string name="use_hevc_leave_off_for_the_widest_head_unit_compatibility">Usa HEVC. Desactívalo para la máxima compatibilidad con unidades principales.</string>
@@ -515,8 +509,6 @@
     <string name="center_map_usage_allowed">Acceso a datos de uso: permitido, la tarjeta solo aparece en la pantalla de inicio</string>
     <string name="center_map_usage_missing">Acceso a datos de uso: no permitido, así que la tarjeta aparece sobre todas las aplicaciones. Por ADB: adb shell appops set %1$s GET_USAGE_STATS allow</string>
     <string name="center_map_no_permission_screen">Esta unidad principal no tiene pantalla de ajustes para este permiso. Permítelo por ADB.</string>
-    <string name="launcher_map_sharing">Compartir el mapa en vivo con otros launchers</string>
-    <string name="launcher_map_sharing_description">Los launchers compatibles con DiPlay pueden mostrar el mapa en vivo del panel de instrumentos en su propia pantalla de inicio. Desactivado por defecto, porque entonces cualquier aplicación de la unidad principal podría pedir el mapa. Consulta docs/LAUNCHER_INTEGRATION.md.</string>
     <string name="turn_card_overlay_size">Tamaño de la tarjeta personalizada</string>
     <string name="turn_card_overlay_opacity">Opacidad de la tarjeta personalizada</string>
     <string name="turn_card_overlay_opacity_option">%1$d %%</string>

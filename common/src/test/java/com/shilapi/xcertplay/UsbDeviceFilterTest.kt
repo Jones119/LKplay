@@ -29,15 +29,9 @@ class UsbDeviceFilterTest {
     }
 
     @Test
-    fun ch341StillMatchesOnlyItsConfiguredProduct() {
-        assertTrue(matchesAttachFilter(0x1a86, 0x5512))
-        assertFalse(matchesAttachFilter(0x1a86, 0x5513))
-    }
-
-    @Test
     fun unrelatedUsbVendorsDoNotMatch() {
         assertFalse(matchesAttachFilter(0x1234, 0x12a8))
-        assertFalse(matchesAttachFilter(0x1234, 0x5512))
+        assertFalse(matchesAttachFilter(0x1234, 0x0001))
     }
 
     private fun matchesAttachFilter(vendorId: Int, productId: Int): Boolean {

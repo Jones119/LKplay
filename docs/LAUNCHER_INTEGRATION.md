@@ -1,5 +1,10 @@
 # CarPlay on your launcher's home screen
 
+> **Removed in the CS11 build:** the embedded-map surface (`MapEmbedService`, action
+> `com.shihab.diplay.action.EMBED_MAP`) and its "share the live map" setting were deleted, because
+> Android 4.4 cannot host a `SurfaceControlViewHost` (API 30). The sections below are kept as the
+> historical contract for builds that still ship that surface.
+
 DiPlay can put CarPlay information on a launcher's home screen in three ways:
 
 | | What it shows | Works with | Needs |

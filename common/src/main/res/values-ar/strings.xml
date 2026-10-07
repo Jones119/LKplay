@@ -15,7 +15,6 @@
     <string name="wifi_direct_channel_description">يختار الوضع التلقائي القناة نيابةً عنك. تعتمد القنوات اليدوية على ما تدعمه سيارتك. تُطبَّق التغييرات عند اتصال Wi-Fi Direct التالي.</string>
     <string name="built_in_car_hotspot">نقطة اتصال السيارة المدمجة</string>
     <string name="hotspot_hint_manual">نقطة اتصال السيارة المدمجة · أبقِ نقطة الاتصال والبلوتوث وواي فاي iPhone مُفعّلة.</string>
-    <string name="hotspot_hint_local">افتح إعداد الاتصال لحفظ بيانات نقطة اتصال السيارة المدمجة.</string>
     <string name="hotspot_hint_p2p">Wi-Fi Direct · أبقِ مفتاح واي فاي السيارة والبلوتوث وواي فاي iPhone مُفعّلة.</string>
     <string name="cluster_size_standard">قياسي · أوضح صورة</string>
     <string name="cluster_size_larger">أكبر · الافتراضي</string>
@@ -85,7 +84,7 @@
     <string name="audio_stream_unavailable">نوع البث %1$d غير متاح هنا (الحالة=%2$s)</string>
     <string name="resolution_handshake_prefix">دقة المصافحة:\u0020</string>
     <string name="safe_area_full_screen_at">المنطقة الآمنة: ملء الشاشة بحجم\u0020</string>
-    <string name="settings_android9_compat">الإعدادات التالية غير متاحة ومخفية على Android 9 (API 28):\n• Wi-Fi P2P (5 GHz) — يُستخدم LocalOnlyHotspot بدلاً منه.\n• مفكّك HEVC البرمجي — يُستخدم فك الترميز العتادي بدلاً منه.</string>
+    <string name="settings_android9_compat">الإعدادات التالية غير متاحة ومخفية على Android 9 (API 28):\n• Wi-Fi P2P (5 GHz) — تُستخدم نقطة اتصال السيارة المدمجة بدلاً منه.\n• مفكّك HEVC البرمجي — يُستخدم فك الترميز العتادي بدلاً منه.</string>
     <string name="settings_mfi_address_hint">يجب أن يبدأ العنوان بـ http:// أو https://. الرمز الاختياري ويُرسل كـ Authorization bearer token.</string>
     <string name="language_section_title">اللغة</string>
     <string name="language_app_language">لغة التطبيق</string>
@@ -224,9 +223,6 @@
     <string name="hotspot_ssid_is_required">‏SSID نقطة الاتصال مطلوب</string>
     <string name="hotspot_ssid_must_be_at_most_32_utf_8_bytes">يجب ألا يتجاوز SSID لنقطة الاتصال 32 بايت UTF-8</string>
     <string name="hotspot_status">حالة نقطة الاتصال</string>
-    <string name="i2c_device">جهاز I2C</string>
-    <string name="i2c_device_path_contains_u_0000">مسار جهاز I2C يحتوي على U+0000</string>
-    <string name="i2c_device_path_is_required">مسار جهاز I2C مطلوب</string>
     <string name="identity_appearance">الهوية والمظهر</string>
     <string name="image_is_not_ready">الصورة غير جاهزة</string>
     <string name="in_carplay_swipe_down_with_three_fingers_to_open_diplay_se">في CarPlay، اسحب لأسفل بثلاثة أصابع لفتح إعدادات DiPlay.</string>
@@ -236,7 +232,6 @@
     <string name="keep_your_iphone_nearby_with_bluetooth_and_wi_fi_on_allow">أبقِ iPhone قريبًا مع تشغيل البلوتوث وواي فاي.\nاسمح بـ CarPlay إن طلب iPhone ذلك.</string>
     <string name="later">لاحقاً</string>
     <string name="left_hand_drive">قيادة يسارى</string>
-    <string name="linux_device_path_for_example_dev_i2c_1">مسار جهاز Linux، على سبيل المثال /dev/i2c-1.</string>
     <string name="loading_image">جارٍ تحميل الصورة</string>
     <string name="local_offline">محلي دون اتصال</string>
     <string name="location">الموقع</string>
@@ -370,7 +365,6 @@
     <string name="usage_access_enabled">الوصول للاستخدام: مُفعّل</string>
     <string name="usage_access_lets_diplay_follow_the_instrument_theme_and_m">يتيح إذن الوصول للاستخدام لـ DiPlay اتباع سمة لوحة العدادات وبطاقة الخريطة. تتم معالجة أحداث نشاط لوحة BYD محلياً فقط. لا توفر هذه السيارة صفحة إعدادات أذونات عاملة.</string>
     <string name="usage_access_setup_needed_for_automatic_mode">الوصول للاستخدام: الإعداد مطلوب للوضع التلقائي</string>
-    <string name="usb_ch341">USB/CH341</string>
     <string name="use_a_usb_data_cable_and_the_car_s_usb_data_port_unlock_yo">استخدم كابل بيانات USB ومنفذ بيانات USB في السيارة. افتح قفل iPhone واسمح بـ CarPlay. لا حاجة لأي إعداد نقطة اتصال.</string>
     <string name="use_a_usb_data_cable_and_unlock_your_iphone_allow_trust_an">استخدم كابل بيانات USB وافتح قفل iPhone.\nاسمح بالثقة وCarPlay إن طلب iPhone ذلك.</string>
     <string name="use_hevc_leave_off_for_the_widest_head_unit_compatibility">استخدم HEVC. أطفئه لأقصى توافقية مع وحدات القيادة.</string>
@@ -515,8 +509,6 @@
     <string name="center_map_usage_allowed">الوصول إلى بيانات الاستخدام: مسموح، تظهر البطاقة على الشاشة الرئيسية فقط</string>
     <string name="center_map_usage_missing">الوصول إلى بيانات الاستخدام: غير مسموح، لذلك تظهر البطاقة فوق كل التطبيقات. عبر ADB: adb shell appops set %1$s GET_USAGE_STATS allow</string>
     <string name="center_map_no_permission_screen">لا توجد في وحدة القيادة شاشة إعدادات لهذا الإذن. اسمح به عبر ADB.</string>
-    <string name="launcher_map_sharing">مشاركة الخريطة المباشرة مع المشغّلات الأخرى</string>
-    <string name="launcher_map_sharing_description">يمكن للمشغّلات التي تدعم DiPlay عرض خريطة لوحة العدادات المباشرة داخل شاشتها الرئيسية. معطّل افتراضيًا، لأن أي تطبيق على وحدة القيادة يمكنه عندها طلب الخريطة. راجع docs/LAUNCHER_INTEGRATION.md.</string>
     <string name="turn_card_overlay_size">حجم بطاقة الانعطاف المخصصة</string>
     <string name="turn_card_overlay_opacity">شفافية بطاقة الانعطاف المخصصة</string>
     <string name="turn_card_overlay_opacity_option">%1$d %%</string>

@@ -12,15 +12,13 @@ enum class CarPlayTransport {
 }
 
 enum class MfiTarget {
+    /** Software identity: the MFi certificate and key are read from the app's private storage. */
     LOCAL,
-    USB_CH341,
-    I2C,
     REMOTE,
 }
 
 enum class WirelessHotspotMode {
     WIFI_P2P,
-    LOCAL_ONLY_HOTSPOT,
     MANUAL,
     EXISTING_WIFI,
 }
@@ -39,15 +37,12 @@ enum class ManualHotspotSecurity {
 }
 
 /**
- * Deployment-owned constants for one head unit. There are deliberately no built-in Apple or
- * CH341 product IDs: the physical devices attached to the target must be identified first.
+ * Deployment-owned constants for one head unit. There are deliberately no built-in Apple product
+ * IDs: the physical devices attached to the target must be identified first.
  */
 class CarPlayRuntimeConfig(
     val iphoneDevices: List<UsbDeviceId> = emptyList(),
-    val mfiTarget: MfiTarget = MfiTarget.USB_CH341,
-    val ch341Devices: List<UsbDeviceId> = emptyList(),
-    val ch341MfiResetGpio: Int? = null,
-    val linuxI2cPath: String? = null,
+    val mfiTarget: MfiTarget = MfiTarget.LOCAL,
     val remoteMfiServer: String? = null,
     val remoteMfiToken: String? = null,
     val hostMac: ByteArray = DEFAULT_HOST_MAC,
@@ -80,17 +75,8 @@ class CarPlayRuntimeConfig(
         }
         require(label.isNotBlank()) { "label must not be blank" }
         require(hostName.isNotBlank()) { "hostName must not be blank" }
-        require(mfiTarget != MfiTarget.USB_CH341 || ch341Devices.isNotEmpty()) {
-            "CH341 devices must be configured for the USB/CH341 MFi target"
-        }
-        require(mfiTarget != MfiTarget.I2C || !linuxI2cPath.isNullOrBlank()) {
-            "A Linux I2C path must be configured for the I2C MFi target"
-        }
         require(mfiTarget != MfiTarget.REMOTE || !remoteMfiServer.isNullOrBlank()) {
             "A server address must be configured for the remote MFi target"
-        }
-        require(ch341MfiResetGpio == null || ch341MfiResetGpio in 0..5) {
-            "CH341 MFi reset GPIO must be D0..D5"
         }
         require(remoteMfiServer?.contains('\u0000') != true) {
             "Remote MFi server must not contain U+0000"

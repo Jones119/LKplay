@@ -414,7 +414,6 @@ class DiPlayActivity : ComponentActivity() {
         val connectionHint = when (AirPlayPersistence.loadWirelessHotspotMode(this)) {
             WirelessHotspotMode.EXISTING_WIFI -> getString(R.string.existing_wifi_hint)
             WirelessHotspotMode.MANUAL -> getString(R.string.hotspot_hint_manual)
-            WirelessHotspotMode.LOCAL_ONLY_HOTSPOT -> getString(R.string.hotspot_hint_local)
             else -> getString(R.string.hotspot_hint_p2p)
         }
         card.addView(label(connectionHint, 15, MUTED).apply { setPadding(0, dp(14), 0, 0) })
@@ -726,10 +725,6 @@ class DiPlayActivity : ComponentActivity() {
                         AirPlayPersistence.loadCenterMapAutoHide(this)) {
                         AirPlayPersistence.saveCenterMapAutoHide(this, it)
                     }
-                }
-                toggle(card, getString(R.string.launcher_map_sharing), getString(R.string.launcher_map_sharing_description),
-                    AirPlayPersistence.loadLauncherMapSharing(this)) {
-                    AirPlayPersistence.saveLauncherMapSharing(this, it)
                 }
                 if (AirPlayPersistence.loadCenterMapOverlay(this)) {
                     val overlay = CenterMapOverlay.permitted(this)

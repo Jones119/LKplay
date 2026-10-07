@@ -52,7 +52,10 @@ class CarPlayHostSettingsTest {
         setField("activeDisplaySize", size)
         CarPlayBackgroundSession::class.java.getDeclaredField("owner").apply { isAccessible = true }
             .set(CarPlayBackgroundSession, activity)
-        AirPlayPersistence.saveMfiTarget(activity, MfiTarget.USB_CH341)
+        // Source-only tests have no provisioned local identity, so the persisted choice is the
+        // remote service that validation accepts without local assets.
+        AirPlayPersistence.saveMfiTarget(activity, MfiTarget.REMOTE)
+        AirPlayPersistence.saveRemoteMfiServer(activity, REMOTE_MFI_SERVER)
         AirPlayPersistence.saveWirelessHotspotMode(activity, WirelessHotspotMode.WIFI_P2P)
         invoke("loadPersistedSettings")
         invoke("buildContentView")
@@ -197,7 +200,7 @@ class CarPlayHostSettingsTest {
         assertEquals(MfiTarget.LOCAL, field("mfiTarget"))
         invoke("cancelSettingsEdits")
         assertEquals(WirelessHotspotMode.WIFI_P2P, field("wirelessHotspotMode"))
-        assertEquals(MfiTarget.USB_CH341, field("mfiTarget"))
+        assertEquals(MfiTarget.REMOTE, field("mfiTarget"))
     }
 
     @Test fun savingPersistsSettingsAndRestartsOnce() {
@@ -272,56 +275,48 @@ class CarPlayHostSettingsTest {
         assertEquals(0, field("restartGeneration"))
     }
 
-    @Test fun authenticationChoicesOnlyExposeLocalAndCh341() {
+    @Test fun authenticationChoicesOnlyExposeLocalAndRemote() {
         invoke("openSettingsMenu")
         val options = views(menu()).filterIsInstance<RadioButton>().filter { it.tag is MfiTarget }.toList()
-        assertEquals(listOf(MfiTarget.LOCAL, MfiTarget.USB_CH341), options.map { it.tag })
+        assertEquals(listOf(MfiTarget.LOCAL, MfiTarget.REMOTE), options.map { it.tag })
         options.first().performClick()
         invoke("cancelSettingsEdits")
-        assertEquals(MfiTarget.USB_CH341, AirPlayPersistence.loadMfiTarget(activity))
-        assertEquals(MfiTarget.USB_CH341, field("mfiTarget"))
+        assertEquals(MfiTarget.REMOTE, AirPlayPersistence.loadMfiTarget(activity))
+        assertEquals(MfiTarget.REMOTE, field("mfiTarget"))
     }
 
-    @Test fun selectingLocalWithoutIdentityKeepsTheMenuAndSavedUsbChoice() {
+    @Test fun selectingLocalWithoutIdentityKeepsTheMenuAndSavedRemoteChoice() {
         attachController()
         invoke("openSettingsMenu")
         views(menu()).filterIsInstance<RadioButton>().first { it.tag == MfiTarget.LOCAL }.performClick()
         invoke("saveSettingsAndReconnect")
         assertTrue(field("menuOpen") as Boolean)
-        assertEquals(MfiTarget.USB_CH341, AirPlayPersistence.loadMfiTarget(activity))
+        assertEquals(MfiTarget.REMOTE, AirPlayPersistence.loadMfiTarget(activity))
         assertEquals(View.VISIBLE, (field("mfiErrorView") as View).visibility)
         assertEquals(0, field("restartGeneration"))
     }
 
-    @Test fun switchingToUsbPersistsAndPassesUsbToTheRuntime() {
+    @Test fun switchingToRemotePersistsAndPassesItToTheRuntime() {
         AirPlayPersistence.saveMfiTarget(activity, MfiTarget.LOCAL)
         attachController()
         invoke("openSettingsMenu")
-        views(menu()).filterIsInstance<RadioButton>().first { it.tag == MfiTarget.USB_CH341 }.performClick()
+        views(menu()).filterIsInstance<RadioButton>().first { it.tag == MfiTarget.REMOTE }.performClick()
         invoke("saveSettingsAndReconnect")
         assertFalse(field("menuOpen") as Boolean)
-        assertEquals(MfiTarget.USB_CH341, AirPlayPersistence.loadMfiTarget(activity))
+        assertEquals(MfiTarget.REMOTE, AirPlayPersistence.loadMfiTarget(activity))
         val config = invoke("createRuntimeConfig") as CarPlayRuntimeConfig
-        assertEquals(MfiTarget.USB_CH341, config.mfiTarget)
-        assertEquals(listOf(com.shilapi.xcertplay.transport.UsbDeviceId(0x1a86, 0x5512)), config.ch341Devices)
+        assertEquals(MfiTarget.REMOTE, config.mfiTarget)
+        assertEquals(REMOTE_MFI_SERVER, config.remoteMfiServer)
         assertEquals(1, field("restartGeneration"))
     }
 
-    @Test fun localRuntimeDoesNotRequestCh341Devices() {
-        AirPlayPersistence.saveMfiTarget(activity, MfiTarget.LOCAL)
-        invoke("loadPersistedSettings")
-        val config = invoke("createRuntimeConfig") as CarPlayRuntimeConfig
-        assertEquals(MfiTarget.LOCAL, config.mfiTarget)
-        assertTrue(config.ch341Devices.isEmpty())
-    }
-
-    @Test fun ch341AttachmentKeepsTheWirelessSession() {
+    @Test fun unrelatedUsbAttachmentKeepsTheWirelessSession() {
         val controller = attachController()
         AirPlayPersistence.saveWirelessEnabled(activity, true)
         invoke("loadPersistedSettings")
         val device = mock(UsbDevice::class.java)
-        `when`(device.vendorId).thenReturn(0x1a86)
-        `when`(device.productId).thenReturn(0x5512)
+        `when`(device.vendorId).thenReturn(0x1234)
+        `when`(device.productId).thenReturn(0x0001)
         val intent = Intent(UsbManager.ACTION_USB_DEVICE_ATTACHED).putExtra(UsbManager.EXTRA_DEVICE, device)
         activity.javaClass.getDeclaredMethod("onNewIntent", Intent::class.java)
             .apply { isAccessible = true }.invoke(activity, intent)
@@ -500,5 +495,10 @@ class CarPlayHostSettingsTest {
         .apply { isAccessible = true }.get(activity)
     private fun setField(name: String, value: Any?) {
         activity.javaClass.getDeclaredField(name).apply { isAccessible = true }.set(activity, value)
+    }
+
+    private companion object {
+        /** A remote MFi service address the settings screen accepts without local assets. */
+        const val REMOTE_MFI_SERVER = "https://mfi.example.test"
     }
 }

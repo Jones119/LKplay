@@ -37,11 +37,11 @@ class SettingsWidgetsTest {
         val row = ConnectionSettingsSection.createMfiTargetChoice(context, MfiTarget.LOCAL,
             onSelected = saved::add)
         assertTrue(saved.isEmpty())
-        val target = views(row.container).filterIsInstance<RadioButton>().first { it.tag == MfiTarget.USB_CH341 }
+        val target = views(row.container).filterIsInstance<RadioButton>().first { it.tag == MfiTarget.REMOTE }
         row.radioGroup.check(target.id)
         row.radioGroup.check(target.id)
         row.radioGroup.clearCheck()
-        assertEquals(listOf(MfiTarget.USB_CH341), saved)
+        assertEquals(listOf(MfiTarget.REMOTE), saved)
     }
 
     @Test fun resolutionDisplayAndSliderStayWithinTheSameRangeWithoutSavingDuringConstruction() {

@@ -17,7 +17,7 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
-    // CS11 移植：暂时关闭原生构建（I2C / hotspot JNI 模块；后续如需再用 NDK<=r26 接入）
+    // CS11 移植：暂时关闭原生构建（hotspot JNI 模块；后续如需再用 NDK<=r26 接入）
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
