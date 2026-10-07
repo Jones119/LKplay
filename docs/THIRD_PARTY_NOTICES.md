@@ -36,6 +36,17 @@ The public preview APK includes an accessory certificate/key pair recovered from
 
 The static site layout, CSS and generator adapt DiAuto (AGPL-3.0). The AGPL license text is included with the source.
 
+## Opus (CS11 build)
+
+`shared/src/main/jniLibs/armeabi-v7a/libdiplay_opus.so` bundles libopus 1.x together with a thin JNI
+binding for `com.shilapi.xcertplay.media.LegacyNativeOpus`. It is required because this head unit ships
+no Opus codec while wireless CarPlay encodes the microphone uplink and the call/Siri downlink in Opus.
+Opus is BSD-3-Clause (Copyright 2001-2023 Xiph.Org, Skype Limited, Octasic, Jean-Marc Valin,
+Timothy B. Terriberry, CSIRO, Gregory Maxwell, Mark Borgerding, Erik de Castro Lopo, Mozilla, Amazon);
+the license text is in `docs/Opus-LICENSE.txt`. The binary was taken from the owner's analysis copy of
+EasyPlay (a DiPlay fork for this same head unit that shares this package name), not from a redistributed
+store build.
+
 ## Historic: HUD maneuver icons (removed in the CS11 build)
 
 The maneuver PNGs previously shipped under `shared/src/main/assets/byd-hud-icons`, imported from BYDMate
