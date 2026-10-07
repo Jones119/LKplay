@@ -473,9 +473,19 @@ object AirPlayPersistence {
             .putString(KEY_CARPLAY_NIGHT_MODE, mode.key).apply()
     }
 
+    /**
+     * CS11 (API19, i.MX6Q) sustains about 30 fps of H.264 decode + present. Asking the iPhone for 60
+     * made it send up to ~53 fps at ~9.5 Mbps; the CS11 pipeline fell behind, every frame older than
+     * 250 ms was dropped instead of presented (shown 27-33 fps while rx reached 53), and the >1 s
+     * backlog recreated the decoder roughly every 5 s. A requested 30 fps keeps rx == shown with zero
+     * recoveries and roughly half the bitrate. Modern devices keep the 60 fps default.
+     */
+    private fun defaultFps(): Int =
+        if (Build.VERSION.SDK_INT < 21) 30 else AirPlayDisplaySettings.DEFAULT_FPS
+
     fun loadFps(context: Context): Int = AirPlayDisplaySettings.sanitizeFps(
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getInt(KEY_FPS, AirPlayDisplaySettings.DEFAULT_FPS),
+            .getInt(KEY_FPS, defaultFps()),
     )
 
     fun loadMediaBufferMillis(context: Context): Int = com.shilapi.xcertplay.media.MediaAudioBuffer.sanitize(
