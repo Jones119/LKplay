@@ -72,6 +72,7 @@ import com.shilapi.xcertplay.airplay.SafeAreaRect
 import com.shilapi.xcertplay.host.R
 import com.shilapi.xcertplay.location.AndroidCarPlayLocationProvider
 import com.shilapi.xcertplay.media.AndroidMediaSink
+import com.shilapi.xcertplay.media.AudioCodecCapabilities
 import com.shilapi.xcertplay.media.CarPlayTouchMapper
 import com.shilapi.xcertplay.media.CarPlayVideoLayout
 import com.shilapi.xcertplay.network.CarPlayVpnService
@@ -3117,6 +3118,7 @@ class CarPlayHostActivity : ComponentActivity() {
             cluster = clusterDisplayConfig(),
             rightHandDrive = rightHandDrive,
             hevc = hevcEnabled,
+            opus = AudioCodecCapabilities.opusCodecsAvailable(),
             microphone = microphoneAvailable,
             manufacturer = normalizedManufacturer(),
             model = normalizedModel(),

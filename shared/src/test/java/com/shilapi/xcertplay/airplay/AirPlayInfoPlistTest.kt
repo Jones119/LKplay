@@ -179,6 +179,35 @@ class AirPlayInfoPlistTest {
     }
 
     @Test
+    fun aHostWithoutOpusCodecsAsksForPcmOnTheCallAndMicrophoneStreams() {
+        val base = AirPlayConfig(
+            deviceName = "test",
+            deviceId = "02:00:00:00:00:02",
+            btMac = "02:00:00:00:00:02",
+            sourceVersion = "366.0",
+            main = AirPlayDisplayConfig(widthPixels = 1280, heightPixels = 720),
+        )
+
+        fun entry(info: Map<String, Any?>, audioType: String): Map<*, *> =
+            (info["audioFormats"] as List<*>)
+                .map { it as Map<*, *> }
+                .single { it["type"] == 100 && it["audioType"] == audioType }
+
+        // 0x70000000 is the Opus bit; the CS11 has neither an Opus encoder nor a decoder, so
+        // advertising it made iOS pick a codec the unit cannot run (dead call audio both ways).
+        val pcmMono48 = 0x154 or 0x4000
+        val pcmStereo48 = 0x3fc or 0xc000
+        val withOpus = AirPlayInfoPlist.build(base.copy(microphone = true))
+        val withoutOpus = AirPlayInfoPlist.build(base.copy(microphone = true, opus = false))
+
+        assertEquals(0x70004154, entry(withOpus, "telephony")["audioInputFormats"])
+        assertEquals(pcmMono48, entry(withoutOpus, "telephony")["audioInputFormats"])
+        assertEquals(pcmMono48, entry(withoutOpus, "speechRecognition")["audioInputFormats"])
+        assertEquals(pcmMono48, entry(withoutOpus, "telephony")["audioOutputFormats"])
+        assertEquals(pcmStereo48, entry(withoutOpus, "default")["audioOutputFormats"])
+    }
+
+    @Test
     fun microphoneInputsAreAdvertisedOnlyWhenEnabled() {
         val base = AirPlayConfig(
             deviceName = "test",

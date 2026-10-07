@@ -63,6 +63,13 @@ data class AirPlayConfig(
     val port: Int = 7000,
     val entertainmentSampleRate: Int = 48000,
     val hevc: Boolean = false,
+    /**
+     * Whether this host really has Opus codecs. CarPlay chooses Opus for the telephony and
+     * speechRecognition streams whenever it is advertised, so a ROM without them (Android 4.4 has
+     * neither an Opus encoder nor a decoder) must advertise PCM only — see
+     * [com.shilapi.xcertplay.media.AudioCodecCapabilities].
+     */
+    val opus: Boolean = true,
     val disableAudioOutput: Boolean = false,
     val microphone: Boolean = false,
     val manufacturer: String = "xcertplay",
