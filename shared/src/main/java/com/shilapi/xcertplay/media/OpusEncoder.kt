@@ -38,7 +38,9 @@ internal class OpusEncoder(bitrate: Int) : Closeable {
     // The CS11 has no Opus encoder in MediaCodec, and wireless CarPlay still requires Opus on the
     // microphone, so the bundled libopus encodes the uplink whenever the platform codec is missing.
     private var native: LegacyNativeOpus.Encoder? =
-        if (codec == null) LegacyNativeOpus.Encoder(bitrate).takeIf { it.isAvailable } else null
+        if ((codec == null || softwareOpusForced()) && LegacyNativeOpus.available) {
+            LegacyNativeOpus.Encoder(bitrate).takeIf { it.isAvailable }
+        } else null
     private val bufferInfo = MediaCodec.BufferInfo()
     private var presentationTimeUs = 0L
     private var closed = false

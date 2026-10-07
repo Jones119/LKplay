@@ -960,11 +960,7 @@ private class AudioRenderer(
      * exercised (and heard) without the CS11's missing codec. Read through reflection because
      * android.os.SystemProperties is not part of the public SDK.
      */
-    private fun forcedSoftwareOpus(): Boolean = runCatching {
-        val get = Class.forName("android.os.SystemProperties")
-            .getMethod("get", String::class.java, String::class.java)
-        (get.invoke(null, "debug.diplay.software_opus", "0") as? String) == "1"
-    }.getOrDefault(false)
+    private fun forcedSoftwareOpus(): Boolean = softwareOpusForced()
 
     private fun configureCodec(mime: String) {
         diagnosticStage = "decoder-format"

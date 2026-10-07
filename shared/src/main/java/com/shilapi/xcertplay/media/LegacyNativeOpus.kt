@@ -116,3 +116,14 @@ internal object LegacyNativeOpus {
     private const val MAX_PACKET_BYTES = 65_535
     private const val DEFAULT_COMPLEXITY = 5
 }
+
+/**
+ * `adb shell setprop debug.diplay.software_opus 1` forces both directions onto libopus, so the
+ * bundled codec can be exercised on a device whose MediaCodec does have Opus (the tablet bench).
+ * Read reflectively because android.os.SystemProperties is not part of the public SDK.
+ */
+internal fun softwareOpusForced(): Boolean = runCatching {
+    val get = Class.forName("android.os.SystemProperties")
+        .getMethod("get", String::class.java, String::class.java)
+    (get.invoke(null, "debug.diplay.software_opus", "0") as? String) == "1"
+}.getOrDefault(false)
