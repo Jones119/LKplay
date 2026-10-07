@@ -828,6 +828,9 @@ private class AudioRenderer(
     @Volatile private var running = true
     @Volatile private var started = false
     private var codec: MediaCodec? = null
+    // This ROM has no Opus decoder in MediaCodec, and CarPlay sends Opus on the telephony and
+    // speechRecognition streams; libopus decodes those packets instead of dropping them.
+    private var softwareOpus: LegacyNativeOpus.Decoder? = null
     private var track: AudioTrack? = null
     private var pcm = ByteArray(64 * 1024)
     private var playbackStarted = false
@@ -910,6 +913,12 @@ private class AudioRenderer(
                 AudioCodecKind.AAC_LC -> configureCodec(MediaFormat.MIMETYPE_AUDIO_AAC)
                 AudioCodecKind.OPUS -> configureCodec(MediaFormat.MIMETYPE_AUDIO_OPUS)
                 AudioCodecKind.LPCM -> Unit
+            }
+            if (codec == null && format.codec == AudioCodecKind.OPUS) {
+                softwareOpus = LegacyNativeOpus.Decoder().takeIf { it.isAvailable }
+                runCatching {
+                    report("Audio: software Opus decoder active=${softwareOpus != null}")
+                }
             }
             createTrack()
             diagnosticStage = "focus"
@@ -1219,6 +1228,17 @@ private class AudioRenderer(
         (sample.toLong() and 0xffff_ffffL) * 1_000_000L / format.sampleRate
 
     private fun feedCodec(payload: ByteArray, presentationTimeUs: Long) {
+        softwareOpus?.let { decoder ->
+            diagnosticStage = "software-opus"
+            val decoded = runCatching { decoder.decode(payload, 0, payload.size) }.getOrNull()
+            if (decoded != null && decoded.isNotEmpty()) {
+                outputBuffers++
+                writePcm(decoded)
+            } else {
+                decoderUnavailablePackets++
+            }
+            return
+        }
         val codec = codec ?: run { decoderUnavailablePackets++; return }
         diagnosticStage = "decoder-input"
         val index = codec.dequeueInputBuffer(INPUT_TIMEOUT_US)
@@ -1469,6 +1489,8 @@ private class AudioRenderer(
     @Synchronized
     private fun release() {
         abandonAudioFocus()
+        softwareOpus?.close()
+        softwareOpus = null
         val codec = codec
         this.codec = null
         if (codec != null) {
