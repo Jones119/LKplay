@@ -458,8 +458,10 @@ class CarPlayController(
         if (activeSession == null) return false
         // Touch reports are absolute snapshots: while the encrypted event channel stalls, replaying
         // every queued position makes the pointer trail the finger, so only the newest move is kept
-        // (finger down/up transitions are always delivered in order).
-        if (!touchGate.enqueue(contacts)) return true
+        // (finger down/up transitions are always delivered in order). The accepted time travels with
+        // the state so the latency report includes the wait for the writer.
+        val state = com.shilapi.xcertplay.airplay.TouchState(contacts)
+        if (!touchGate.enqueue(state)) return true
         return try {
             touchExecutor.execute(::drainTouch)
             true
@@ -470,13 +472,13 @@ class CarPlayController(
 
     private fun drainTouch() {
         while (true) {
-            val contacts = touchGate.next() ?: return
+            val state = touchGate.next() ?: return
             val session = activeSession
             if (session == null) {
                 touchGate.reset()
                 return
             }
-            session.sendTouch(contacts)
+            session.sendTouch(state.contacts, state.enqueuedNs)
         }
     }
 

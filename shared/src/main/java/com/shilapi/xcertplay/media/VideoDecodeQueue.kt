@@ -47,6 +47,9 @@ internal class VideoDecodeQueue(
         jobs.removeIf { it is VideoJob.Frame || it is VideoJob.Resync }
     }
 
+    /** Frames still waiting for the decoder thread; reported so backlog growth is visible. */
+    @Synchronized fun pendingFrames(): Int = jobs.count { it is VideoJob.Frame }
+
     fun poll(timeoutMillis: Long): VideoJob? = jobs.poll(timeoutMillis, TimeUnit.MILLISECONDS)
 }
 

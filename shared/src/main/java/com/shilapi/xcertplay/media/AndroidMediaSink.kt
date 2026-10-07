@@ -489,6 +489,7 @@ private class VideoDecoder(
                         null -> Unit
                     }
                     decoder?.let(::drainOutput)
+                    stats.onQueueDepth(queue.pendingFrames())
                     stats.logIfDue()?.let(report)
                     if (referenceChain.needsKeyFrame && lastConfig != null && outputSurface != null) requestKeyFrameIfDue()
                 } catch (error: Exception) {
@@ -726,6 +727,8 @@ private class VideoDecoder(
                     val render = outputSurface != null && ageUs <= RENDER_MAX_AGE_US
                     codec.releaseOutputBuffer(index, render)
                     if (render) stats.onRendered()
+                    // Without a surface nothing can be presented yet; only a refused stale frame counts.
+                    else if (outputSurface != null) stats.onDropped()
                     if (render && !renderedFrameLogged) {
                         renderedFrameLogged = true
                         report("first frame rendered")

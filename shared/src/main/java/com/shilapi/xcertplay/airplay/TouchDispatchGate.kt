@@ -1,6 +1,15 @@
 package com.shilapi.xcertplay.airplay
 
 /**
+ * One accepted finger state and when it was accepted, so the uplink can report how long the state
+ * waited for the writer as part of the finger-to-frame latency.
+ */
+internal data class TouchState(
+    val contacts: List<AirPlayContact>,
+    val enqueuedNs: Long = System.nanoTime(),
+)
+
+/**
  * Keeps the touch uplink finger-following while the encrypted event channel is slow.
  *
  * Every report from [AirPlayHid.touchReport] is an absolute snapshot of the current contact state,
@@ -15,27 +24,29 @@ package com.shilapi.xcertplay.airplay
  * are never dropped or reordered. Coordinates may be skipped; transitions may not.
  */
 internal class TouchDispatchGate {
-    private val pending = ArrayDeque<List<AirPlayContact>>()
+    private val pending = ArrayDeque<TouchState>()
     private var workerActive = false
 
     /**
      * Records the newest contact state. Returns true when the caller must start a worker run, false
      * when an already running worker will pick the state up.
      */
-    @Synchronized fun enqueue(contacts: List<AirPlayContact>): Boolean {
+    @Synchronized fun enqueue(state: TouchState): Boolean {
         val previous = pending.lastOrNull()
-        if (previous != null && shape(previous) == shape(contacts) && shape(contacts).isNotEmpty()) {
+        if (previous != null && shape(previous.contacts) == shape(state.contacts) &&
+            shape(state.contacts).isNotEmpty()
+        ) {
             // The same fingers are still held: only the newest position matters.
             pending.removeLast()
         }
-        pending.addLast(contacts)
+        pending.addLast(state)
         if (workerActive) return false
         workerActive = true
         return true
     }
 
     /** The next state to send, or null once everything queued has been handed out. */
-    @Synchronized fun next(): List<AirPlayContact>? {
+    @Synchronized fun next(): TouchState? {
         pending.removeFirstOrNull()?.let { return it }
         workerActive = false
         return null
