@@ -50,12 +50,7 @@ object AirPlayInfoPlist {
         )
         if (!config.disableAudioOutput) {
             info["audioLatencies"] = audioLatencies()
-            info["audioFormats"] = audioFormats(
-                config.entertainmentSampleRate,
-                config.microphone,
-                config.mainBufferedAudio,
-                config.opus,
-            )
+            info["audioFormats"] = audioFormats(config.entertainmentSampleRate, config.microphone, config.mainBufferedAudio)
         }
         info["extendedFeatures"] = listOf("vocoderInfo", "enhancedRequestCarUI")
         info["displays"] = displays
@@ -127,7 +122,6 @@ object AirPlayInfoPlist {
         entertainmentRate: Int,
         microphone: Boolean,
         mainBuffered: Boolean = false,
-        opusSupported: Boolean = true,
     ): List<Map<String, Any?>> {
         fun format(type: Int, audioType: String, outputFormats: Int, inputFormats: Int? = null): Map<String, Any?> {
             val entry = linkedMapOf<String, Any?>(
@@ -143,10 +137,7 @@ object AirPlayInfoPlist {
         val pcmVoice = 0x3fc
         val pcm = pcmVoice or (if (is48) 0xc000 else 0xc00)
         val pcmMono = 0x154 or (if (is48) 0x4000 else 0x400)
-        // CarPlay picks Opus for telephony/speechRecognition whenever it is advertised. A ROM
-        // without an Opus codec (Android 4.4 has neither encoder nor decoder) must advertise PCM
-        // only, otherwise call audio cannot be decoded and the microphone uplink cannot be encoded.
-        val opus = if (opusSupported) 0x70000000 else 0
+        val opus = 0x70000000
         val aacLc = if (is48) 0x800000 else 0x400000
         val pcmInput = if (microphone) pcmMono else null
         val wirelessInput = if (microphone) pcmMono or opus else null
