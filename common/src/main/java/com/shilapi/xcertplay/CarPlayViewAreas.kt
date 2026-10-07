@@ -137,7 +137,7 @@ class CarPlayViewAreas private constructor(
             }
             for (screen in screens) {
                 val window = splits[screen] ?: continue
-                // The window's own size (BYD shows its bars in split screen), kept even for the encoder.
+                // The window's own size (the car shows its bars in split screen), kept even for the encoder.
                 val splitWidth = (screen.width * window.first).toInt().coerceIn(2, screen.width) and 1.inv()
                 val splitHeight = (screen.height * window.second).toInt().coerceIn(2, screen.height) and 1.inv()
                 for (edge in edges) {

@@ -31,17 +31,14 @@ class HomeScreenMonitorTest {
     }
 
     @Test
-    fun isHomePackageRecognizesBYDAndThirdPartyLaunchers() {
+    fun isHomePackageRecognizesCarAndThirdPartyLaunchers() {
         val monitor = HomeScreenMonitor(context) {}
         val isHomeMethod = HomeScreenMonitor::class.java.getDeclaredMethod("isHomePackage", String::class.java).apply {
             isAccessible = true
         }
 
-        // Standard BYD launchers
+        // The car's own default launcher
         assertTrue(isHomeMethod.invoke(monitor, "com.android.launcher3") as Boolean)
-        assertTrue(isHomeMethod.invoke(monitor, "com.byd.launchermap") as Boolean)
-        assertTrue(isHomeMethod.invoke(monitor, "com.byd.naviauto") as Boolean)
-        assertTrue(isHomeMethod.invoke(monitor, "com.byd.mycar") as Boolean)
 
         // Third-party launchers
         assertTrue(isHomeMethod.invoke(monitor, "com.smg.dydesktop") as Boolean)
@@ -52,9 +49,9 @@ class HomeScreenMonitorTest {
         assertFalse(isHomeMethod.invoke(monitor, "com.custom.carlauncher") as Boolean)
 
         // Non-home full-screen apps
-        assertFalse(isHomeMethod.invoke(monitor, "com.byd.panoramic") as Boolean)
+        assertFalse(isHomeMethod.invoke(monitor, "com.example.panoramic") as Boolean)
         assertFalse(isHomeMethod.invoke(monitor, "com.netease.cloudmusic") as Boolean)
-        assertFalse(isHomeMethod.invoke(monitor, "com.byd.carsetting") as Boolean)
+        assertFalse(isHomeMethod.invoke(monitor, "com.example.carsetting") as Boolean)
         assertFalse(isHomeMethod.invoke(monitor, "com.kugou.android") as Boolean)
         assertFalse(isHomeMethod.invoke(monitor, "com.autonavi.amapauto") as Boolean)
         assertFalse(isHomeMethod.invoke(monitor, "com.yecon.carsetting") as Boolean)
@@ -82,7 +79,7 @@ class HomeScreenMonitorTest {
         assertEquals(true, observedVisibility)
 
         // Switch to 360 Panoramic Camera -> should hide (false)
-        HomeScreenMonitor.notifyForegroundPackage("com.byd.panoramic")
+        HomeScreenMonitor.notifyForegroundPackage("com.example.panoramic")
         org.robolectric.shadows.ShadowLooper.idleMainLooper()
         assertEquals(false, observedVisibility)
 

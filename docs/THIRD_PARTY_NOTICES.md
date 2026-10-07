@@ -36,8 +36,21 @@ The public preview APK includes an accessory certificate/key pair recovered from
 
 The static site layout, CSS and generator adapt DiAuto (AGPL-3.0). The AGPL license text is included with the source.
 
-## BYD HUD maneuver icons
+## Historic: HUD maneuver icons (removed in the CS11 build)
 
-Required Notice: Copyright AndyShaman (https://github.com/AndyShaman/BYDMate)
+The maneuver PNGs previously shipped under `shared/src/main/assets/byd-hud-icons`, imported from BYDMate
+(Required Notice: Copyright AndyShaman, https://github.com/AndyShaman/BYDMate, PolyForm Noncommercial 1.0.0),
+were removed in the CS11 build together with the rest of the vendor-specific HUD/cluster adaptation: the
+target head unit exposes no such display, so nothing referenced them. This notice is kept for provenance.
 
-The maneuver PNGs under `shared/src/main/assets/byd-hud-icons` were imported from BYDMate. Its PolyForm Noncommercial 1.0.0 terms and required notice are included alongside the assets. These files are separate from the project code license; upstream describes them as donor assets and their original provenance is not independently established. The validated DiLink5.1 windshield path uses factory turn codes rather than these images.
+## CarPlay car icon and label (CS11 build)
+
+The image shipped as `common/src/main/res/raw/ic_car_home.png` is the icon iOS renders next to the
+"back to the car" entry in CarPlay. It carries the Lynk & Co mark (the LYNK&CO wordmark with 领克),
+cropped from an image supplied by the vehicle owner, and is used only to identify this app on the
+owner's own head unit; "Lynk & Co" and the Lynk & Co logo are trademarks of their respective owner and
+this project claims no affiliation. The label iOS shows together with the icon (`oemIconLabel`, stored
+as `oem_label`) defaults to 领克 and can be changed in the app's settings. The image it replaced (the
+BYD wordmark) was removed with the rest of the vendor-specific adaptation.
+
+

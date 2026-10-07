@@ -21,7 +21,7 @@ import org.robolectric.annotation.Implementation
 import org.robolectric.annotation.LooperMode
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [29], shadows = [DiPlayAuthenticationTest.NavigationOutputs::class])
+@Config(sdk = [29])
 @LooperMode(LooperMode.Mode.PAUSED)
 class DiPlayAuthenticationTest {
     private val context get() = RuntimeEnvironment.getApplication()
@@ -81,13 +81,6 @@ class DiPlayAuthenticationTest {
         val statuses = startAuthentication(MfiTarget.LOCAL)
         assertTrue(statuses.any { it is CarPlayStatus.Failed })
         assertFalse(statuses.contains(CarPlayStatus.WaitingForMfi))
-    }
-
-    // Authentication tests do not have a real SOME/IP service. Avoid starting a periodic OEM
-    // output worker that can bind again after Robolectric replaces the application context.
-    @Implements(com.shilapi.xcertplay.hud.BydNavigationOutputs::class, isInAndroidSdk = false)
-    class NavigationOutputs {
-        @Implementation fun start(context: Context) = Unit
     }
 
     private fun startAuthentication(target: MfiTarget): List<CarPlayStatus> {

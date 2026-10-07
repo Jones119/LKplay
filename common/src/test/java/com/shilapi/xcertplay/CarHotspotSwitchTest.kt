@@ -8,9 +8,6 @@ import android.widget.LinearLayout
 import android.widget.Switch
 import com.shilapi.xcertplay.adb.LocalAdb
 import com.shilapi.xcertplay.host.R
-import com.shilapi.xcertplay.hud.BydAdbAccess
-import com.shilapi.xcertplay.hud.BydOutputSettings
-import com.shilapi.xcertplay.hud.BydVehicleFieldStore
 import com.shilapi.xcertplay.network.CarHotspotSettings
 import com.shilapi.xcertplay.orchestration.WirelessHotspotMode
 import java.util.concurrent.CopyOnWriteArrayList
@@ -34,17 +31,16 @@ import org.robolectric.shadows.ShadowToast
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [29], qualifiers = "en", manifest = Config.NONE, shadows = [CarHotspotSwitchTest.Grant::class,
-    CarHotspotAdbGrantTest.WritePermission::class, CarHotspotSwitchTest.StatusCheck::class])
+    CarHotspotAdbGrantTest.WritePermission::class])
 class CarHotspotSwitchTest {
     private lateinit var activity: DiPlayActivity
     private lateinit var controls: LinearLayout
 
     @Before fun setUp() {
         val app = RuntimeEnvironment.getApplication()
-        for (name in listOf("diplay_byd_outputs", "diplay_byd_vehicle_fields", "diplay_car_hotspot", "xcertplay_airplay", "diplay")) {
+        for (name in listOf("diplay_car_hotspot", "xcertplay_airplay", "diplay")) {
             app.getSharedPreferences(name, 0).edit().clear().commit()
         }
-        BydVehicleFieldStore.clearMemoryForTests()
         CarPlayBackgroundSession.clear()
         CarHotspotAdbGrantTest.WritePermission.allowed = false
         ShadowSettings.setCanDrawOverlays(false)
@@ -53,7 +49,6 @@ class CarHotspotSwitchTest {
         Grant.worker = null
         Grant.requested.clear()
         Grant.fail = false
-        StatusCheck.workers.clear()
         Grant.allowed = CarHotspotSetup.Permission.entries.toSet()
         Grant.access = LocalAdb.Access.READY
         activity = Robolectric.buildActivity(DiPlayActivity::class.java).get()
@@ -61,20 +56,18 @@ class CarHotspotSwitchTest {
         AirPlayPersistence.saveWirelessHotspotMode(activity, WirelessHotspotMode.MANUAL)
         AirPlayPersistence.saveAutoStartOnBoot(activity, false)
         controls = LinearLayout(activity)
-        DiPlayActivity::class.java.getDeclaredMethod("renderBydAdbControls", LinearLayout::class.java,
-            LocalAdb.Access::class.java, Boolean::class.javaPrimitiveType, Boolean::class.javaPrimitiveType)
+        DiPlayActivity::class.java.getDeclaredMethod("renderHotspotControls", LinearLayout::class.java,
+            LocalAdb.Access::class.java, Boolean::class.javaPrimitiveType)
             .apply { isAccessible = true }
-            .invoke(activity, controls, LocalAdb.Access.READY, true, false)
+            .invoke(activity, controls, LocalAdb.Access.READY, true)
         activity.setContentView(controls)
     }
 
     @After fun tearDown() {
         Grant.release.countDown()
         Grant.worker?.join(3_000)
-        StatusCheck.workers.forEach { it.join(3_000) }
         shadowOf(Looper.getMainLooper()).idle()
         CarPlayBackgroundSession.clear()
-        BydVehicleFieldStore.clearMemoryForTests()
     }
 
     @Test fun enablingDirectlyRequestsPermissionWithoutAnotherDialog() {
@@ -114,15 +107,14 @@ class CarHotspotSwitchTest {
         assertEquals(activity.getString(R.string.hotspot_permission_failed), ShadowToast.getTextOfLatestToast())
     }
 
-    @Test fun anExistingPermissionStillWaitsForAdbBeforeEnabling() {
+    @Test fun anExistingPermissionEnablesTheSwitchWithoutAdb() {
         CarHotspotAdbGrantTest.WritePermission.allowed = true
         hotspotSwitch().isChecked = true
-        awaitGrant()
-        assertFalse(CarHotspotSettings.enabled(activity))
-        completeGrant()
         assertTrue(CarHotspotSettings.enabled(activity))
         assertTrue(hotspotSwitch().isChecked)
         assertNull(ShadowAlertDialog.getLatestAlertDialog())
+        assertTrue(Grant.requested.isEmpty())
+        assertNull(Grant.worker)
     }
 
     @Test fun selectingBootFirstGrantsBothRequiredPermissionsFromTheHotspotSwitch() {
@@ -177,35 +169,9 @@ class CarHotspotSwitchTest {
         assertTrue(Grant.requested.isEmpty())
     }
 
-    @Test fun vehicleControlsAreNotDuplicatedInTheHotspotPermissionCard() {
+    @Test fun theHotspotCardHoldsOnlyTheHotspotSwitch() {
         assertEquals(1, switches(controls).size)
-        assertFalse(BydOutputSettings.batteryToIphone(activity))
-        assertFalse(BydOutputSettings.wheelSpeedToIphone(activity))
-        assertFalse(BydOutputSettings.videoWhileParked(activity))
         assertTrue(Grant.requested.isEmpty())
-    }
-
-    @Test fun anOutstandingVehicleCheckPreventsASecondAuthorizationFlow() {
-        DiPlayActivity::class.java.getDeclaredField("adbCheckInProgress").apply {
-            isAccessible = true
-        }.setBoolean(activity, true)
-        refreshControls()
-        assertFalse(hotspotSwitch().isEnabled)
-        // Even a stale listener cannot start another grant or save the setting.
-        hotspotSwitch().isChecked = true
-        assertFalse(CarHotspotSettings.enabled(activity))
-        assertFalse(hotspotSwitch().isChecked)
-        assertTrue(Grant.requested.isEmpty())
-        assertNull(Grant.worker)
-
-        DiPlayActivity::class.java.getDeclaredField("adbCheckInProgress").apply {
-            isAccessible = true
-        }.setBoolean(activity, false)
-        refreshControls()
-        assertTrue(hotspotSwitch().isEnabled)
-        hotspotSwitch().isChecked = true
-        awaitGrant(); completeGrant()
-        assertTrue(CarHotspotSettings.enabled(activity))
     }
 
     @Test fun unexpectedAdbFailureRestoresTheSameSwitch() {
@@ -253,15 +219,6 @@ class CarHotspotSwitchTest {
         for ((name, value) in mapOf("initialLaunch" to false, "page" to "settings")) {
             DiPlayActivity::class.java.getDeclaredField(name).apply { isAccessible = true }.set(activity, value)
         }
-    }
-
-    @Implements(BydAdbAccess::class, isInAndroidSdk = false)
-    class StatusCheck {
-        @Implementation fun check(context: Context, mayAsk: Boolean): BydAdbAccess.Status {
-            workers.add(Thread.currentThread())
-            return BydAdbAccess.Status(BydAdbAccess.State.READY, batteryPercent = 74.0, rangeKm = 48)
-        }
-        companion object { val workers = CopyOnWriteArrayList<Thread>() }
     }
 
     private fun awaitGrant() { assertTrue(Grant.entered.await(3, TimeUnit.SECONDS)) }

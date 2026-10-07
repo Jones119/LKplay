@@ -20,7 +20,6 @@ import android.view.KeyEvent
 import androidx.core.graphics.drawable.toBitmap
 import com.shilapi.xcertplay.airplay.CarPlayMediaButton
 import com.shilapi.xcertplay.host.R
-import com.shilapi.xcertplay.hud.BydOutputSettings
 import com.shilapi.xcertplay.media.CarPlayNowPlaying
 import com.shilapi.xcertplay.orchestration.CarPlayController
 import java.util.concurrent.Executors
@@ -31,7 +30,7 @@ import com.shilapi.xcertplay.compat.getDrawableCompat
 /**
  * Steering-wheel and other hardware media buttons for CarPlay.
  *
- * Android delivers media keys to a media session; BYD picks the session of the audio-focus
+ * Android delivers media keys to a media session; the head unit picks the session of the audio-focus
  * owner. Once CarPlay plays music, DiPlay holds audio focus and an active session until the
  * CarPlay session ends, so play also works after a pause. Keys go to the iPhone as CarPlay media
  * HID presses ([CarPlayMediaButton]).
@@ -121,7 +120,7 @@ internal object CarPlayMediaKeys {
                 nowPlaying = update
                 // The iPhone repeats NowPlayingUpdate about twice a second for the position alone.
                 // Republishing the metadata each time sent a copy of the artwork through system_server
-                // to every media listener, and on a DiLink 5.0 Tang that exhausted memory within
+                // to every media listener, and on one head unit that exhausted memory within
                 // minutes. The position goes in the playback state.
                 if (metadataChanged) session?.setMetadata(androidMetadata(update, shownArtworkLocked()))
                 publishPlaybackStateLocked()
@@ -203,7 +202,6 @@ internal object CarPlayMediaKeys {
         }
         focusHeld = granted
         val cb = callback ?: CarPlayMediaCallback(
-            experimentalDiLink3Keys = { appContext?.let(BydOutputSettings::carPlayCallControls) == true },
             send = ::send,
         ).also { callback = it }
         session = MediaSession(context, "DiPlay CarPlay").apply {
@@ -241,10 +239,7 @@ internal object CarPlayMediaKeys {
 
     /** A legacy MEDIA_BUTTON KeyEvent from [MediaButtonReceiver]; same mapping as the media session. */
     fun onLegacyMediaKeyEvent(event: KeyEvent): Boolean {
-        val index = CarPlayMediaButton.forKeyCode(
-            event.keyCode,
-            appContext?.let(BydOutputSettings::carPlayCallControls) == true,
-        ) ?: run {
+        val index = CarPlayMediaButton.forKeyCode(event.keyCode) ?: run {
             Log.i(TAG, "legacy media key unmapped code=${event.keyCode}")
             return false
         }
@@ -389,13 +384,12 @@ internal object CarPlayMediaKeys {
  * media controllers (not hardware keys) call [onPlay] and [onPause] with an explicit intent.
  */
 internal class CarPlayMediaCallback(
-    private val experimentalDiLink3Keys: () -> Boolean = { false },
     private val send: (index: Int, source: String) -> Unit,
 ) : MediaSession.Callback() {
     override fun onMediaButtonEvent(mediaButtonIntent: Intent): Boolean {
         @Suppress("DEPRECATION")
         val event = mediaButtonIntent.getParcelableExtra<KeyEvent>(Intent.EXTRA_KEY_EVENT) ?: return false
-        val index = CarPlayMediaButton.forKeyCode(event.keyCode, experimentalDiLink3Keys())
+        val index = CarPlayMediaButton.forKeyCode(event.keyCode)
             ?: return super.onMediaButtonEvent(mediaButtonIntent)
         if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
             send(index, KeyEvent.keyCodeToString(event.keyCode))

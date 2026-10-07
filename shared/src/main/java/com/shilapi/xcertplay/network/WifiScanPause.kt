@@ -3,8 +3,8 @@ package com.shilapi.xcertplay.network
 import android.content.Context
 import android.os.Build
 import android.util.Log
-import com.shilapi.xcertplay.hud.BydAdbShell
-import com.shilapi.xcertplay.hud.BydParcel
+import com.shilapi.xcertplay.hud.AdbParcel
+import com.shilapi.xcertplay.hud.AdbShell
 import java.lang.reflect.Field
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
@@ -12,10 +12,10 @@ import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 
 /**
- * Pauses the head unit's automatic Wi-Fi network search while wireless CarPlay runs.
+ * The head unit's automatic Wi-Fi network search is paused while wireless CarPlay runs.
  *
- * BYD DiLink 3 (Android 10) scans every Wi-Fi band every 10 s whenever the car's own Wi-Fi client is
- * not connected to a network. Each scan takes the single radio off the CarPlay channel for 3-6 s, so
+ * A head unit that scans every Wi-Fi band every 10 s whenever its own Wi-Fi client is
+ * not connected to a network takes the single radio off the CarPlay channel for 3-6 s, so
  * the stream stutters unless the car happens to be joined to a hotspot. Through the approved local
  * adb shell, `IWifiManager.enableWifiConnectivityManager(false)` stops those scans (shell holds
  * CONNECTIVITY_INTERNAL). One process-wide worker owns controller leases and restores scans only
@@ -63,12 +63,12 @@ internal class WifiScanPause(
         }
 
         /** `void` replies carry only a zero exception word. */
-        fun accepted(output: String?): Boolean = BydParcel.words(output).firstOrNull() == 0L
+        fun accepted(output: String?): Boolean = AdbParcel.words(output).firstOrNull() == 0L
 
         /**
          * Android 10 blocks direct reflection on this hidden constant but still allows the lookup when
          * it goes through Class.getDeclaredField itself; later releases close that path, so only Q is
-         * attempted, which is what DiLink 3 runs.
+         * attempted.
          */
         fun enableConnectivityManagerTransaction(): Int? {
             if (Build.VERSION.SDK_INT != Build.VERSION_CODES.Q) return null
@@ -95,7 +95,7 @@ private object ProcessWifiScanPause : WifiScanPauseControl {
     private val worker: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor {
         Thread(it, WifiScanPause.TAG).apply { isDaemon = true }
     }
-    private val adb = BydAdbShell(WifiScanPause.TAG)
+    private val adb = AdbShell(WifiScanPause.TAG)
     private var session: WifiScanPauseSession? = null
     private var retry: ScheduledFuture<*>? = null
 

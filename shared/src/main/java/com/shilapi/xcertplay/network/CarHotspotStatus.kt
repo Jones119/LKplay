@@ -18,7 +18,7 @@ object CarHotspotStatus {
 
     /**
      * True/false from the Wi-Fi AP state, or null when the firmware hides it (then callers must
-     * not block the connection). Interface flags are not used: BYD keeps wlan1 up with an address
+     * not block the connection). Interface flags are not used: some firmware keeps wlan1 up with an address
      * while tethering is off.
      */
     fun isEnabled(context: Context): Boolean? {

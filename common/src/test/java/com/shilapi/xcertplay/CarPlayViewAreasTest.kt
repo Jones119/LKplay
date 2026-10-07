@@ -9,7 +9,7 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class CarPlayViewAreasTest {
-    // On a Tang, BYD's split screen gives DiPlay 1270x1208 of the 2560x1440 screen.
+    // On one tested car, the split screen gives DiPlay 1270x1208 of the 2560x1440 screen.
     private val split = 1270f / 2560 to 1208f / 1440
 
     @Test

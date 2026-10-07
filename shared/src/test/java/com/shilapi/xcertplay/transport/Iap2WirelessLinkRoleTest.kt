@@ -11,7 +11,7 @@ class Iap2WirelessLinkRoleTest {
     private val full = Iap2IdentificationConfig(
         name = "DiPlay",
         modelIdentifier = "DiPlay",
-        manufacturer = "BYD",
+        manufacturer = "TestCar",
         serialNumber = "test",
         firmwareVersion = "1",
         hardwareVersion = "1",

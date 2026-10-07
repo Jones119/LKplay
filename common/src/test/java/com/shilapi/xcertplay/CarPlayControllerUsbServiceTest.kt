@@ -8,7 +8,6 @@ import android.content.IntentFilter
 import android.content.ServiceConnection
 import android.os.Looper
 import com.shilapi.xcertplay.airplay.*
-import com.shilapi.xcertplay.hud.BydNavigationOutputs
 import com.shilapi.xcertplay.orchestration.*
 import com.shilapi.xcertplay.transport.Iap2IdentificationConfig
 import org.junit.After
@@ -30,7 +29,6 @@ class CarPlayControllerUsbServiceTest {
 
     @After fun tearDown() {
         controllers.forEach { it.close(); assertTrue(it.awaitClosed(2_000)) }
-        BydNavigationOutputs.endNow()
     }
 
     @Test fun wirelessLocalCanBeCreatedAndReachMfiWithoutAUsbService() {

@@ -23,7 +23,7 @@ internal object P2pStartupRecovery {
         else -> null
     }
 
-    /** A band-only request still needs channel selection, which some BYD drivers cannot do. */
+    /** A band-only request still needs channel selection, which some drivers cannot do. */
     fun plan(stationFrequency: Int?, preferred: P2pCreationRequest? = null,
              preferredChannel: Int = WifiP2pChannels.AUTO): List<P2pCreationRequest> = buildList {
         WifiP2pChannels.frequencyMhz(preferredChannel)?.let {
@@ -38,7 +38,7 @@ internal object P2pStartupRecovery {
             if (frequencies.add(frequency)) add(P2pCreationRequest(mode, frequency))
         }
         // A station on 5 GHz shares the radio with the group: another 5 GHz channel makes the radio
-        // switch between the two, which on a BYD Tang (station 5200, group 5745) stalled video
+        // switch between the two, which on one tested car (station 5200, group 5745) stalled video
         // for 0.6-2 s and starved music. A 2.4 GHz group runs alongside without switching.
         val stationOnFiveGhz = stationFrequency != null && stationFrequency in 5150..5895
         val remembered = preferred?.frequencyMHz?.let(::rememberedFrequency)

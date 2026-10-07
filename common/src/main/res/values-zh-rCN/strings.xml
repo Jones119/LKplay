@@ -123,7 +123,6 @@
     <string name="back_to_diplay">返回 DiPlay</string>
     <string name="band">频段</string>
     <string name="bluetooth_settings">蓝牙设置</string>
-    <string name="byd_navigation">比亚迪导航</string>
     <string name="cancel">取消</string>
     <string name="car_home">车机主页</string>
     <string name="car_hotspot_details">车机热点详情</string>
@@ -351,7 +350,6 @@
     <string name="share">分享</string>
     <string name="show_on_screen_debug_logs">在屏幕上显示调试日志</string>
     <string name="show_password">显示密码</string>
-    <string name="show_phone_navigation_arrows_distance_and_street_names_on">在支持的比亚迪显示屏上显示手机导航箭头、距离和道路名称。不同车型的兼容性有所差异。</string>
     <string name="show_the_side_map_only_when_its_card_is_open_and_switch_to">仅在地图卡片展开时显示侧方地图，并在“地图主题”中切换为完整地图。更改主题或卡片不会中断 CarPlay 连接。</string>
     <string name="shows_the_iphone_s_cluster_map_on_the_instrument_cluster_c">在仪表盘上显示iPhone地图。通过方向盘操作仪表盘菜单，选择小屏导航或全屏导航。</string>
     <string name="start_carplay_automatically_after_device_boot">设备启动后自动启动 CarPlay</string>
@@ -360,7 +358,6 @@
     <string name="starting_wireless_hotspot">正在启动无线热点</string>
     <string name="startup">启动</string>
     <string name="still_waiting_for_usage_access_check_that_the_command_ran">仍在等待使用访问权限。请确认命令已在本车机上成功运行，然后重试。</string>
-    <string name="tap_a_number_to_test_14_driver_speaker_on_byd">点按数字测试。14 = 比亚迪主驾扬声器。</string>
     <string name="the_head_unit_couldn_t_start_carplay_wi_fi_check_wi_fi_and">车机无法启动 CarPlay Wi-Fi。请检查 Wi-Fi 并关闭其他投屏应用，正在重试…</string>
     <string name="this_ends_the_existing_wi_fi_direct_connection_including_o">这会结束现有的 Wi-Fi Direct 连接，包括重新安装后遗留的连接。请先关闭其他投屏应用。车机的互联网 Wi-Fi 不受影响。</string>
     <string name="this_head_unit_cannot_use_the_smaller_size_at_this_resolut">此车机在当前分辨率下无法使用更小的尺寸，将使用默认尺寸。</string>
@@ -374,7 +371,6 @@
     <string name="turn_on_wi_fi_in_the_head_unit_s_settings_to_connect">请在车机设置中打开 Wi-Fi 后再连接。</string>
     <string name="turn_the_car_s_wi_fi_switch_on_allow_location_nearby_devic">打开车机的 Wi-Fi 开关。如提示请允许位置/附近的设备权限，并在 Android 询问时启用位置。如果播放卡顿，请尝试使用 5 GHz 的内置车机热点。</string>
     <string name="usage_access_enabled">使用访问权限：已启用</string>
-    <string name="usage_access_lets_diplay_follow_the_instrument_theme_and_m">使用访问权限让 DiPlay 跟随仪表盘主题和地图卡片。仅在本地处理 BYD 仪表盘活动事件。本车机没有可用的权限设置页面。</string>
     <string name="usage_access_setup_needed_for_automatic_mode">使用访问权限：自动模式需要设置</string>
     <string name="use_a_usb_data_cable_and_the_car_s_usb_data_port_unlock_yo">使用 USB 数据线连接车机的 USB 数据接口。解锁 iPhone 并允许 CarPlay。无需设置热点。</string>
     <string name="use_a_usb_data_cable_and_unlock_your_iphone_allow_trust_an">请使用 USB 数据线并解锁 iPhone。\niPhone 出现提示时允许“信任”和使用 CarPlay。</string>
@@ -486,17 +482,13 @@
     <string name="adb_vehicle_gear_unreadable">此固件上无法读取挡位。</string>
     <string name="advanced_vehicle_data">高级车辆数据</string>
     <string name="hide_advanced_vehicle_data">收起高级车辆数据</string>
-    <string name="advanced_vehicle_data_description">可使用 DiLink 5.0 默认数据读取，或探测旧版车机字段；所有操作均为只读。</string>
     <string name="vehicle_data_mode">车辆数据模式</string>
-    <string name="vehicle_data_mode_default">默认模式 · 已在 DiLink 5.0 车机验证</string>
-    <string name="vehicle_data_mode_legacy">旧版车机探测 · 已在 13 控制器 / DiLink 3.0 车机实测</string>
     <string name="adb_not_checked">尚未检测 ADB。</string>
     <string name="vehicle_probe_saved_automatic">车辆能力已保存；实时 ADB 验证和必要的重新探测会自动完成。</string>
     <string name="request_adb_authorization">请求 DiPlay ADB 授权</string>
     <string name="adb_enabled_not_approved">ADB 已开启，但尚未授权这个 DiPlay 测试版。</string>
     <string name="probe_adb_and_vehicle_data">探测旧版车机</string>
     <string name="probe_vehicle_data_again">重新探测旧版车机</string>
-    <string name="probing_vehicle_data">正在读取本固件的比亚迪字段目录并验证所需字段…</string>
     <string name="vehicle_probe_failed">车辆数据探测失败：%1$s</string>
     <string name="vehicle_probe_lost_saved_fields">本次探测未确认以下已保存字段：%1$s。旧配置已保留。</string>
     <string name="replace_saved_vehicle_data_anyway">仍然替换已保存的车辆数据</string>
@@ -519,7 +511,6 @@
     <string name="video_while_parked">驻车时播放视频</string>
     <string name="video_while_parked_description">iOS 27：在 iPhone 上投送到 CarPlay 的视频会在车辆处于 P 挡时在车机屏幕上播放。挂出 P 挡时播放器会关闭；没有 ADB 时视频保持关闭，iPhone 只播放声音。普通 HTTPS 视频（例如来自 Safari）可以播放；受 FairPlay 保护的视频（例如 Apple TV+）需要获得授权的接收器，在这里无法播放。会重新连接 CarPlay。需要车机开启网络 ADB。</string>
     <string name="cluster_song">仪表盘显示歌曲</string>
-    <string name="cluster_song_description">CarPlay 正在播放的歌曲名和歌手会显示在仪表盘的音乐卡片中，并同步播放和暂停状态。卡片以比亚迪的“其他”音源显示，因为仪表盘不会绘制 CarPlay 自身的音源。立即生效。需要车机开启网络 ADB。</string>
     <string name="video_back_to_carplay">返回 CarPlay</string>
     <string name="video_play">播放</string>
     <string name="video_pause">暂停</string>
@@ -564,7 +555,6 @@
     <string name="btn_open_overlay_setting">前往开启【显示在其他应用上层】</string>
     <string name="manual_grant_cmd_hint">或在电脑终端执行以下 ADB 命令一键授权：</string>
     <string name="adb_cluster_activity_label">仪表地图</string>
-    <string name="adb_cluster_activity_mode">DiLink 4 仪表视频（ADB，实验性）</string>
     <string name="adb_cluster_activity_description">通过内置ADB直接在已验证仪表副屏启动地图。请先授权ADB，再重新连接iPhone。</string>
     <string name="adb_cluster_authorize">授权 ADB / 重试仪表移动</string>
     <string name="adb_cluster_open">重试仪表地图</string>
@@ -586,7 +576,6 @@
     <string name="hotspot_control_unsupported">当前固件不支持自动开启热点，请在车机设置中开启。</string>
     <string name="hotspot_control_timeout">等待车机热点开启超时，请在车机设置中开启。</string>
     <string name="hotspot_control_failed">车机热点开启失败，请在车机设置中开启。</string>
-    <string name="byd_adb_features">比亚迪功能 · 需要 ADB</string>
     <string name="location_reporting_reconnects">更改此设置会重新连接当前 CarPlay 会话。</string>
     <string name="diagnostic_report_saved_in_app">由于公共保存位置不可用，报告已私密保存到 DiPlay。您可以在此分享或查看报告。不会自动发送任何内容。</string>
     <string name="diagnostic_report_saved_to_path">报告已保存到：\n%1$s\n\n您也可以在此分享或查看报告。不会自动发送任何内容。</string>
@@ -630,7 +619,6 @@
     <string name="cluster_song_on_change">仅在切歌时显示</string>
     <string name="cluster_song_on_change_description">新歌曲在仪表盘上显示 5 秒，然后清空卡片。暂停和继续播放不会再次显示。</string>
     <string name="carplay_calls_on_dashboard">仪表盘显示 CarPlay 通话</string>
-    <string name="carplay_calls_on_dashboard_description">来电和通话中的 CarPlay 通话会在仪表盘上显示来电者，并在仪表盘和抬头显示器上显示通话时长，与比亚迪原厂 CarPlay 应用相同。通话期间车辆还会降低风扇风速。立即生效。需要主机开启网络 ADB。</string>
     <string name="cluster_safe_area_edit">仪表安全区域 · 编辑框</string>
     <string name="cluster_safe_area_reset">重置仪表安全区域</string>
     <string name="cluster_safe_area_hint">拖动四条绿色边界，保存后在下次 CarPlay 连接时生效。自定义区域会替代车辆标记偏移，重置后恢复。</string>
@@ -660,7 +648,6 @@
     <string name="carplay_rotation_sharper">更清晰（屏幕尺寸）</string>
     <string name="auto_grant_incomplete">未验证全部请求权限。请检查下方各项状态；开启网络 ADB 后重试，或使用手动设置。现有权限保持不变。</string>
     <string name="carplay_call_controls_experimental">CarPlay 通话按键（实验功能）</string>
-    <string name="carplay_call_controls_experimental_description">启用尚未验证的 DiLink 3 通话、语音和播放/暂停按键。仍需实车测试。默认关闭；仪表通话卡片为独立设置。</string>
     <string name="side_panel">CarPlay 旁的侧边面板（实验性）</string>
     <string name="side_panel_description">CarPlay 可移到屏幕的三分之二，DiPlay 在其余部分显示自己的面板：横屏时在乘客一侧，竖屏时在底部（时钟，以及已读取时的电量）。可在会话菜单中显示或隐藏。下次连接时生效。</string>
     <string name="side_panel_show">侧边面板</string>

@@ -13,7 +13,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * A shell on the head unit's own adbd ("ADB over network", 127.0.0.1:5555), for the few commands an
- * ordinary app may not run, such as switching the BYD cluster's navigation mode. Speaks the plain
+ * ordinary app may not run, such as changing a vendor system setting. Speaks the plain
  * ADB protocol (AOSP adb/protocol.txt); the TLS variant used by Android 11+ wireless debugging is
  * not supported.
  *

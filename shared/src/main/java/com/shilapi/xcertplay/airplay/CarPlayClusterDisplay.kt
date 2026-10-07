@@ -30,7 +30,7 @@ object CarPlayClusterDisplay {
 
     /**
      * Where the car marker goes, as percent of the panel (left, top, right, bottom). Measured on a
-     * DiLink 5.0 cluster with a calibration grid. In "Full screen navi" BYD draws a status row,
+     * tested cluster with a calibration grid. In "Full screen navi" the car draws a status row,
      * turn/ADAS icons, the ADAS lane view (from x 68 %), speed and power readouts and a bottom band
      * over the map; "Small screen navi" crops the panel to a centre window of about x 31–68 %,
      * y 16–89 %. This centre area is clear in both modes, so no per-mode setting is needed.

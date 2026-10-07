@@ -1,16 +1,7 @@
 package com.shilapi.xcertplay.hud
 
-internal data class BydHudGuidance(
-    val distanceMeters: Int,
-    /** Native HUD arrow (field 28). */
-    val maneuver: Int,
-    /** Gaode maneuver code: selects the HUD icon (field 8). */
-    val gaode: Int = 0,
-    val road: String = "",
-    val arrivalEpochSeconds: Long? = null,
-)
-
-internal data class BydAppleManeuver(
+/** One decoded route-guidance instruction, as Apple sent it on the iAP2 route channel. */
+internal data class AppleManeuver(
     val distanceMeters: Int,
     val type: Int,
     val drivingSide: Int,
@@ -20,21 +11,21 @@ internal data class BydAppleManeuver(
     val arrivalEpochSeconds: Long? = null,
 )
 
-internal enum class BydHudRouteChange {
+internal enum class RouteGuidanceChange {
     NONE,
     GUIDANCE,
     CLEAR,
 }
 
-/** Decodes the iAP2 route-guidance subset needed by the BYD windshield HUD and cluster. */
-internal class BydHudRouteState(
+/** Decodes the iAP2 route-guidance subset (0x5201/0x5202) into the next-turn instruction. */
+internal class RouteGuidanceState(
     private val nanoTime: () -> Long = System::nanoTime,
     private val staleRouteNs: Long = STALE_ROUTE_NS,
     private val emptyListHideNs: Long = EMPTY_LIST_HIDE_NS,
     /**
-     * The dashboard overlay keeps the last instruction across a wireless session drop: the iPhone
-     * often sends NoRouteSet (0) while the tunnel is tearing down, which is not a real arrival.
-     * Arrived (2) still ends the route. The overlay's own stale window retires a truly ended one.
+     * Keep the last instruction across a wireless session drop: the iPhone often sends NoRouteSet
+     * (0) while the tunnel is tearing down, which is not a real arrival. Arrived (2) still ends the
+     * route. The consumer's own stale window retires a truly ended one.
      */
     private val keepAcrossNoRoute: Boolean = false,
 ) {
@@ -51,31 +42,19 @@ internal class BydHudRouteState(
     private var emptyListSinceNs: Long? = null
     private var lastRouteUpdateNs: Long? = null
 
-    fun accept(messageId: Int, payload: ByteArray): BydHudRouteChange {
-        if (!validTlvs(payload)) return BydHudRouteChange.NONE
+    fun accept(messageId: Int, payload: ByteArray): RouteGuidanceChange {
+        if (!validTlvs(payload)) return RouteGuidanceChange.NONE
         return when (messageId) {
             ROUTE_GUIDANCE_UPDATE -> parseRouteUpdate(payload)
             ROUTE_GUIDANCE_MANEUVER_UPDATE -> parseManeuverUpdate(payload)
-            else -> BydHudRouteChange.NONE
+            else -> RouteGuidanceChange.NONE
         }
     }
 
-    fun current(): BydHudGuidance? {
+    /** Next maneuver as Apple sent it, for consumers with their own icon set. */
+    fun currentApple(): AppleManeuver? {
         val maneuver = activeManeuver() ?: return null
-        val gaode = BydManeuverCodes.gaode(maneuver.type, maneuver.drivingSide)
-        return BydHudGuidance(
-            distanceMeters = distanceMeters,
-            maneuver = BydManeuverCodes.hudArrow(gaode),
-            gaode = gaode,
-            road = roadFor(maneuver),
-            arrivalEpochSeconds = arrivalEpochSeconds,
-        )
-    }
-
-    /** Next maneuver as Apple sent it, for outputs with a richer icon set than the HUD. */
-    fun currentApple(): BydAppleManeuver? {
-        val maneuver = activeManeuver() ?: return null
-        return BydAppleManeuver(
+        return AppleManeuver(
             distanceMeters, maneuver.type, maneuver.drivingSide,
             roadFor(maneuver), remainingSeconds, remainingMeters, arrivalEpochSeconds,
         )
@@ -108,7 +87,7 @@ internal class BydHudRouteState(
     // The road the driver turns onto is what the next instruction is about; fall back to the current one.
     private fun roadFor(maneuver: Maneuver): String = maneuver.afterRoad.ifEmpty { currentRoad }
 
-    private fun parseRouteUpdate(data: ByteArray): BydHudRouteChange {
+    private fun parseRouteUpdate(data: ByteArray): RouteGuidanceChange {
         // A teardown NoRouteSet is not fresh guidance. Do not let repeated teardown frames
         // extend the retained instruction's lifetime or replace its road/arrival metadata.
         if (keepAcrossNoRoute) {
@@ -116,7 +95,7 @@ internal class BydHudRouteState(
             forEachTlv(data) { type, value, valueLength ->
                 if (type == 0x01 && valueLength >= 1) noRoute = data[value] == 0.toByte()
             }
-            if (noRoute) return BydHudRouteChange.NONE
+            if (noRoute) return RouteGuidanceChange.NONE
         }
         lastRouteUpdateNs = nanoTime()
         var state: Int? = null
@@ -141,16 +120,16 @@ internal class BydHudRouteState(
         }
 
         // Only NoRouteSet (0) and Arrived (2) end the route. A wireless handoff often sends
-        // NoRouteSet while the session is still coming back — keep the overlay instruction then.
+        // NoRouteSet while the session is still coming back — keep the instruction then.
         if (state == 0 || state == 2) {
-            return if (clear()) BydHudRouteChange.CLEAR else BydHudRouteChange.NONE
+            return if (clear()) RouteGuidanceChange.CLEAR else RouteGuidanceChange.NONE
         }
         // The iPhone briefly sends an empty current list every few seconds and while rerouting. Keep the last
         // maneuver (and the cached 0x5202 details, which are never resent) and hide it only if the list stays
-        // empty; the bridges' 1 s tick clears the outputs once current() turns null.
+        // empty.
         if (listPresent && firstManeuver == null) {
             if (emptyListSinceNs == null) emptyListSinceNs = nanoTime()
-            return BydHudRouteChange.NONE
+            return RouteGuidanceChange.NONE
         }
         if (firstManeuver != null) emptyListSinceNs = null
         if (state != null) routeActive = true
@@ -159,10 +138,10 @@ internal class BydHudRouteState(
             routeActive = true
         }
         if (distance != null) distanceMeters = distance!!.coerceAtLeast(0)
-        return if (current() != null) BydHudRouteChange.GUIDANCE else BydHudRouteChange.NONE
+        return if (currentApple() != null) RouteGuidanceChange.GUIDANCE else RouteGuidanceChange.NONE
     }
 
-    private fun parseManeuverUpdate(data: ByteArray): BydHudRouteChange {
+    private fun parseManeuverUpdate(data: ByteArray): RouteGuidanceChange {
         var index: Int? = null
         var type: Int? = null
         var drivingSide = 0
@@ -176,7 +155,7 @@ internal class BydHudRouteState(
             }
         }
         if (index != null && type != null) maneuvers[index!!] = Maneuver(type!!, drivingSide, afterRoad)
-        return if (current() != null) BydHudRouteChange.GUIDANCE else BydHudRouteChange.NONE
+        return if (currentApple() != null) RouteGuidanceChange.GUIDANCE else RouteGuidanceChange.NONE
     }
 
     private inline fun forEachTlv(data: ByteArray, block: (Int, Int, Int) -> Unit) {

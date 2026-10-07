@@ -18,7 +18,7 @@ import java.util.Date
 
 /**
  * A home-screen widget with CarPlay's next turn (arrow, distance, road), arrival and the
- * song. A standard Android widget, so it works in any launcher that hosts widgets; BYD's own home
+ * song. A standard Android widget, so it works in any launcher that hosts widgets; the car's own home
  * accepts only its listed widgets. A widget cannot show video, so there is no live map here.
  */
 class NavigationWidget : AppWidgetProvider() {
@@ -107,7 +107,7 @@ internal object NavigationWidgetUpdater {
         return views
     }
 
-    /** Apple's RouteGuidanceManeuverType, grouped as DiPlay's BYD outputs group it. */
+    /** Apple's RouteGuidanceManeuverType, grouped the way DiPlay's maneuver icons are. */
     fun arrow(type: Int, drivingSide: Int): Int = when (type) {
         1, 20 -> R.drawable.ic_maneuver_left
         2, 21 -> R.drawable.ic_maneuver_right
