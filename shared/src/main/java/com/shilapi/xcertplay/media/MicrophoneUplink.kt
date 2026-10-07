@@ -170,6 +170,21 @@ internal class MicrophoneUplink(
         }
     }
 
+    /** Highest absolute 16-bit sample of one PCM frame; 0 means the capture is silent. */
+    private fun peakOf(frame: ByteArray): Int {
+        var peak = 0
+        var index = 0
+        while (index + 1 < frame.size) {
+            val low = frame[index].toInt() and 0xFF
+            val high = frame[index + 1].toInt()
+            val sample = ((high shl 8) or low).toShort().toInt()
+            val magnitude = if (sample < 0) -sample else sample
+            if (magnitude > peak) peak = magnitude
+            index += 2
+        }
+        return peak
+    }
+
     private fun sourceLadder(primary: Int): List<Int> =
         listOf(primary, MediaRecorder.AudioSource.MIC, MediaRecorder.AudioSource.DEFAULT).distinct()
 
@@ -218,6 +233,8 @@ internal class MicrophoneUplink(
         val counters = MicrophoneCounters()
         val routeInfo = { routeType(recorder) }
         var filled = 0
+        var levelPeak = 0
+        var levelFrames = 0
         try {
             while (running.get()) {
                 stats.reading()
@@ -247,6 +264,14 @@ internal class MicrophoneUplink(
                     offset += copied
                     if (filled == frame.size) {
                         sendFrame(socket, counters, frame)
+                        // A silent capture (routing or effect chain) otherwise looks identical to a
+                        // working one in the byte counters, so report the level once per second.
+                        levelPeak = maxOf(levelPeak, peakOf(frame))
+                        if (++levelFrames >= LEVEL_FRAMES_PER_LOG) {
+                            Log.i(TAG, "microphone level peak=$levelPeak frames=$levelFrames")
+                            levelPeak = 0
+                            levelFrames = 0
+                        }
                         filled = 0
                     }
                 }
@@ -359,6 +384,8 @@ internal class MicrophoneUplink(
     private companion object {
         const val TAG = "xcertplay-usb"
         const val MIN_READ_BYTES = 2_048
+        /** 20 ms frames per level report (one second at 48 kHz). */
+        const val LEVEL_FRAMES_PER_LOG = 50
         const val CLOSE_JOIN_MILLIS = 500L
     }
 }

@@ -19,6 +19,10 @@ android {
         versionCode = 32
         versionName = "0.2.13-cs11.1"
         multiDexEnabled = true
+        // The CS11 is 32-bit armv7 and the bundled libopus only ships armeabi-v7a. Keeping the APK
+        // 32-bit matches the head unit and lets a 64-bit device (the tablet bench) load the same
+        // native library instead of silently skipping it, so both run the identical codec path.
+        ndk { abiFilters += "armeabi-v7a" }
     }
 
     localAuthenticationAssets?.let { sourceSets.getByName("main").assets.srcDir(it) }

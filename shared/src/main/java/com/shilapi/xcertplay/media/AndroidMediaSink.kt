@@ -911,7 +911,9 @@ private class AudioRenderer(
                 "mediaChannel=$mediaChannel navigationChannel=$navigationChannel focus=$audioFocusEnabled") }
             when (format.codec) {
                 AudioCodecKind.AAC_LC -> configureCodec(MediaFormat.MIMETYPE_AUDIO_AAC)
-                AudioCodecKind.OPUS -> configureCodec(MediaFormat.MIMETYPE_AUDIO_OPUS)
+                AudioCodecKind.OPUS -> if (!forcedSoftwareOpus() || !LegacyNativeOpus.available) {
+                    configureCodec(MediaFormat.MIMETYPE_AUDIO_OPUS)
+                }
                 AudioCodecKind.LPCM -> Unit
             }
             if (codec == null && format.codec == AudioCodecKind.OPUS) {
@@ -951,6 +953,18 @@ private class AudioRenderer(
             release()
         }
     }
+
+    /**
+     * Debug hook for the bundled libopus path: `adb shell setprop debug.diplay.software_opus 1`
+     * forces it on a device whose MediaCodec does have an Opus decoder, so the fallback can be
+     * exercised (and heard) without the CS11's missing codec. Read through reflection because
+     * android.os.SystemProperties is not part of the public SDK.
+     */
+    private fun forcedSoftwareOpus(): Boolean = runCatching {
+        val get = Class.forName("android.os.SystemProperties")
+            .getMethod("get", String::class.java, String::class.java)
+        (get.invoke(null, "debug.diplay.software_opus", "0") as? String) == "1"
+    }.getOrDefault(false)
 
     private fun configureCodec(mime: String) {
         diagnosticStage = "decoder-format"
