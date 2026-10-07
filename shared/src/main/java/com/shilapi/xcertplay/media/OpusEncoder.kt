@@ -3,6 +3,8 @@ package com.shilapi.xcertplay.media
 import android.media.MediaCodec
 import android.media.MediaFormat
 import android.util.Log
+import com.shilapi.xcertplay.compat.inputBufferCompat
+import com.shilapi.xcertplay.compat.outputBufferCompat
 import java.io.Closeable
 
 /**
@@ -140,9 +142,6 @@ internal class OpusEncoder(bitrate: Int) : Closeable {
     }
 }
 
-// CS11: MediaCodec.getInputBuffer/getOutputBuffer 是 API21+；4.4 上走 legacy 缓冲区数组（文件级扩展）
-private fun android.media.MediaCodec.inputBufferCompat(index: Int): java.nio.ByteBuffer? =
-    if (android.os.Build.VERSION.SDK_INT >= 21) getInputBuffer(index) else inputBuffers.getOrNull(index)
+// CS11: MediaCodec.getInputBuffer/getOutputBuffer 是 API21+；4.4 上走 legacy 缓冲区数组。
+// 复用 compat 层的同一实现，避免两份逻辑各自漂移（见 com.shilapi.xcertplay.compat.inputBufferCompat）。
 
-private fun android.media.MediaCodec.outputBufferCompat(index: Int): java.nio.ByteBuffer? =
-    if (android.os.Build.VERSION.SDK_INT >= 21) getOutputBuffer(index) else outputBuffers.getOrNull(index)

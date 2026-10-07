@@ -125,7 +125,9 @@ class BydSettingsReconnectTest {
         ReflectionHelpers.ClassParameter.from(Boolean::class.javaPrimitiveType!!, true))
     private fun renderHotspotCard() = ReflectionHelpers.callInstanceMethod<Unit>(activity, "renderBydAdbControls",
         ReflectionHelpers.ClassParameter.from(LinearLayout::class.java, LinearLayout(activity)),
-        ReflectionHelpers.ClassParameter.from(LocalAdb.Access::class.java, LocalAdb.Access.READY))
+        ReflectionHelpers.ClassParameter.from(LocalAdb.Access::class.java, LocalAdb.Access.READY),
+        ReflectionHelpers.ClassParameter.from(Boolean::class.javaPrimitiveType!!, true),
+        ReflectionHelpers.ClassParameter.from(Boolean::class.javaPrimitiveType!!, false))
 
     private class DeferredBackend : BydVehicleSettingsBackend {
         var result = BydAdbAccess.Status(BydAdbAccess.State.READY, batteryPercent = 51.0, rangeKm = 100)

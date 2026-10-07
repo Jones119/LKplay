@@ -19,7 +19,7 @@ class AudioTrackAttributesCompatibilityTest {
         val attributes = AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).build()
         val track = buildTrack(attributes)
         try {
-            assertSame(attributes, audioTrackAttributesForFocus(track, attributes))
+            assertSame(attributes, AudioApiBridge.attributesForFocus(track, attributes))
         } finally {
             track.release()
         }
@@ -32,7 +32,7 @@ class AudioTrackAttributesCompatibilityTest {
         val track = buildTrack(attributes)
         try {
             val different = AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE).build()
-            assertEquals(attributes, audioTrackAttributesForFocus(track, different))
+            assertEquals(attributes, AudioApiBridge.attributesForFocus(track, different))
         } finally {
             track.release()
         }

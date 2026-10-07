@@ -24,7 +24,13 @@ internal class ManualHotspotInterfaces(
 
     fun sample(): HotspotNetworkSnapshot {
         val ap = publicTethering?.interfaces ?: legacyApInterfaces()
-        val before = runCatching { connectivity?.activeNetwork }
+        // CS11/4.4 has no ConnectivityManager.getActiveNetwork (API 23), so the default network
+        // cannot be sampled there: an unobservable sample must not look like a changing network.
+        val defaultObservable = Build.VERSION.SDK_INT >= 23
+        val before = if (defaultObservable) runCatching { connectivity?.activeNetwork } else null
+        // allNetworks (API 21) is missing on the same firmware, so the Wi-Fi upstream set is
+        // unobservable there as well; that must not disqualify every hotspot candidate.
+        val upstreamObservable = Build.VERSION.SDK_INT >= 21
         val upstreams = runCatching {
             checkNotNull(connectivity)
             connectivity.allNetworks.mapNotNull { network ->
@@ -34,7 +40,7 @@ internal class ManualHotspotInterfaces(
             }.toSet()
         }.getOrNull()
         val defaultName = runCatching {
-            before.getOrNull()?.let { connectivity?.getLinkProperties(it)?.interfaceName }
+            before?.getOrNull()?.let { connectivity?.getLinkProperties(it)?.interfaceName }
         }.getOrNull()
         val interfaces = runCatching {
             Collections.list(NetworkInterface.getNetworkInterfaces()).mapNotNull { iface ->
@@ -46,11 +52,12 @@ internal class ManualHotspotInterfaces(
                 }.getOrNull()
             }
         }.getOrDefault(emptyList())
-        val after = runCatching { connectivity?.activeNetwork }
+        val after = if (defaultObservable) runCatching { connectivity?.activeNetwork } else null
         return HotspotNetworkSnapshot(
             interfaces, ap, upstreams, defaultName,
-            consistent = before.isSuccess && after.isSuccess && before.getOrNull() == after.getOrNull(),
+            consistent = defaultNetworkSampleConsistent(defaultObservable, before, after),
             apEnabled = CarHotspotStatus.isEnabled(context),
+            upstreamObservable = upstreamObservable,
         )
     }
 
@@ -108,3 +115,12 @@ internal fun legacyHotspotInterfaces(tethered: List<String>, wifiRegexes: List<S
 internal fun wirelessInterfaceName(name: String): Boolean =
     name.startsWith("wlan") || name.startsWith("swlan") || name.startsWith("ap") ||
         name.contains("softap", ignoreCase = true) || name.startsWith("wifi") || name.startsWith("p2p")
+
+/**
+ * CS11（Android 4.4 / API 19）没有 `ConnectivityManager.getActiveNetwork`（API 23）：默认网络
+ * 在旧平台上根本不可观测。此时若把"读不到"判成"网络在变化"，热点采样会被永久拒绝、无线连接
+ * 永远起不来，所以不可观测的采样一律视为一致；可观测时仍要求前后两次采样相同。
+ */
+internal fun defaultNetworkSampleConsistent(observable: Boolean, before: Result<*>?, after: Result<*>?): Boolean =
+    !observable || before == null || after == null ||
+        (before.isSuccess && after.isSuccess && before.getOrNull() == after.getOrNull())

@@ -65,14 +65,20 @@ object CarHotspotTethering {
                 }
             }
         }
-        return enableUntil(
+        // 4.4 车机（CS11）：先试反射 setWifiApEnabled（无 shell、安装即授予权限），再退回本地 ADB。
+        val startLegacy: () -> Boolean = { LegacySoftApControl.requestEnable(context, log) }
+        val startFallback: () -> Boolean = { startLegacy() || startAdb() }
+        val result = enableUntil(
             deadline,
             isCancelled,
             { permitted(context) },
             stateWithAdbObservation({ CarHotspotStatus.isEnabled(context) }, observedAdbState),
-            startFallback = startAdb,
+            startFallback = startFallback,
             start = startReflection,
-        ).also { log("car hotspot auto-enable: ${it.diagnostic}") }
+        )
+        // legacy 路径为开热点可能临时关掉了 Wi-Fi 客户端；最终未就绪时恢复。
+        if (result != Result.READY) LegacySoftApControl.restoreWifiClientIfNeeded(context, log)
+        return result.also { log("car hotspot auto-enable: ${it.diagnostic}") }
     }
 
     /** An ADB observation supplements hidden platform status, but never overrides a current off state. */

@@ -83,7 +83,16 @@ internal class DiLink51ClusterMonitor(context: Context, private val onState: (Cl
     }
 
     companion object {
-        fun hasAccess(context: Context): Boolean = context.systemService(AppOpsManager::class.java)
-            .checkOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), context.packageName) == AppOpsManager.MODE_ALLOWED
+        // CS11: OPSTR_GET_USAGE_STATS 是 API21 起的 op 字符串；4.4 的 AppOpsManager 字符串表里
+        // 没有 usage-stats（只有 location 那几个），checkOpNoThrow 会先抛 IllegalArgumentException——
+        // 而该字段是编译期内联常量，lint 的 NewApi 看不到，必须在这里显式门闩。
+        fun hasAccess(context: Context): Boolean {
+            if (Build.VERSION.SDK_INT < 21) return false
+            return runCatching {
+                context.systemService(AppOpsManager::class.java)
+                    .checkOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), context.packageName) ==
+                    AppOpsManager.MODE_ALLOWED
+            }.getOrDefault(false)
+        }
     }
 }

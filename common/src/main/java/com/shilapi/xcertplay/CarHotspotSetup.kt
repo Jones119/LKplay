@@ -50,9 +50,10 @@ internal object CarHotspotSetup {
             access
         }
 
-    fun shouldStartOnLaunch(context: Context, hasSession: Boolean): Boolean =
+    fun shouldStartOnLaunch(context: Context, hasSession: Boolean, allowCredentiallessStart: Boolean = false): Boolean =
         !hasSession && CarHotspotSettings.shouldEnable(context,
             AirPlayPersistence.loadWirelessEnabled(context), AirPlayPersistence.loadWirelessHotspotMode(context)) &&
-            ManualHotspotValidation.error(AirPlayPersistence.loadManualHotspotSsid(context),
-                AirPlayPersistence.loadManualHotspotPassphrase(context)) == null
+            (allowCredentiallessStart ||
+                ManualHotspotValidation.error(AirPlayPersistence.loadManualHotspotSsid(context),
+                    AirPlayPersistence.loadManualHotspotPassphrase(context)) == null)
 }

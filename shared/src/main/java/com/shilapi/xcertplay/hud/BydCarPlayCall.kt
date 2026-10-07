@@ -421,20 +421,28 @@ object BydCarPlayCallTool {
         }
     }
 
-    private fun alive(processId: String): Boolean = runCatching {
-        android.system.Os.kill(processId.toInt(), 0)
-        true
-    }.getOrDefault(false)
+    // CS11: android.system.Os / ErrnoException 都是 API21+；4.4 上它们既不存在，也会把
+    // "读不到"静默变成"这个进程还活着"，从而永远夺不回陈旧的 recovery 记录。保守返回存活。
+    private fun alive(processId: String): Boolean {
+        if (android.os.Build.VERSION.SDK_INT < 21) return true
+        return runCatching {
+            android.system.Os.kill(processId.toInt(), 0)
+            true
+        }.getOrDefault(false)
+    }
 
-    private fun appMayBeAlive(processId: String): Boolean = try {
-        android.system.Os.kill(processId.toInt(), 0)
-        true
-    } catch (error: android.system.ErrnoException) {
-        // Shell may lack permission to signal the app UID. Only ESRCH establishes death;
-        // EPERM and other errors must not authorize stealing even a pristine reservation.
-        error.errno != android.system.OsConstants.ESRCH
-    } catch (_: Throwable) {
-        true
+    private fun appMayBeAlive(processId: String): Boolean {
+        if (android.os.Build.VERSION.SDK_INT < 21) return true
+        return try {
+            android.system.Os.kill(processId.toInt(), 0)
+            true
+        } catch (error: android.system.ErrnoException) {
+            // Shell may lack permission to signal the app UID. Only ESRCH establishes death;
+            // EPERM and other errors must not authorize stealing even a pristine reservation.
+            error.errno != android.system.OsConstants.ESRCH
+        } catch (_: Throwable) {
+            true
+        }
     }
 
     private fun running(packageName: String, processId: String): Boolean = runCatching {

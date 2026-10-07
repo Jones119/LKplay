@@ -135,7 +135,9 @@ class BydVehicleDataSettingsTest {
         val hotspot = LinearLayout(activity)
         ReflectionHelpers.callInstanceMethod<Unit>(activity, "renderBydAdbControls",
             ReflectionHelpers.ClassParameter.from(LinearLayout::class.java, hotspot),
-            ReflectionHelpers.ClassParameter.from(LocalAdb.Access::class.java, LocalAdb.Access.READY))
+            ReflectionHelpers.ClassParameter.from(LocalAdb.Access::class.java, LocalAdb.Access.READY),
+            ReflectionHelpers.ClassParameter.from(Boolean::class.javaPrimitiveType!!, true),
+            ReflectionHelpers.ClassParameter.from(Boolean::class.javaPrimitiveType!!, false))
         val page = descendants(activity.window.decorView).filterIsInstance<ScrollView>().first()
             .getChildAt(0) as LinearLayout
         page.addView(hotspot)

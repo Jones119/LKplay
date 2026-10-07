@@ -121,7 +121,9 @@ class BydAdbSettingsUiTest {
     private fun render(access: LocalAdb.Access) {
         ReflectionHelpers.callInstanceMethod<Unit>(activity, "renderBydAdbControls",
             ReflectionHelpers.ClassParameter.from(LinearLayout::class.java, controls),
-            ReflectionHelpers.ClassParameter.from(LocalAdb.Access::class.java, access))
+            ReflectionHelpers.ClassParameter.from(LocalAdb.Access::class.java, access),
+            ReflectionHelpers.ClassParameter.from(Boolean::class.javaPrimitiveType!!, true),
+            ReflectionHelpers.ClassParameter.from(Boolean::class.javaPrimitiveType!!, false))
     }
     private fun descendants(view: View): List<View> = buildList {
         add(view)

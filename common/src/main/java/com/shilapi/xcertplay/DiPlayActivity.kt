@@ -914,10 +914,24 @@ class DiPlayActivity : ComponentActivity() {
             com.shilapi.xcertplay.network.CarHotspotStatus.isEnabled(this) == false &&
             !(CarHotspotSettings.enabled(this) && CarHotspotTethering.permitted(this))
 
+    // CS11/4.4: the firmware keeps a usable hotspot configuration which the controller adopts for the
+    // connection itself, so MANUAL setup never has to block the user on credentials typed by hand.
+    private fun carHotspotConfiguration(): com.shilapi.xcertplay.network.LegacySoftApControl.UsableApConfiguration? =
+        if (AirPlayPersistence.loadWirelessHotspotMode(this) == WirelessHotspotMode.MANUAL) {
+            com.shilapi.xcertplay.network.LegacySoftApControl.readUsableStored(this)
+        } else {
+            null
+        }
+
+    private fun carHotspotSelfConfigured(): Boolean = carHotspotConfiguration() != null
+
     private fun bydAdbSettings(parent: LinearLayout) {
         if (AirPlayPersistence.loadWirelessHotspotMode(this) != WirelessHotspotMode.MANUAL) return
-        if (!CarHotspotSetup.isBydHeadUnit(this)) {
-            Log.i("DiPlay-Hotspot", "settings hidden: BYD head unit not detected")
+        val byd = CarHotspotSetup.isBydHeadUnit(this)
+        // CS11/4.4: the hotspot is started through reflected setWifiApEnabled, which needs no ADB.
+        val legacy = com.shilapi.xcertplay.network.LegacySoftApControl.supported()
+        if (!byd && !legacy) {
+            Log.i("DiPlay-Hotspot", "settings hidden: neither BYD head unit nor legacy soft-AP support detected")
             return
         }
         val controls = column().apply { visibility = View.GONE }
@@ -927,22 +941,22 @@ class DiPlayActivity : ComponentActivity() {
             val access = runCatching { CarHotspotSetup.check(applicationContext) }
                 .onFailure { Log.w("DiPlay-Hotspot", "settings ADB check failed", it) }
                 .getOrDefault(LocalAdb.Access.UNREACHABLE)
-            Log.i("DiPlay-Hotspot", "settings eligibility: byd=true adb=$access visible=${CarHotspotSettings.visible(true, access)}")
+            Log.i("DiPlay-Hotspot", "settings eligibility: byd=$byd legacy=$legacy adb=$access visible=${CarHotspotSettings.visible(byd, access, legacy)}")
             runOnUiThread {
                 if (bydAdbControls !== controls || isFinishing || isDestroyed) return@runOnUiThread
-                if (CarHotspotSettings.visible(true, access)) {
+                if (CarHotspotSettings.visible(byd, access, legacy)) {
                     controls.visibility = View.VISIBLE
-                    renderBydAdbControls(controls, access)
+                    renderBydAdbControls(controls, access, byd, legacy)
                 }
             }
         }, "diplay-hotspot-adb-check").start()
     }
 
-    private fun renderBydAdbControls(controls: LinearLayout, access: LocalAdb.Access) {
+    private fun renderBydAdbControls(controls: LinearLayout, access: LocalAdb.Access, byd: Boolean, legacy: Boolean) {
         controls.removeAllViews()
         adbSwitches.keys.retainAll(setOf(R.string.open_after_the_car_starts))
         adbStatus = null
-        controls.visibility = if (CarHotspotSettings.visible(true, access)) View.VISIBLE else View.GONE
+        controls.visibility = if (CarHotspotSettings.visible(byd, access, legacy)) View.VISIBLE else View.GONE
         if (controls.visibility == View.GONE) return
         if (AirPlayPersistence.loadWirelessHotspotMode(this) != WirelessHotspotMode.MANUAL) {
             controls.visibility = View.GONE
@@ -950,8 +964,10 @@ class DiPlayActivity : ComponentActivity() {
         }
         section(controls, getString(R.string.byd_adb_features), R.drawable.ic_dp_permissions) { card ->
             if (AirPlayPersistence.loadWirelessHotspotMode(this) == WirelessHotspotMode.MANUAL) {
+                // Legacy firmware needs no ADB, so the toggle saves directly instead of requesting a grant.
                 adbToggle(card, R.string.auto_car_hotspot_title, R.string.auto_car_hotspot_description,
                     read = { CarHotspotSettings.enabled(this) },
+                    needsAdb = { byd },
                     permissions = {
                         buildList {
                             add(CarHotspotSetup.Permission.HOTSPOT)
@@ -964,15 +980,17 @@ class DiPlayActivity : ComponentActivity() {
                     if (!it) startupHotspotCancelled = true
                 }
             }
-            adbStatus = label(getString(if (access == LocalAdb.Access.READY)
-                R.string.adb_access_ready else R.string.adb_not_approved), 14, MUTED).also(card::addView)
-            val allReady = UsbPermissionSetup.snapshot(this).values.all { it }
-            if (!allReady) {
-                card.addView(button(getString(R.string.btn_auto_apply_permissions), false) { autoApplyPermissions() }, matchButton(8, 54))
-            } else {
-                card.addView(label(getString(R.string.btn_permissions_ready), 14, Color.rgb(127, 205, 154)).apply {
-                    setPadding(0, dp(6), 0, dp(4))
-                })
+            if (byd) {
+                adbStatus = label(getString(if (access == LocalAdb.Access.READY)
+                    R.string.adb_access_ready else R.string.adb_not_approved), 14, MUTED).also(card::addView)
+                val allReady = UsbPermissionSetup.snapshot(this).values.all { it }
+                if (!allReady) {
+                    card.addView(button(getString(R.string.btn_auto_apply_permissions), false) { autoApplyPermissions() }, matchButton(8, 54))
+                } else {
+                    card.addView(label(getString(R.string.btn_permissions_ready), 14, Color.rgb(127, 205, 154)).apply {
+                        setPadding(0, dp(6), 0, dp(4))
+                    })
+                }
             }
         }
     }
@@ -1059,7 +1077,8 @@ class DiPlayActivity : ComponentActivity() {
     }
 
     private fun startupHotspotEligible(): Boolean =
-        CarHotspotSetup.shouldStartOnLaunch(applicationContext, CarPlayBackgroundSession.hasSession())
+        CarHotspotSetup.shouldStartOnLaunch(applicationContext, CarPlayBackgroundSession.hasSession(),
+            allowCredentiallessStart = com.shilapi.xcertplay.network.LegacySoftApControl.supported())
 
     private fun hotspotResultText(result: CarHotspotTethering.Result): String = getString(when (result) {
         CarHotspotTethering.Result.READY -> R.string.hotspot_control_on
@@ -1142,7 +1161,7 @@ class DiPlayActivity : ComponentActivity() {
             } else LinearLayout.LayoutParams(-1, -2))
             option.addView(button("${if (mode == candidate) "✓  " else ""}${titles[index]}", mode == candidate) {
                 if (candidate == WirelessHotspotMode.MANUAL) {
-                    pendingCarHotspotSetup = true
+                    pendingCarHotspotSetup = !carHotspotSelfConfigured()
                     render()
                 } else if (candidate == WirelessHotspotMode.EXISTING_WIFI) {
                     askHotspotCredentials(existingWifi = true) { ssid, password ->
@@ -1158,17 +1177,23 @@ class DiPlayActivity : ComponentActivity() {
             option.addView(label(descriptions[index], 15, MUTED).apply { setPadding(0, dp(6), 0, dp(12)) })
         }
         if (mode == WirelessHotspotMode.MANUAL) {
+            val storedInCar = carHotspotConfiguration()
             parent.addView(label(getString(R.string.hotspot_setup), 22, TEXT, true))
             parent.addView(label(getString(R.string.s_1_open_car_hotspot_settings_turn_the_hotspot_on_and_sele), 16, MUTED).apply { setPadding(0, dp(8), 0, dp(12)) })
             parent.addView(button(getString(R.string.open_car_hotspot_settings), false) { openCarWifiSettings() }, matchButton(0, 60))
-            parent.addView(button(if (pendingCarHotspotSetup) getString(R.string.save_hotspot_details_and_use_this_mode) else "${getString(R.string.edit_saved_hotspot_prefix)}${storedSsid()}", false) {
+            parent.addView(button(if (pendingCarHotspotSetup) getString(R.string.save_hotspot_details_and_use_this_mode) else "${getString(R.string.edit_saved_hotspot_prefix)}${storedSsid().ifEmpty { storedInCar?.ssid.orEmpty() }}", false) {
                 askHotspotCredentials { ssid, password ->
                     saveHotspotCredentials(ssid, password)
                     pendingCarHotspotSetup = false
                     applyWirelessLink(WirelessHotspotMode.MANUAL)
                 }
             }, matchButton(12, 60))
-            parent.addView(label(if (pendingCarHotspotSetup) getString(R.string.finish_setup_save_your_hotspot_details_to_use_this_mode) else if (carHotspotOff()) getString(R.string.hotspot_details_off) else getString(R.string.hotspot_details_saved), 15, if (carHotspotOff()) WARNING else MUTED).apply { setPadding(0, dp(12), 0, 0) })
+            parent.addView(label(when {
+                pendingCarHotspotSetup -> getString(R.string.finish_setup_save_your_hotspot_details_to_use_this_mode)
+                storedInCar != null && storedSsid().isEmpty() -> getString(R.string.hotspot_details_read_from_car, storedInCar.ssid)
+                carHotspotOff() -> getString(R.string.hotspot_details_off)
+                else -> getString(R.string.hotspot_details_saved)
+            }, 15, if (carHotspotOff()) WARNING else MUTED).apply { setPadding(0, dp(12), 0, 0) })
             val join = hotspotJoinControls ?: HotspotJoinControls(this,
                 { CarPlayBackgroundSession.hasSession() }, beforeAction = { startupHotspotCancelled = true },
                 labelFactory = { label(it, 15, MUTED) }, buttonFactory = { title, click -> button(title, false, click) })
@@ -1315,14 +1340,18 @@ class DiPlayActivity : ComponentActivity() {
     private fun askHotspotCredentials(existingWifi: Boolean = false, done: (String, String) -> Unit) {
         val fields = column().apply { setPadding(dp(24), dp(12), dp(24), dp(12)) }
         fields.addView(label(getString(if (existingWifi) R.string.existing_wifi_instructions else R.string.copy_these_from_the_car_s_hotspot_settings_use_5_ghz_if_av), 16, MUTED))
+        // CS11/4.4: offer what the car itself stores, so the fields never open blank on that firmware.
+        val storedInCar = if (existingWifi) null else com.shilapi.xcertplay.network.LegacySoftApControl.readUsableStored(this)
         val ssid = EditText(this).apply {
             hint = getString(if (existingWifi) R.string.existing_wifi_ssid else R.string.hotspot_name)
-            setText(if (existingWifi) AirPlayPersistence.loadExistingWifiSsid(this@DiPlayActivity) else storedSsid())
+            setText(if (existingWifi) AirPlayPersistence.loadExistingWifiSsid(this@DiPlayActivity)
+                else storedSsid().ifEmpty { storedInCar?.ssid.orEmpty() })
             setSingleLine()
         }
         val password = EditText(this).apply {
             hint = getString(if (existingWifi) R.string.existing_wifi_password else R.string.hotspot_password)
-            setText(if (existingWifi) AirPlayPersistence.loadExistingWifiPassphrase(this@DiPlayActivity) else storedPassword())
+            setText(if (existingWifi) AirPlayPersistence.loadExistingWifiPassphrase(this@DiPlayActivity)
+                else storedPassword().ifEmpty { storedInCar?.password.orEmpty() })
             setSingleLine()
             inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
         }
@@ -2771,9 +2800,10 @@ class DiPlayActivity : ComponentActivity() {
 
     private fun connect(wireless: Boolean) {
         startupHotspotCancelled = true
-        if (wireless && pendingCarHotspotSetup) { toast(getString(R.string.save_your_hotspot_details_in_connection_setup_first)); page = "connection"; render(); return }
+        if (wireless && pendingCarHotspotSetup && !carHotspotSelfConfigured()) { toast(getString(R.string.save_your_hotspot_details_in_connection_setup_first)); page = "connection"; render(); return }
         if (setupError != null) { toast(setupError!!); return }
         if (wireless && AirPlayPersistence.loadWirelessHotspotMode(this) == WirelessHotspotMode.MANUAL &&
+            !carHotspotSelfConfigured() &&
             hotspotError(storedSsid(), storedPassword()) != null) {
             pendingCarHotspotSetup = true
             page = "connection"
@@ -3145,7 +3175,9 @@ class DiPlayActivity : ComponentActivity() {
                 width = 0
                 height = dp(48)
                 columnSpec = if (Build.VERSION.SDK_INT >= 21) GridLayout.spec(GridLayout.UNDEFINED, 1f)
-                else GridLayout.spec(GridLayout.UNDEFINED, 1, 1f) // CS11: spec(int,float) 是 API21+
+                // CS11: spec(int,float) 与 spec(int,int,float)（带权重）都是 API21+；4.4 只能用
+                // API14 的 spec(int,int)，退化为等宽而不是加权等宽。
+                else GridLayout.spec(GridLayout.UNDEFINED, 1)
                 setMargins(dp(4), dp(4), dp(4), dp(4))
             }
             grid.addView(btn, params)

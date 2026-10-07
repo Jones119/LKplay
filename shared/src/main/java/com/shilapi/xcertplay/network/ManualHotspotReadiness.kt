@@ -20,6 +20,11 @@ internal data class HotspotNetworkSnapshot(
     val defaultInterface: String?,
     val consistent: Boolean = true,
     val apEnabled: Boolean? = true,
+    /**
+     * CS11（API19）没有 `ConnectivityManager.allNetworks`（API21），Wi-Fi 上游集合在旧平台上
+     * 根本不可观测；不可观测不能被当成"这个候选是上游"。现代平台保持 true（原语义）。
+     */
+    val upstreamObservable: Boolean = true,
 )
 
 internal data class HotspotSelection(val name: String, val index: Int, val address: InetAddress) {
@@ -46,7 +51,7 @@ internal fun selectHotspotInterface(snapshot: HotspotNetworkSnapshot, log: (Stri
             snapshot.apInterfaces != null -> "not_platform_ap"
             upstream -> "wifi_upstream"
             snapshot.defaultInterface == iface.name -> "default_network_without_ap_evidence"
-            snapshot.wifiUpstreams == null -> "upstream_unobservable"
+            snapshot.wifiUpstreams == null && snapshot.upstreamObservable -> "upstream_unobservable"
             !iface.wireless -> "no_ap_evidence"
             else -> "wireless_non_upstream"
         }

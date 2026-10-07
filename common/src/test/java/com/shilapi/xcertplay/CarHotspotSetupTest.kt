@@ -114,6 +114,30 @@ class CarHotspotSetupTest {
         assertEquals(WirelessHotspotMode.MANUAL, AirPlayPersistence.loadWirelessHotspotMode(context))
     }
 
+    // CS11/4.4 exposes the legacy soft-AP API, which needs no ADB, so the setting is reachable there.
+    @Test fun legacySoftApFirmwareSeesTheSettingWithoutAdbOrBydDetection() {
+        assertTrue(CarHotspotSettings.visible(bydAvailable = false, access = LocalAdb.Access.UNREACHABLE,
+            legacySupported = true))
+        for (access in LocalAdb.Access.entries) {
+            assertTrue(CarHotspotSettings.visible(false, access, legacySupported = true))
+        }
+        assertFalse(CarHotspotSettings.visible(false, LocalAdb.Access.READY, legacySupported = false))
+    }
+
+    // The legacy firmware stores the hotspot credentials, so the launch path may start it without them.
+    @Test fun credentiallessLegacyStartupStillNeedsTheOptInAndWirelessMode() {
+        CarHotspotSettings.setEnabled(context, true)
+        configureHotspotWithoutCredentials()
+        assertFalse(eligible())
+        assertTrue(CarHotspotSetup.shouldStartOnLaunch(context, hasSession = false, allowCredentiallessStart = true))
+        assertFalse(CarHotspotSetup.shouldStartOnLaunch(context, hasSession = true, allowCredentiallessStart = true))
+        AirPlayPersistence.saveWirelessEnabled(context, false)
+        assertFalse(CarHotspotSetup.shouldStartOnLaunch(context, hasSession = false, allowCredentiallessStart = true))
+        AirPlayPersistence.saveWirelessEnabled(context, true)
+        CarHotspotSettings.setEnabled(context, false)
+        assertFalse(CarHotspotSetup.shouldStartOnLaunch(context, hasSession = false, allowCredentiallessStart = true))
+    }
+
     private fun eligible() = CarHotspotSetup.shouldStartOnLaunch(context, hasSession = false)
 
     private fun installPackage(name: String, system: Boolean) {
@@ -131,5 +155,10 @@ class CarHotspotSetupTest {
         AirPlayPersistence.saveWirelessHotspotMode(context, WirelessHotspotMode.MANUAL)
         AirPlayPersistence.saveManualHotspotSsid(context, "Car hotspot")
         AirPlayPersistence.saveManualHotspotPassphrase(context, "12345678")
+    }
+
+    private fun configureHotspotWithoutCredentials() {
+        AirPlayPersistence.saveWirelessEnabled(context, true)
+        AirPlayPersistence.saveWirelessHotspotMode(context, WirelessHotspotMode.MANUAL)
     }
 }

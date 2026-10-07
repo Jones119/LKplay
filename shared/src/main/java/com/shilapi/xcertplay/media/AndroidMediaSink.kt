@@ -1107,11 +1107,16 @@ private class AudioRenderer(
      */
     private fun requestAudioFocus() {
         val channel = mappedChannel ?: return
-        val attributes = trackAttributes ?: return
         if (channel == AudioChannel.NAVIGATION) {
             Log.i(TAG, "audio focus skipped channel=NAVIGATION; overlays without ducking")
             return
         }
+        // CS11: 4.4 没有 AudioAttributes（API21），trackAttributes 恒为 null；但遗留的
+        // requestAudioFocus(listener, streamType, gain) 不需要属性，所以这里不能一票否决，
+        // 否则 AudioFocusCoordinator 里那条为 4.4 写的遗留分支永远不可达。
+        // 只有 API26+ 的 AudioFocusRequest 才必须有属性，那时仍保持原来的静默跳过。
+        val attributes = trackAttributes
+        if (attributes == null && Build.VERSION.SDK_INT >= 26) return
         track?.let { audioFocusCoordinator.acquire(it, channel, attributes) }
     }
 

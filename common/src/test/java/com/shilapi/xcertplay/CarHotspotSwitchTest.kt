@@ -62,7 +62,9 @@ class CarHotspotSwitchTest {
         AirPlayPersistence.saveAutoStartOnBoot(activity, false)
         controls = LinearLayout(activity)
         DiPlayActivity::class.java.getDeclaredMethod("renderBydAdbControls", LinearLayout::class.java,
-            LocalAdb.Access::class.java).apply { isAccessible = true }.invoke(activity, controls, LocalAdb.Access.READY)
+            LocalAdb.Access::class.java, Boolean::class.javaPrimitiveType, Boolean::class.javaPrimitiveType)
+            .apply { isAccessible = true }
+            .invoke(activity, controls, LocalAdb.Access.READY, true, false)
         activity.setContentView(controls)
     }
 

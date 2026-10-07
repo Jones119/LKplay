@@ -30,6 +30,7 @@
     <string name="hotspot_mode_p2p_desc">备选方案。需要打开车机 Wi-Fi 开关；2.4 GHz 连接可能会卡顿。</string>
     <string name="hotspot_details_off">热点已关闭 · 请在车机设置中开启。</string>
     <string name="hotspot_details_saved">详情已保存 · 连接前请确认车载热点已开启。</string>
+    <string name="hotspot_details_read_from_car">已自动读取本车热点（%1$s）· 无需手动填写。</string>
     <string name="permission_enabled_ready">权限已启用 · 可以使用</string>
     <string name="permission_not_enabled">权限尚未启用</string>
     <string name="clipboard_usage_access">DiPlay 使用情况访问权限</string>

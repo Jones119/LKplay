@@ -44,6 +44,7 @@ import com.shilapi.xcertplay.network.CarPlayBonjour
 import com.shilapi.xcertplay.network.diagnosticSummary
 import com.shilapi.xcertplay.network.CarPlayVpnService
 import com.shilapi.xcertplay.network.LocalOnlyHotspotManager
+import com.shilapi.xcertplay.network.LegacySoftApControl
 import com.shilapi.xcertplay.network.ManualHotspotManager
 import com.shilapi.xcertplay.network.ExistingWifiManager
 import com.shilapi.xcertplay.network.WifiP2pGroupManager
@@ -1215,7 +1216,9 @@ class CarPlayController(
 
             val adapter = bluetoothAdapter
                 ?: throw IOException("Bluetooth adapter is unavailable")
-            if (!adapter.isEnabled) throw IOException("Bluetooth is not enabled")
+            if (!adapter.isEnabled && !requestWirelessBluetoothOn(adapter)) {
+                throw IOException("Bluetooth is not enabled")
+            }
             val device = selectWirelessBluetoothDevice(adapter)
             val hostBluetoothMac = accessoryBluetoothMac(adapter)
             debugLog(
@@ -2116,6 +2119,18 @@ class CarPlayController(
             throw WirelessStartupException(WirelessStartupFailure.HOTSPOT_CONFIGURATION,
                 "The car hotspot is off. Turn it on in the car settings and connect again.")
         }
+        // CS11/4.4: the user may not have typed any credentials; when the firmware stores a usable
+        // hotspot configuration, adopt its live SSID/passphrase/security instead of the saved form.
+        val adoptedManual = if (hotspotMode == WirelessHotspotMode.MANUAL) {
+            LegacySoftApControl.readUsableStored(appContext)?.also { adopted ->
+                debugLog(
+                    "generation=$generation manual hotspot adopts live AP configuration " +
+                        "ssid='${adopted.ssid}' security=${adopted.security}",
+                )
+            }
+        } else {
+            null
+        }
         val manager: WirelessHotspotManager = when (hotspotMode) {
             WirelessHotspotMode.WIFI_P2P -> WifiP2pGroupManager(appContext, ::debugLog,
                 preferredChannel = config.wifiP2pPreferredChannel)
@@ -2126,12 +2141,16 @@ class CarPlayController(
             )
             WirelessHotspotMode.MANUAL -> ManualHotspotManager(
                 context = appContext,
-                ssid = config.manualHotspotSsid
+                ssid = adoptedManual?.ssid ?: config.manualHotspotSsid
                     ?: throw WirelessStartupException(WirelessStartupFailure.HOTSPOT_CONFIGURATION, "Manual hotspot SSID is not configured"),
-                passphrase = config.manualHotspotPassphrase.orEmpty(),
+                passphrase = if (adoptedManual != null) adoptedManual.password.orEmpty() else config.manualHotspotPassphrase.orEmpty(),
                 band = config.manualHotspotBand,
                 channel = config.manualHotspotChannel,
-                security = config.manualHotspotSecurity,
+                security = when (adoptedManual?.security) {
+                    LegacySoftApControl.StoredSecurity.OPEN -> ManualHotspotSecurity.OPEN
+                    LegacySoftApControl.StoredSecurity.WPA_PSK -> ManualHotspotSecurity.WPA2
+                    else -> config.manualHotspotSecurity
+                },
                 onDiagnostic = { debugLog("generation=$generation $it") },
                 isCancelled = { isStaleWirelessRun(generation) },
             )
@@ -2171,6 +2190,32 @@ class CarPlayController(
     private fun pauseWifiScans(backend: WirelessHotspotBackend) = synchronized(this) {
         if (closed || !WifiScanPause.eligible(backend)) return@synchronized
         (wifiScanPause ?: WifiScanPause(appContext, ::debugLog).also { wifiScanPause = it }).pause()
+    }
+
+    // Attempts to bring Bluetooth up on firmware where it is off at connect time (CS11/4.4);
+    // best effort, cancellable, and never blocks longer than the enable timeout.
+    @Suppress("DEPRECATION")
+    private fun requestWirelessBluetoothOn(adapter: BluetoothAdapter): Boolean {
+        debugLog("wireless Bluetooth is off; requesting enable")
+        if (runCatching { adapter.enable() }.getOrDefault(false) != true) {
+            debugLog("wireless Bluetooth enable request was refused")
+            return false
+        }
+        val deadline = System.nanoTime() + BLUETOOTH_ENABLE_TIMEOUT_MILLIS * 1_000_000L
+        while (System.nanoTime() < deadline) {
+            if (adapter.isEnabled) {
+                debugLog("wireless Bluetooth enabled")
+                return true
+            }
+            if (closed) return false
+            try {
+                Thread.sleep(250L)
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+                return false
+            }
+        }
+        return adapter.isEnabled
     }
 
     private fun selectWirelessBluetoothDevice(adapter: BluetoothAdapter): BluetoothDevice {
@@ -2721,6 +2766,7 @@ class CarPlayController(
         private const val DEVICE_AVAILABILITY_POLL_INTERVAL_MILLIS = 2_000L
         private const val WIRELESS_HANDOFF_TIMEOUT_MILLIS = 45_000L
         private const val RFCOMM_CONNECT_TIMEOUT_MILLIS = 15_000L
+        private const val BLUETOOTH_ENABLE_TIMEOUT_MILLIS = 6_000L
         private const val MAXIMUM_REENUMERATION_ATTEMPTS = 2
         private const val EXECUTOR_CLOSE_TIMEOUT_MILLIS = 2_000L
         private const val ADAPTER_ADDRESS_PLACEHOLDER = "02:00:00:00:00:00"

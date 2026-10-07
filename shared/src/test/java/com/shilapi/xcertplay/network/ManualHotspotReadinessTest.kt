@@ -107,6 +107,23 @@ class ManualHotspotReadinessTest {
         assertEquals(500L, now)
     }
 
+    @Test fun unobservableUpstreamsStillAllowAWirelessCandidate() {
+        // CS11/API19: allNetworks（API21）不存在 → wifi 上游集合恒为 null（不是空集）。
+        // "不可观测"不能否决候选，否则 MANUAL 热点采样会永远超时。
+        val legacy = HotspotNetworkSnapshot(listOf(iface()), apInterfaces = null, wifiUpstreams = null,
+            defaultInterface = null, upstreamObservable = false)
+        assertEquals("wlan0", select(legacy)?.name)
+        val modern = HotspotNetworkSnapshot(listOf(iface()), apInterfaces = null, wifiUpstreams = null,
+            defaultInterface = null, upstreamObservable = true)
+        assertNull(select(modern))
+    }
+
+    @Test fun unobservableUpstreamsStillCannotAuthorizeEthernetOrUsb() {
+        val legacy = HotspotNetworkSnapshot(listOf(iface("eth0"), iface("usb0")), apInterfaces = null,
+            wifiUpstreams = null, defaultInterface = null, upstreamObservable = false)
+        assertNull(select(legacy))
+    }
+
     @Test fun unmatchedLegacyNamesStillCannotAuthorizeEthernetOrSta() {
         val ap = legacyHotspotInterfaces(listOf("eth0"), listOf("softap0", "wigig0"))
         assertNull(ap)

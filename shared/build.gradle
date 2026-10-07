@@ -30,6 +30,15 @@ android {
         disable += ['UnsafeOptInUsageError', 'UnsafeOptInUsageWarning']
     }
 }
+
+// CS11: unit tests run on the JVM, where Robolectric already provides
+// org.conscrypt:conscrypt-openjdk-uber (desktop classes + native libraries). The Android AAR's
+// org.conscrypt classes would still shadow them and fail with
+// "UnsatisfiedLinkError: no conscrypt_jni in java.library.path" during Robolectric setup, so the
+// Android artifact is excluded from the unit-test classpaths only; the APK keeps it.
+configurations
+    .matching { it.name.endsWith('UnitTestRuntimeClasspath') || it.name.endsWith('UnitTestCompileClasspath') }
+    .configureEach { exclude group: 'org.conscrypt', module: 'conscrypt-android' }
 dependencies {
     implementation libs.androidx.annotation
     implementation libs.androidx.core.ktx
