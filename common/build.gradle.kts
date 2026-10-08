@@ -22,6 +22,10 @@ android {
 
     testOptions {
         unitTests.isIncludeAndroidResources = true
+        // Production code logs through android.util.Log, which the JVM tests otherwise reject with
+        // "Method w in android.util.Log not mocked". Returning defaults makes those calls no-ops
+        // (this fixed thirteen tests in :shared) so the tests check the behaviour they describe.
+        unitTests.isReturnDefaultValues = true
         // The UI suite covers several SDKs and locale-specific resource sandboxes.
         unitTests.all { it.maxHeapSize = "1g" }
     }

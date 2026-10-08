@@ -29,6 +29,13 @@ android {
         abortOnError false
         disable += ['UnsafeOptInUsageError', 'UnsafeOptInUsageWarning']
     }
+
+    // Production code logs through android.util.Log, which the JVM unit tests otherwise reject with
+    // "Method w in android.util.Log not mocked" — that alone was failing sixteen of them. Returning
+    // defaults makes those calls no-ops so the tests exercise the behaviour they describe.
+    testOptions {
+        unitTests.returnDefaultValues = true
+    }
 }
 
 // CS11: unit tests run on the JVM, where Robolectric already provides
