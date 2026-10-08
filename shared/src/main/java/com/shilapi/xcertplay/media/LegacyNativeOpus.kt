@@ -127,3 +127,15 @@ internal fun softwareOpusForced(): Boolean = runCatching {
         .getMethod("get", String::class.java, String::class.java)
     (get.invoke(null, "debug.diplay.software_opus", "0") as? String) == "1"
 }.getOrDefault(false)
+
+/**
+ * Reads a system property as an on/off switch (`adb shell setprop <name> 0|1`), so behaviour that only
+ * the car can settle — the CS11's telephony capture returns silence with the voice effects chain and
+ * communication mode attached — can be tried on the head unit without rebuilding. Read reflectively
+ * because android.os.SystemProperties is not part of the public SDK.
+ */
+internal fun debugSwitch(name: String, default: Boolean): Boolean = runCatching {
+    val get = Class.forName("android.os.SystemProperties")
+        .getMethod("get", String::class.java, String::class.java)
+    ((get.invoke(null, name, if (default) "1" else "0") as? String) ?: "") == "1"
+}.getOrDefault(default)

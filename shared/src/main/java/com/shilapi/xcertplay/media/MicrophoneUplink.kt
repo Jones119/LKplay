@@ -154,7 +154,12 @@ internal class MicrophoneUplink(
         socket = nextSocket
         opusEncoder = nextEncoder
         return try {
-            if (config.audioType == "telephony") effects = voiceEffects(nextRecorder.audioSessionId)
+            // CS11: with the voice effects chain attached the telephony capture returns near-silence
+            // (microphone level peak ~5 while the caller hears nothing), so it can be switched off at
+            // runtime with `ADB shell setprop debug.diplay.mic_effects 0` for an on-car comparison.
+            if (config.audioType == "telephony" && debugSwitch("debug.diplay.mic_effects", true)) {
+                effects = voiceEffects(nextRecorder.audioSessionId)
+            }
             nextRecorder.startRecording()
             stats.started(routeType(nextRecorder))
             thread = Thread({ capture(nextRecorder, nextSocket) }, "carplay-mic").apply {

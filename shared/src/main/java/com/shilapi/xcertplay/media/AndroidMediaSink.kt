@@ -312,7 +312,11 @@ class AndroidMediaSink(
     override fun onMicrophoneStarted(id: AudioStreamId, config: MicrophoneConfig) {
         // This callback runs on the downlink thread; microphone failures must not stop playback.
         try {
-            if (config.audioType == "telephony") enterCommunicationMode(id)
+            // CS11: MODE_IN_COMMUNICATION may hand the capture to a silent vendor input; it can be
+            // left alone at runtime with `ADB shell setprop debug.diplay.mic_mode 0`.
+            if (config.audioType == "telephony" && debugSwitch("debug.diplay.mic_mode", true)) {
+                enterCommunicationMode(id)
+            }
             val uplink = microphoneUplinks.computeIfAbsent(id) { MicrophoneUplink(config, onAudioDiagnostic) }
             if (!uplink.start()) {
                 microphoneUplinks.remove(id, uplink)
