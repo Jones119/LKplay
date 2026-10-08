@@ -1,3 +1,5 @@
 <resources>
-    <bool name="config_advanced_audio_channel_mapping">false</bool>
+    <!-- CS11: expose the per-channel mapping so guidance can be pinned to the vendor's own stream and
+         adjusted on site (the vendor ROM has STREAM_NAVI_TTS = 12 with its own volume UI). -->
+    <bool name="config_advanced_audio_channel_mapping">true</bool>
 </resources>

@@ -35,7 +35,10 @@ internal data class AudioChannelSelection(
  */
 internal object AudioChannelMapper {
     const val STREAM_TYPE_MAIN_HIGH_AUDIO = 102
-    const val DEFAULT_NAVIGATION_STREAM_TYPE = 14
+    // CS11: the vendor ROM exposes STREAM_NAVI_TTS as stream 12 and gives it its own volume UI, so
+    // guidance belongs there instead of AOSP stream 14 (which this ROM maps to nothing usable and
+    // made the car show media volume while a prompt played).
+    const val DEFAULT_NAVIGATION_STREAM_TYPE = 12
 
     fun map(
         audioType: String,

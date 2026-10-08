@@ -174,7 +174,7 @@ object AirPlayPersistence {
 
     fun loadAdvancedAudioChannelMapping(context: Context): Boolean =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getBoolean(KEY_ADVANCED_AUDIO_CHANNEL_MAPPING, false)
+            .getBoolean(KEY_ADVANCED_AUDIO_CHANNEL_MAPPING, true)
 
     fun saveAdvancedAudioChannelMapping(context: Context, enabled: Boolean) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
@@ -184,7 +184,7 @@ object AirPlayPersistence {
 
     fun loadNavigationStreamType(context: Context): Int =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getInt(KEY_NAVIGATION_STREAM_TYPE, 14)
+            .getInt(KEY_NAVIGATION_STREAM_TYPE, 12)
 
     fun saveNavigationStreamType(context: Context, streamType: Int) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()

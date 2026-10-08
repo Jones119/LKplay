@@ -185,8 +185,16 @@ internal class MicrophoneUplink(
         return peak
     }
 
-    private fun sourceLadder(primary: Int): List<Int> =
-        listOf(primary, MediaRecorder.AudioSource.MIC, MediaRecorder.AudioSource.DEFAULT).distinct()
+    private fun sourceLadder(primary: Int): List<Int> = listOf(
+        primary,
+        // The CS11 only opens the microphone through VOICE_COMMUNICATION: VOICE_RECOGNITION, MIC and
+        // DEFAULT all answer the probe with -3 there, which is why Siri (speechrecognition) fell back
+        // to the iPhone's own microphone while a call — which already uses VOICE_COMMUNICATION — sent
+        // the car's microphone fine.
+        MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+        MediaRecorder.AudioSource.MIC,
+        MediaRecorder.AudioSource.DEFAULT,
+    ).distinct()
 
     private fun voiceEffects(sessionId: Int): List<AudioEffect> = listOfNotNull(
         enabledEffect("AEC") {
