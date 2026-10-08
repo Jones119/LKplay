@@ -92,6 +92,9 @@ object VendorClusterBridge {
                 val directory = context.getExternalFilesDir(null) ?: return
                 val file = java.io.File(directory, "cluster-artwork-${System.currentTimeMillis()}.png")
                 java.io.FileOutputStream(file).use { out -> bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out) }
+                // The reader is another process: the default 0660 leaves it unreadable for anyone not
+                // in this app's group, which is what the car's own service is.
+                runCatching { file.setReadable(true, false) }
                 directory.listFiles()?.forEach { candidate ->
                     if (candidate.name.startsWith("cluster-artwork-") && candidate != file) runCatching { candidate.delete() }
                 }
@@ -107,6 +110,10 @@ object VendorClusterBridge {
         if (enabled) lastMedia?.let { pushMedia(it) }
     }
 
+    /** Supplied by the app side: renders Apple's maneuver type into the cluster's arrow image. */
+    @Volatile
+    var arrowRenderer: ((type: Int, drivingSide: Int) -> android.graphics.Bitmap?)? = null
+
     fun pushGuidance(snapshot: CarPlayGlance.Snapshot) {
         if (!enabled) return
         val context = appContext ?: return
@@ -120,15 +127,24 @@ object VendorClusterBridge {
             guidanceStarted = true
             call(target, "notifyTurnByTurnStarted")
         }
-        // The vendor arrow ids are its own set (docs/_digest/37 records them as unverified), so the
-        // Apple maneuver type is passed through and logged: the next on-car run says what the cluster
-        // draws, and the mapping table is corrected from that rather than guessed now.
-        call(target, "updateTurnByTurnArrow", type)
+        // The cluster draws the arrow from an image, the way the head unit's own HiCar bridge does
+        // (`updateDriveDirectionImage`, docs/_digest/37). The vendor's integer arrow ids are its own
+        // unverified set, so the app-supplied bitmap is preferred and the integer stays as a fallback.
+        val arrow = runCatching { arrowRenderer?.invoke(type, snapshot.drivingSide) }.getOrNull()
+        if (arrow != null) {
+            call(target, "updateTurnByTurnArrow", arrow)
+        } else {
+            call(target, "updateTurnByTurnArrow", type)
+        }
         if (snapshot.road.isNotEmpty()) call(target, "updateNextGuidancePointName", snapshot.road)
         if (snapshot.distanceMeters > 0) {
             call(target, "updateDistanceToNextGuidancePoint", snapshot.distanceMeters)
         }
-        snapshot.remainingSeconds?.let { call(target, "updateETA", it.toInt()) }
+        snapshot.remainingMeters?.let { call(target, "updateDistanceToDestination", it.toInt()) }
+        // The cluster's own ETA field reads as an arrival time, not a countdown: a remaining-seconds
+        // value rendered as "<1min" on the car, so the absolute arrival is preferred (docs/_digest/37).
+        val eta = snapshot.arrivalEpochSeconds ?: snapshot.remainingSeconds
+        eta?.let { call(target, "updateETA", it.toInt()) }
     }
 
     fun stopGuidance() {

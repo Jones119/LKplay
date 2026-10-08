@@ -711,8 +711,14 @@ class CarPlayHostActivity : ComponentActivity() {
         // wireless CarPlay must keep advertising Opus even though the platform has none, because
         // dropping it from the advertisement makes iOS stop routing audio to the car at all.
         runCatching { appendLog(com.shilapi.xcertplay.media.CodecCapabilityReport.line()) }
-        // Give the cluster bridge its context; it stays inert until `debug.diplay.cluster` is set.
-        runCatching { com.shilapi.xcertplay.media.VendorClusterBridge.attach(this) }
+        // Give the cluster bridge its context and its arrow renderer; both stay inert until
+        // `debug.diplay.cluster` is set.
+        runCatching {
+            com.shilapi.xcertplay.media.VendorClusterBridge.attach(this)
+            com.shilapi.xcertplay.media.VendorClusterBridge.arrowRenderer = { type, side ->
+                ManeuverArrowRenderer.render(this, type, side)
+            }
+        }
         // One-off reconnaissance for the two vendor integrations worth doing next (docs/_digest/37):
         // what the car's media centre answers, and what the DIM navigation API offers. Log-only.
         if (!DiPlayScreenState.vendorProbesDone) {
