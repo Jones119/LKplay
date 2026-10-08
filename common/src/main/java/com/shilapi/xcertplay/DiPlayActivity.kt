@@ -97,6 +97,10 @@ class DiPlayActivity : ComponentActivity() {
     private val tick = object : Runnable {
         override fun run() { refreshStatus(); handler.postDelayed(this, 1000) }
     }
+    private val bluetoothAutoConnectPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        DiPlayPreferences.saveConnectOnPhoneBluetooth(this, granted)
+        render()
+    }
     private val bluetoothPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) choosePhone() else permissionHelp(getString(R.string.nearby_devices), getString(R.string.allow_nearby_devices_so_diplay_can_connect_to_your_paired))
     }
@@ -156,6 +160,10 @@ class DiPlayActivity : ComponentActivity() {
         super.onNewIntent(intent); setIntent(intent)
         page = intent.getStringExtra("page") ?: "home"; render()
         handleWirelessRecovery()
+        if (consumeBluetoothAutoConnectIntent(intent)) {
+            if (initialLaunch) { initialLaunch = false; startCarHotspotOnLaunch() }
+            handler.post { connect(AirPlayPersistence.loadWirelessEnabled(this)) }
+        }
     }
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putString("page", page)
@@ -201,6 +209,22 @@ class DiPlayActivity : ComponentActivity() {
                 handler.post { connect(AirPlayPersistence.loadWirelessEnabled(this)) }
             }
         }
+        if (consumeBluetoothAutoConnectIntent(intent)) {
+            if (initialLaunch) { initialLaunch = false; startCarHotspotOnLaunch() }
+            handler.post { connect(AirPlayPersistence.loadWirelessEnabled(this)) }
+        }
+    }
+
+    /**
+     * True when [PhoneBluetoothReceiver] opened us for the selected iPhone. The receiver's extra is
+     * consumed here, and the request only counts when nothing is connected yet.
+     */
+    private fun consumeBluetoothAutoConnectIntent(intent: Intent): Boolean {
+        val requested = intent.getBooleanExtra(PhoneBluetoothReceiver.EXTRA_AUTO_CONNECT, false)
+        intent.removeExtra(PhoneBluetoothReceiver.EXTRA_AUTO_CONNECT)
+        return requested && DiPlayPreferences.connectOnPhoneBluetooth(this) &&
+            DiPlayPreferences.phoneAddress(this) != null && setupError == null &&
+            !CarPlayBackgroundSession.hasSession()
     }
     override fun onPause() {
         WheelKeyService.cancelLearning()
@@ -436,6 +460,21 @@ class DiPlayActivity : ComponentActivity() {
         }
         section(content, getString(R.string.automatic_connection), R.drawable.ic_dp_automation) { card ->
             toggle(card, getString(R.string.connect_when_diplay_opens), getString(R.string.use_your_last_connection_type_and_selected_iphone), DiPlayPreferences.autoConnect(this)) { DiPlayPreferences.saveAutoConnect(this, it) }
+            toggle(card, getString(R.string.connect_when_iphone_bluetooth_connects),
+                getString(R.string.connect_when_iphone_bluetooth_connects_description),
+                DiPlayPreferences.connectOnPhoneBluetooth(this)) { enabled ->
+                if (!enabled) {
+                    DiPlayPreferences.saveConnectOnPhoneBluetooth(this, false)
+                } else if (Build.VERSION.SDK_INT >= 31 &&
+                    checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED
+                ) {
+                    bluetoothAutoConnectPermission.launch(Manifest.permission.BLUETOOTH_CONNECT)
+                } else {
+                    // CS11 (API 19) has no runtime Bluetooth permission, so enabling takes effect here.
+                    DiPlayPreferences.saveConnectOnPhoneBluetooth(this, true)
+                    render()
+                }
+            }
             adbToggle(card, R.string.open_after_the_car_starts,
                 R.string.availability_depends_on_your_head_unit_s_startup_settings,
                 read = { AirPlayPersistence.loadAutoStartOnBoot(this) },

@@ -24,6 +24,17 @@
             android:enabled="true"
             tools:replace="android:enabled" />
 
+        <!-- Opens DiPlay when the selected iPhone reconnects over Bluetooth (upstream fe1a59d).
+             System broadcasts still reach a non-exported receiver; only other apps cannot. -->
+        <receiver
+            android:name="com.shilapi.xcertplay.PhoneBluetoothReceiver"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.bluetooth.device.action.ACL_CONNECTED" />
+            </intent-filter>
+        </receiver>
+
     </application>
 
 </manifest>
