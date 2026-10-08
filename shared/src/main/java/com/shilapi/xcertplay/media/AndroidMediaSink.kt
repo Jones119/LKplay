@@ -671,6 +671,11 @@ private class VideoDecoder(
             }
         }
         releaseDecoder()
+        // CS11: rebuilding the vendor decoder immediately after releasing it makes the component fall
+        // back to client-side buffers ("OMX_SetParameter() failed for StoreMetaDataInBuffers" then
+        // "Using client-side OMX mux"), and those frames never reach the visible surface — the black
+        // screen after the surface is recreated. Letting the old instance tear down avoids it.
+        if (Build.VERSION.SDK_INT < 23) runCatching { Thread.sleep(200L) }
         lastConfig?.let(::configureDecoder)
     }
 
