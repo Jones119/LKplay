@@ -189,10 +189,13 @@ class DiPlayActivity : ComponentActivity() {
         cancelUsbPermissionSetup()
         startupHotspotCancelled = true
         super.onStop()
-        // Bringing the running CarPlay screen forward stops this activity too, and scheduling the
+        // Bringing a running CarPlay screen forward stops this activity too, and scheduling the
         // centre-screen card there would drop it on top of CarPlay — which looks exactly like a black
-        // screen while frames keep flowing. Only a real departure to the car's own UI schedules it.
-        if (!isFinishing && !isChangingConfigurations && !carPlayScreenBroughtForward) {
+        // screen while frames keep flowing (docs/_digest/36). The host activity's own visibility is
+        // the reliable answer; CarPlayBackgroundSession.hasSession() stays false here.
+        if (!isFinishing && !isChangingConfigurations &&
+            !carPlayScreenBroughtForward && !DiPlayScreenState.carPlayHostVisible
+        ) {
             CenterMapOverlay.scheduleShow()
         }
     }

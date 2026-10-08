@@ -700,6 +700,7 @@ class CarPlayHostActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         isActivityStarted = true
+        DiPlayScreenState.carPlayHostVisible = true
         logThemeState(ThemeModeDiagnostics.Source.START, resources.configuration)
         mainHandler.removeCallbacks(pollConfiguration)
         mainHandler.post(pollConfiguration)
@@ -831,6 +832,7 @@ class CarPlayHostActivity : ComponentActivity() {
         closePicturePanel()
         // The controller, USB/iAP2 link, and VPN attachment intentionally outlive the UI.
         isActivityStarted = false
+        DiPlayScreenState.carPlayHostVisible = false
         logThemeState(ThemeModeDiagnostics.Source.STOP, resources.configuration)
         mainHandler.removeCallbacks(pollConfiguration)
         super.onStop()
