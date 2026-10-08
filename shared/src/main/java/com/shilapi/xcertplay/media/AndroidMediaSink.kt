@@ -106,7 +106,8 @@ internal class AudioFocusCoordinator(
         }
         held = true
         requestedChannel = primary.channel
-        val line = "Audio: focus requested channel=${primary.channel} gain=$gain granted=$result activeTracks=${active.size}"
+        val line = "Audio: focus requested channel=${primary.channel} stream=${primary.streamType} " +
+            "gain=$gain granted=$result activeTracks=${active.size}"
         Log.i(TAG, line)
         runCatching { report(line) }
     }
