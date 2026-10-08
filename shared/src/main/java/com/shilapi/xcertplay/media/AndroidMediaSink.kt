@@ -448,6 +448,14 @@ private class VideoDecoder(
     @Volatile private var decoder: MediaCodec? = null
     private var outputSurface: Surface? = surface
     private var lastConfig: VideoJob.Config? = null
+    // CS11: a decoder rebuilt for a new surface can land in the vendor's client-side buffer mode,
+    // where it produces no output at all while our counters still look healthy — the black screen
+    // after returning from the car's launcher. EasyPlay retries the rebuild on a one second cooldown
+    // until frames appear (docs/_digest/36); these counters drive the same retry here.
+    private var outputFramesSinceConfigure = 0
+    private var inputsSinceConfigure = 0
+    private var lastConfigureAtNs = 0L
+    private var lastRebuildAtNs = 0L
     private var renderedFrameLogged = false
     private var submittedFrameLogged = false
     private var duplicateConfigLogged = false
@@ -508,6 +516,21 @@ private class VideoDecoder(
                     stats.onQueueDepth(queue.pendingFrames())
                     stats.logIfDue()?.let(report)
                     if (referenceChain.needsKeyFrame && lastConfig != null && outputSurface != null) requestKeyFrameIfDue()
+            // CS11: a decoder rebuilt for a new surface can stop rendering entirely while the stream
+            // keeps arriving (rx ~2 fps, shown ~0). Rebuild it again — at most once a second, and only
+            // once input has actually been handed to it — until it renders something (docs/_digest/36).
+            if (outputFramesSinceConfigure == 0 && inputsSinceConfigure > 0 && decoder != null &&
+                lastConfig != null && outputSurface != null
+            ) {
+                val now = System.nanoTime()
+                if (now - lastConfigureAtNs > NO_OUTPUT_GRACE_NS && now - lastRebuildAtNs > REBUILD_COOLDOWN_NS) {
+                    lastRebuildAtNs = now
+                    Log.w(TAG, "video decoder rendered nothing since configure; rebuilding it")
+                    releaseDecoder()
+                    lastConfig?.let(::configureDecoder)
+                    requestKeyFrameIfDue()
+                }
+            }
                 } catch (error: Exception) {
                     if (running) Log.e(TAG, "video decoder job failed: ${job?.javaClass?.simpleName}", error)
                     if (running) reportFailure("stage=${job?.javaClass?.simpleName ?: "drain"}", error)
@@ -581,6 +604,10 @@ private class VideoDecoder(
                 TAG,
                 "video decoder configured name=${next.name} mime=$mime size=${width}x$height",
             )
+            // A freshly configured decoder owes us its first frame; the retry guard watches for it.
+            outputFramesSinceConfigure = 0
+            inputsSinceConfigure = 0
+            lastConfigureAtNs = System.nanoTime()
         }
     }
 
@@ -707,6 +734,7 @@ private class VideoDecoder(
         if (annexB.size <= input.remaining()) {
             input.put(annexB)
             codec.queueInputBuffer(index, 0, annexB.size, System.nanoTime() / 1000, 0)
+        inputsSinceConfigure++
             referenceChain.onQueued()
         } else {
             recover("video frame exceeded codec input capacity")
@@ -747,7 +775,10 @@ private class VideoDecoder(
                     else (System.nanoTime() / 1000) - info.presentationTimeUs
                     val render = outputSurface != null && ageUs <= RENDER_MAX_AGE_US
                     codec.releaseOutputBuffer(index, render)
-                    if (render) stats.onRendered()
+                    if (render) {
+                        stats.onRendered()
+                        outputFramesSinceConfigure++
+                    }
                     // Without a surface nothing can be presented yet; only a refused stale frame counts.
                     else if (outputSurface != null) stats.onDropped()
                     if (render && !renderedFrameLogged) {
@@ -814,6 +845,10 @@ private class VideoDecoder(
         const val INPUT_TIMEOUT_US = 10_000L
         const val STALL_RECOVERY_NS = 1_000_000_000L
         const val RENDER_MAX_AGE_US = 250_000L
+        /** How long a freshly configured decoder may render nothing before it is rebuilt (CS11). */
+        const val NO_OUTPUT_GRACE_NS = 700_000_000L
+        /** Minimum spacing between those rebuilds, matching EasyPlay's one second cooldown. */
+        const val REBUILD_COOLDOWN_NS = 1_000_000_000L
         val START_CODE = byteArrayOf(0x00, 0x00, 0x00, 0x01)
     }
 }
