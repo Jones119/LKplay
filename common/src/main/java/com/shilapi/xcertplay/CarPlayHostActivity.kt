@@ -280,39 +280,6 @@ class CarPlayHostActivity : ComponentActivity() {
     private var controller: CarPlayController? = null
     private var currentSurface: Surface? = null
     private var currentSurfaceTexture: SurfaceTexture? = null
-    /** Timestamp of the last rendered video frame, and the counters behind the throughput monitor. */
-    private var lastVideoFrameMs = 0L
-    private var videoFramesSinceCheck = 0
-    private var videoCheckStartedMs = 0L
-    private var videoStallSamples = 0
-
-    /**
-     * Watches the rendered-frame rate. After the car's launcher covers CarPlay the phone throttles the
-     * video to roughly 1 fps and a keyframe request alone does not restore it, so a session that stays
-     * far below the expected rate is rebuilt (docs/_digest/36). Only a session that has rendered at
-     * least one frame is judged, so starting up is left to the existing startup retry budget.
-     */
-    private val videoStallCheck = object : Runnable {
-        override fun run() {
-            val now = SystemClock.elapsedRealtime()
-            val started = videoCheckStartedMs
-            val frames = videoFramesSinceCheck
-            videoCheckStartedMs = now
-            videoFramesSinceCheck = 0
-            if (started != 0L && frames >= 0) {
-                val elapsed = (now - started).coerceAtLeast(1L)
-                val fps = frames * 1000.0 / elapsed
-                val judging = lastVideoFrameMs != 0L && activeAirPlaySession != null && !shuttingDown.get()
-                videoStallSamples = if (judging && fps < VIDEO_MIN_FPS) videoStallSamples + 1 else 0
-                if (videoStallSamples >= VIDEO_STALL_SAMPLES) {
-                    videoStallSamples = 0
-                    appendLog("video throughput frames=$frames in ${elapsed}ms; reconnecting")
-                    reconnectAfterLoss("video throughput fell to ${frames * 1000L / elapsed}fps")
-                }
-            }
-            mainHandler.postDelayed(this, VIDEO_CHECK_INTERVAL_MILLIS)
-        }
-    }
     // Copies of stream 111 outside the dashboard (centre card, launcher maps) each get their own decoder.
     private val mirrorSink: (String, Surface?) -> Unit = { key, surface -> sink?.setMirrorSurface(SCREEN_TYPE_ALT, key, surface) }
     private val mirrorsChanged: () -> Unit = {
@@ -464,12 +431,6 @@ class CarPlayHostActivity : ComponentActivity() {
             }
             appendLog(if (existing === surface) "Texture surface reused" else "Texture surface created")
             attachSurface(surface)
-            // Start the throughput watch from the surface the video comes back to.
-            videoCheckStartedMs = SystemClock.elapsedRealtime()
-            videoFramesSinceCheck = 0
-            videoStallSamples = 0
-            mainHandler.removeCallbacks(videoStallCheck)
-            mainHandler.postDelayed(videoStallCheck, VIDEO_CHECK_INTERVAL_MILLIS)
             updateVideoLayout(width, height)
             scheduleDisplaySize(width, height)
         }
@@ -863,7 +824,6 @@ class CarPlayHostActivity : ComponentActivity() {
 
     override fun onPause() {
         nightModeController.pause()
-        mainHandler.removeCallbacks(videoStallCheck)
         super.onPause()
     }
 
@@ -3384,8 +3344,6 @@ class CarPlayHostActivity : ComponentActivity() {
             }
 
             override fun onVideoFrameRendered(session: AirPlaySession) {
-                lastVideoFrameMs = android.os.SystemClock.elapsedRealtime()
-                videoFramesSinceCheck++
                 runOnUiThread {
                     if (controllerGeneration != restartGeneration || activeAirPlaySession !== session || shuttingDown.get()) return@runOnUiThread
                     if (!startupRetryBudget.firstFrame(session, android.os.SystemClock.elapsedRealtime())) return@runOnUiThread
@@ -4394,10 +4352,6 @@ class CarPlayHostActivity : ComponentActivity() {
     }
 
     private companion object {
-        /** Throughput monitor: sample every 4 s and rebuild the session after two slow samples. */
-        const val VIDEO_CHECK_INTERVAL_MILLIS = 4_000L
-        const val VIDEO_MIN_FPS = 5.0
-        const val VIDEO_STALL_SAMPLES = 2
         const val SIDE_PANEL_REFRESH_MILLIS = 5_000L
         const val TAG = "xcertplay-usb"
         const val SCREEN_TYPE_MAIN = 110
