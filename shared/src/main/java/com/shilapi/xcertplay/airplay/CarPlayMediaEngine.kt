@@ -107,14 +107,18 @@ class CarPlayMediaEngine(
         }
         sink.setVideoRecoveryHandler(type) {
             if (streams[streamKey] === screen) {
-                // The cluster asks for a keyframe of its own screen; the plain command is the main screen's.
-                val command = if (type == STREAM_TYPE_ALT_SCREEN) {
-                    mapOf("type" to "forceKeyFrame", "params" to mapOf("uuid" to AirPlayInfoPlist.ALT_UUID))
-                } else {
-                    mapOf("type" to "forceKeyFrame")
-                }
-                val sent = session.sendCommand(command)
-                session.logDebug("Video recovery: requested keyframe sent=$sent")
+                // The command must name the display: the RTSP layer accepts a uuid-less forceKeyFrame
+                // and reports success, but the phone then never re-sends an IDR for the main screen,
+                // which leaves a rebuilt decoder with nothing to show — the black screen after
+                // returning from the car's launcher (docs/_digest/36). The plain command stays as a
+                // fallback for a phone that wants no uuid.
+                val uuid = if (type == STREAM_TYPE_ALT_SCREEN) AirPlayInfoPlist.ALT_UUID
+                else AirPlayInfoPlist.MAIN_UUID
+                val named = session.sendCommand(
+                    mapOf("type" to "forceKeyFrame", "params" to mapOf("uuid" to uuid)),
+                )
+                val sent = named || session.sendCommand(mapOf("type" to "forceKeyFrame"))
+                session.logDebug("Video recovery: requested keyframe uuid=$uuid named=$named sent=$sent")
             }
         }
         val port = screen.listen(
