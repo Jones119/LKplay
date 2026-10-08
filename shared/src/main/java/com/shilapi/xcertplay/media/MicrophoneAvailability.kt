@@ -18,7 +18,7 @@ import android.util.Log
  * It opens and closes the recorder immediately, so it must only be called while no CarPlay
  * microphone session is active.
  */
-internal object MicrophoneAvailability {
+object MicrophoneAvailability {
     private const val TAG = "xcertplay-usb"
     private const val SAMPLE_RATE = 48_000
     private const val PROBE_BYTES = 1_920

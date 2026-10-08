@@ -661,4 +661,8 @@
     <string name="car_button_description">CarPlay 会在应用列表中显示此图标和名称。点按即可返回车辆自带的界面。更改将在 CarPlay 下次连接时生效。</string>
     <string name="car_button_saved_next_connection">已保存。CarPlay 将在下次连接时显示新的图标和名称。</string>
     <string name="this_head_unit_has_no_image_picker">此车机没有图片选择器。</string>
+    <string name="microphone_status_checking">正在检测车机麦克风…</string>
+    <string name="microphone_status_available">麦克风：可用，CarPlay 语音输入能使用它</string>
+    <string name="microphone_status_blocked">麦克风：被车机语音助手占用，CarPlay 听不到你说话</string>
+    <string name="microphone_status_hint">若被占用，请在车机设置里关闭语音唤醒（嗨领克 / 小度小度），CarPlay 即可独占麦克风。</string>
 </resources>

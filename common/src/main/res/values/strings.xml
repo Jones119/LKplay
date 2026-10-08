@@ -661,4 +661,8 @@
     <string name="car_button_description">CarPlay shows this icon and name in its app list. Tap it to return to the car\'s own screen. Changes apply the next time CarPlay connects.</string>
     <string name="car_button_saved_next_connection">Saved. CarPlay shows the new icon and name the next time it connects.</string>
     <string name="this_head_unit_has_no_image_picker">This head unit has no image picker.</string>
+    <string name="microphone_status_checking">Checking the head unit microphone…</string>
+    <string name="microphone_status_available">Microphone: available, CarPlay voice input can use it</string>
+    <string name="microphone_status_blocked">Microphone: held by the head unit voice assistant, so CarPlay cannot hear you</string>
+    <string name="microphone_status_hint">If it is held, switch the car voice wake word (嗨领克 / 小度小度) off in the head unit settings; CarPlay then owns the microphone.</string>
 </resources>

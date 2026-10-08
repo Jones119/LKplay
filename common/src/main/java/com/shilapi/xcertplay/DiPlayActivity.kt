@@ -583,6 +583,25 @@ class DiPlayActivity : ComponentActivity() {
             }
             mediaChannelControl(card)
             navigationChannelControl(card)
+            // The head unit can keep the microphone for its own voice assistant, and CarPlay voice
+            // input then fails silently; report it instead of leaving the driver to guess.
+            val microphoneStatus = label(getString(R.string.microphone_status_checking), 14, MUTED)
+            card.addView(microphoneStatus)
+            card.addView(label(getString(R.string.microphone_status_hint), 13, MUTED))
+            Thread({
+                val status = com.shilapi.xcertplay.media.MicrophoneAvailability.probe()
+                runOnUiThread {
+                    microphoneStatus.text = getString(
+                        when (status) {
+                            com.shilapi.xcertplay.media.MicrophoneAvailability.Status.AVAILABLE ->
+                                R.string.microphone_status_available
+                            com.shilapi.xcertplay.media.MicrophoneAvailability.Status.BLOCKED ->
+                                R.string.microphone_status_blocked
+                            else -> R.string.microphone_status_checking
+                        },
+                    )
+                }
+            }, "diplay-mic-status").apply { isDaemon = true }.start()
         }
         section(content, getString(R.string.location), R.drawable.ic_dp_navigation) { card ->
             toggle(card, getString(R.string.report_location_to_iphone),
