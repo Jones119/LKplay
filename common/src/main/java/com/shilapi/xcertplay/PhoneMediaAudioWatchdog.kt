@@ -141,10 +141,14 @@ internal class PhoneMediaAudioWatchdog(private val context: Context) {
 
         override fun release(): Boolean {
             vendor.disconnect()?.let { if (it) return true }
+            // CarPlay has to own phone calls: while HFP stays connected the head unit's own dialer
+            // takes the call over and CarPlay's telephony stream never carries its audio.
+            if (vendor.disconnectHfp() == true) return true
             return callProfileMethod("disconnect")
         }
 
-        override fun restore(): Boolean = callProfileMethod("connect")
+        override fun restore(): Boolean =
+            vendor.connectHfp() == true || vendor.connect() == true || callProfileMethod("connect")
     }
 
     /**
@@ -205,6 +209,30 @@ private class VendorA2dpControl(
         for (address in candidates.distinct()) {
             val result = invoke(target, "reqA2dpDisconnect", address) as? Boolean
             log("reqA2dpDisconnect($address)=$result")
+            if (result == true) return true
+        }
+        return false
+    }
+
+    /** The hands-free profile of the same adapter API, so CarPlay can own phone calls. */
+    private val hfp: Any? = bt?.let { owner ->
+        invoke(owner, "getHfp")?.also { log("adaptapi hfp=${it.javaClass.name}") }
+    }
+
+    fun connect(): Boolean? = request(a2dp, "reqA2dpConnect", "getA2dpConnectedAddress")
+
+    fun connectHfp(): Boolean? = request(hfp, "reqHfpConnect", "getHfpConnectedAddress")
+
+    fun disconnectHfp(): Boolean? = request(hfp, "reqHfpDisconnect", "getHfpConnectedAddress")
+
+    /** Tries the live address first, then the paired one, logging every attempt's result. */
+    private fun request(target: Any?, method: String, addressGetter: String): Boolean? {
+        if (target == null) return null
+        val connected = invoke(target, addressGetter) as? String
+        val candidates = listOfNotNull(connected?.takeIf { it.isNotBlank() }, phoneAddress?.takeIf { it.isNotBlank() })
+        for (address in candidates.distinct()) {
+            val result = invoke(target, method, address) as? Boolean
+            log("$method($address)=$result")
             if (result == true) return true
         }
         return false
