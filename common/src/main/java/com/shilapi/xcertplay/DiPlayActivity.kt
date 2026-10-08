@@ -164,6 +164,7 @@ class DiPlayActivity : ComponentActivity() {
             if (initialLaunch) { initialLaunch = false; startCarHotspotOnLaunch() }
             handler.post { connect(AirPlayPersistence.loadWirelessEnabled(this)) }
         }
+        openCarPlayScreenIfConnected()
     }
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putString("page", page)
@@ -213,12 +214,30 @@ class DiPlayActivity : ComponentActivity() {
             if (initialLaunch) { initialLaunch = false; startCarHotspotOnLaunch() }
             handler.post { connect(AirPlayPersistence.loadWirelessEnabled(this)) }
         }
+        openCarPlayScreenIfConnected()
     }
 
     /**
      * True when [PhoneBluetoothReceiver] opened us for the selected iPhone. The receiver's extra is
      * consumed here, and the request only counts when nothing is connected yet.
      */
+    /**
+     * A running CarPlay session already owns the video surface, so tapping DiPlay goes straight back
+     * to the CarPlay screen instead of the wired/wireless page. That is what the driver expects, and
+     * it keeps the host activity's surface from being torn down and rebuilt for nothing. The
+     * connection page stays underneath, so Back still reaches it.
+     */
+    private fun openCarPlayScreenIfConnected(): Boolean {
+        if (intent.getStringExtra("page") != null) return false
+        if (!CarPlayBackgroundSession.hasSession() || !CarPlayBackgroundSession.isOwner(this)) return false
+        return runCatching {
+            startActivity(
+                Intent(this, CarPlayHostActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),
+            )
+            true
+        }.getOrDefault(false)
+    }
+
     private fun consumeBluetoothAutoConnectIntent(intent: Intent): Boolean {
         val requested = intent.getBooleanExtra(PhoneBluetoothReceiver.EXTRA_AUTO_CONNECT, false)
         intent.removeExtra(PhoneBluetoothReceiver.EXTRA_AUTO_CONNECT)
