@@ -597,7 +597,11 @@ private class VideoDecoder(
         val attempts = listOf(
             DecoderAttempt(codecName = null, tuned = true),
             DecoderAttempt(codecName = null, tuned = false),
-        ) + softwareDecoderName(mime)?.let { listOf(DecoderAttempt(it, tuned = false)) }.orEmpty()
+        ) + softwareDecoderName(mime)?.let { listOf(DecoderAttempt(it, tuned = false)) }.orEmpty() +
+            // Last resort: every other registered name for this MIME. This ROM's vendor H.264
+            // component can refuse a configure/start (docs/_digest/36, /37) and createDecoderByType
+            // only ever offers the default, so walking the rest is worth having before giving up.
+            enumeratedCodecNames(mime).map { DecoderAttempt(it, tuned = false) }
         var next: MediaCodec? = null
         for (attempt in attempts) {
             next = tryConfigure(mime, csd, surface, attempt)
@@ -624,6 +628,30 @@ private class VideoDecoder(
     }
 
     private data class DecoderAttempt(val codecName: String?, val tuned: Boolean)
+
+    /**
+     * Every other registered decoder name for [mime], for the API-19 fallback above.
+     *
+     * `MediaCodecList.getCodecInfos` is API 21+, so the deprecated static pair does the work here and
+     * the whole body is guarded (EasyPlay's LegacyCodecFactory enumerates exactly this way). The guard
+     * is also why the old calls sit in their own method: Dalvik resolves references per method, so an
+     * API-21-only reference must never share a body with an API-19 one.
+     */
+    @Suppress("DEPRECATION")
+    private fun enumeratedCodecNames(mime: String): List<String> {
+        if (Build.VERSION.SDK_INT >= 21) return emptyList()
+        return runCatching {
+            val count = android.media.MediaCodecList.getCodecCount()
+            (0 until count).mapNotNull { index ->
+                val info = android.media.MediaCodecList.getCodecInfoAt(index) ?: return@mapNotNull null
+                if (info.isEncoder) {
+                    null
+                } else {
+                    info.supportedTypes.firstOrNull { it.equals(mime, ignoreCase = true) }?.let { info.name }
+                }
+            }.filter { it.isNotBlank() }
+        }.getOrDefault(emptyList())
+    }
 
     private fun buildFormat(mime: String, csd: List<ByteArray>, tuned: Boolean): MediaFormat =
         MediaFormat.createVideoFormat(mime, width, height).apply {

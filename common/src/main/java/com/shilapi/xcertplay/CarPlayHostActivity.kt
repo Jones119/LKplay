@@ -707,6 +707,10 @@ class CarPlayHostActivity : ComponentActivity() {
         super.onStart()
         isActivityStarted = true
         DiPlayScreenState.carPlayHostVisible = true
+        // One honest line about what this ROM actually provides. It is reported, never acted on:
+        // wireless CarPlay must keep advertising Opus even though the platform has none, because
+        // dropping it from the advertisement makes iOS stop routing audio to the car at all.
+        runCatching { appendLog(com.shilapi.xcertplay.media.CodecCapabilityReport.line()) }
         logThemeState(ThemeModeDiagnostics.Source.START, resources.configuration)
         mainHandler.removeCallbacks(pollConfiguration)
         mainHandler.post(pollConfiguration)
