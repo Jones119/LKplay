@@ -140,6 +140,12 @@ internal object CarPlayMediaKeys {
             decoded?.recycle()
             return
         }
+        // The cluster only ever showed the first track's cover, so record which transfer each decode
+        // belongs to and whether it is the track's current one.
+        Log.i(
+            TAG,
+            "artwork decoded id=$id bytes=${decoded?.byteCount} current=${nowPlaying.artworkTransferId}",
+        )
         artworkCache.remove(id)
         artworkCache[id] = decoded
         while (artworkCache.size > MAX_CACHED_ARTWORK) artworkCache.remove(artworkCache.keys.first())
