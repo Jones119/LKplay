@@ -461,6 +461,11 @@ private class VideoDecoder(
 
     fun setSurface(surface: Surface?) {
         queue.offer(VideoJob.SurfaceChanged(surface))
+        // A new surface rebuilds the decoder, which then starts mid-GOP: without a fresh IDR the panel
+        // stays black. That is exactly what the car showed after its launcher covered CarPlay (the
+        // surface is destroyed, then handed back on return), and API 19 has no MediaCodec
+        // setOutputSurface to avoid the rebuild.
+        if (surface != null) requestKeyFrame()
     }
 
     override fun close() {
