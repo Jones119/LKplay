@@ -222,10 +222,12 @@ class AndroidMediaSink(
 
     fun setSurface(type: Int, surface: Surface) {
         surfaces[type] = surface
+        Log.i("xcertplay-usb", "video surface set type=$type id=${System.identityHashCode(surface)} valid=${surface.isValid}")
         videoDecoders[type]?.setSurface(surface)
     }
 
     fun clearSurface(type: Int, surface: Surface) {
+        Log.i("xcertplay-usb", "video surface cleared type=$type id=${System.identityHashCode(surface)}")
         if (surfaces.remove(type, surface)) videoDecoders[type]?.setSurface(null)
     }
 
@@ -454,6 +456,7 @@ private class VideoDecoder(
     // until frames appear (docs/_digest/36); these counters drive the same retry here.
     private var outputFramesSinceConfigure = 0
     private var inputsSinceConfigure = 0
+    private var receivedSinceConfigure = 0
     private var lastConfigureAtNs = 0L
     private var lastRebuildAtNs = 0L
     private var renderedFrameLogged = false
@@ -475,6 +478,8 @@ private class VideoDecoder(
 
     fun submit(nalus: ByteArray) {
         stats.onReceived(nalus.size)
+        // Data is arriving from the phone; the retry guard cares whether any of it ever renders.
+        receivedSinceConfigure++
         queue.offer(VideoJob.Frame(nalus))
     }
 
@@ -517,15 +522,21 @@ private class VideoDecoder(
                     stats.logIfDue()?.let(report)
                     if (referenceChain.needsKeyFrame && lastConfig != null && outputSurface != null) requestKeyFrameIfDue()
             // CS11: a decoder rebuilt for a new surface can stop rendering entirely while the stream
-            // keeps arriving (rx ~2 fps, shown ~0). Rebuild it again — at most once a second, and only
-            // once input has actually been handed to it — until it renders something (docs/_digest/36).
-            if (outputFramesSinceConfigure == 0 && inputsSinceConfigure > 0 && decoder != null &&
+            // keeps arriving. Two shapes of that: the vendor component lands in client-side buffer
+            // mode, or the reference chain never sees a keyframe so nothing is ever handed to it. Both
+            // look the same from here — data arrives, nothing renders — and both are what EasyPlay's
+            // one second rebuild cooldown exists for (docs/_digest/36).
+            if (outputFramesSinceConfigure == 0 && receivedSinceConfigure > 0 && decoder != null &&
                 lastConfig != null && outputSurface != null
             ) {
                 val now = System.nanoTime()
                 if (now - lastConfigureAtNs > NO_OUTPUT_GRACE_NS && now - lastRebuildAtNs > REBUILD_COOLDOWN_NS) {
                     lastRebuildAtNs = now
-                    Log.w(TAG, "video decoder rendered nothing since configure; rebuilding it")
+                    Log.w(
+                        TAG,
+                        "video decoder rendered nothing since configure " +
+                            "(received=$receivedSinceConfigure inputs=$inputsSinceConfigure); rebuilding it",
+                    )
                     releaseDecoder()
                     lastConfig?.let(::configureDecoder)
                     requestKeyFrameIfDue()
@@ -607,6 +618,7 @@ private class VideoDecoder(
             // A freshly configured decoder owes us its first frame; the retry guard watches for it.
             outputFramesSinceConfigure = 0
             inputsSinceConfigure = 0
+            receivedSinceConfigure = 0
             lastConfigureAtNs = System.nanoTime()
         }
     }

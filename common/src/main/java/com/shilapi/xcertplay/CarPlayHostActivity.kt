@@ -280,6 +280,8 @@ class CarPlayHostActivity : ComponentActivity() {
     private var controller: CarPlayController? = null
     private var currentSurface: Surface? = null
     private var currentSurfaceTexture: SurfaceTexture? = null
+    /** Set when the video surface is destroyed; a fresh activity is the only working recovery. */
+    private var surfaceLostSinceCreate = false
     // Copies of stream 111 outside the dashboard (centre card, launcher maps) each get their own decoder.
     private val mirrorSink: (String, Surface?) -> Unit = { key, surface -> sink?.setMirrorSurface(SCREEN_TYPE_ALT, key, surface) }
     private val mirrorsChanged: () -> Unit = {
@@ -449,6 +451,10 @@ class CarPlayHostActivity : ComponentActivity() {
             }
             currentSurface = null
             currentSurfaceTexture = null
+            // The vendor decoder cannot be rebuilt into surface mode on this head unit (it falls back
+            // to client-side buffers and renders nothing visible), so a lost surface means the whole
+            // host activity has to come back fresh — see onResume (docs/_digest/36).
+            surfaceLostSinceCreate = true
             appendLog("Texture surface destroyed")
             return true
         }
@@ -711,10 +717,18 @@ class CarPlayHostActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        // Coming back from the car's launcher can restore the window without a fresh
-        // SurfaceTexture callback, so the decoder stayed detached from the surface the log recorded
-        // ("video decoder detached from surface") and the screen stayed black while frames kept
-        // decoding. Re-attaching the live surface is a no-op when the decoder already has it.
+        // Coming back after the car's launcher took the screen: the TextureView surface was destroyed,
+        // and the decoder rebuilt for the new one cannot render to a surface on this vendor codec
+        // (OMX_SetParameter() failed for StoreMetaDataInBuffers → client-side buffers, nothing on the
+        // panel). A freshly created activity builds a fresh decoder, which is the path that works, so
+        // restart ourselves once instead of showing a black screen (docs/_digest/36).
+        if (surfaceLostSinceCreate && !shuttingDown.get() && !isFinishing && !isChangingConfigurations) {
+            surfaceLostSinceCreate = false
+            appendLog("surface was lost; recreating the CarPlay screen for a fresh decoder")
+            recreate()
+            return
+        }
+        // Also make sure the decoder is bound to whatever surface is live now.
         currentSurface?.takeIf { it.isValid }?.let(::attachSurface)
         val savedNightMode = AirPlayPersistence.loadCarPlayNightMode(this)
         val savedThreshold = AirPlayPersistence.loadAmbientLightThreshold(this)
@@ -4097,9 +4111,13 @@ class CarPlayHostActivity : ComponentActivity() {
     }
 
     private fun attachSurface(surface: Surface) {
+        appendLog("attach surface id=${System.identityHashCode(surface)} valid=${surface.isValid}")
         sink?.setSurface(SCREEN_TYPE_MAIN, surface)
-        // With the dashboard map on, stream 111 goes to the mirror surfaces instead of the main view.
-        if (!AirPlayPersistence.loadClusterMapEnabled(this)) sink?.setSurface(SCREEN_TYPE_ALT, surface)
+        // Stream 111 must NOT share the main SurfaceTexture: with the dashboard map off this used to
+        // hand it the same surface, so two decoders wrote into one SurfaceTexture and the main stream
+        // never won a buffer (shown=0 while its stream kept arriving) — the black screen after the
+        // surface came back. The centre-screen card has its own mirror surfaces (mirrorSink →
+        // setMirrorSurface), so nothing here depends on that sharing (docs/_digest/36).
     }
 
     private fun onHostTouch(view: View, event: MotionEvent): Boolean {
