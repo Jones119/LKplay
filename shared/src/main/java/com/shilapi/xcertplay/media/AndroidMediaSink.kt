@@ -940,6 +940,8 @@ private class AudioRenderer(
     private var diagnosticStage = "starting"
     private var lastDecoderOutputMetadata: String? = null
     private var decoderOutputReports = 0
+    /** Times the decoder's real output format disagreed with the advertised one (see drainCodec). */
+    private var decoderFormatMismatches = 0
     private val thread = Thread({
         android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO)
         run()
@@ -1366,13 +1368,29 @@ private class AudioRenderer(
                     // Vendor metadata inspection must not interrupt otherwise working playback.
                     if (decoderOutputReports < 4) runCatching {
                         val outputFormat = codec.outputFormat
-                        val metadata = "rate=${outputFormat.intOrNull(MediaFormat.KEY_SAMPLE_RATE)} " +
-                            "channels=${outputFormat.intOrNull(MediaFormat.KEY_CHANNEL_COUNT)} " +
+                        val rate = outputFormat.intOrNull(MediaFormat.KEY_SAMPLE_RATE)
+                        val channels = outputFormat.intOrNull(MediaFormat.KEY_CHANNEL_COUNT)
+                        val metadata = "rate=$rate channels=$channels " +
                             "pcmEncoding=${outputFormat.intOrNull(MediaFormat.KEY_PCM_ENCODING)}"
                         if (metadata != lastDecoderOutputMetadata) {
                             lastDecoderOutputMetadata = metadata
                             decoderOutputReports++
                             report("Audio: decoded format audioType=${format.audioType} codec=${format.codec} $metadata")
+                        }
+                        // The track was built from the advertised format; if the decoder disagrees, the
+                        // PCM is written at the wrong pitch/length. EasyPlay rebuilds the track here
+                        // (docs/_digest/37); we report it first, because rebuilding mid-stream is not
+                        // worth the risk until the car shows it actually happens.
+                        if ((rate != null && rate != format.sampleRate) ||
+                            (channels != null && channels != format.channels)
+                        ) {
+                            decoderFormatMismatches++
+                            Log.w(
+                                TAG,
+                                "audio decoder output disagrees with the advertised format " +
+                                    "advertised=${format.sampleRate}Hz/${format.channels}ch " +
+                                    "decoded=${rate}Hz/${channels}ch audioType=${format.audioType}",
+                            )
                         }
                     }
                 }

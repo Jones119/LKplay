@@ -9,6 +9,8 @@ internal data class AppleManeuver(
     val remainingSeconds: Long? = null,
     val remainingMeters: Long? = null,
     val arrivalEpochSeconds: Long? = null,
+    /** True while the iPhone is guiding the driver to the route's start (state 6 + type 11). */
+    val proceedToRoute: Boolean = false,
 )
 
 internal enum class RouteGuidanceChange {
@@ -33,6 +35,12 @@ internal class RouteGuidanceState(
 
     private val maneuvers = mutableMapOf<Int, Maneuver>()
     private var routeActive = false
+    /**
+     * The route-guidance state byte (0x5201 type 0x01). 1 = active, 6 = proceeding to the route's
+     * start; paired with Apple maneuver type 11 it means "drive to the route", which consumers must
+     * not draw as an ordinary turn (docs/_digest/37).
+     */
+    private var routeState: Int? = null
     private var activeIndex = -1
     private var distanceMeters = 0
     private var currentRoad = ""
@@ -57,12 +65,16 @@ internal class RouteGuidanceState(
         return AppleManeuver(
             distanceMeters, maneuver.type, maneuver.drivingSide,
             roadFor(maneuver), remainingSeconds, remainingMeters, arrivalEpochSeconds,
+            // "Proceeding to route": route state 6 with Apple maneuver type 11 means the driver is
+            // being sent to the route's start, not through a turn (docs/_digest/37).
+            proceedToRoute = routeState == 6 && maneuver.type == 11,
         )
     }
 
     fun clear(): Boolean {
         val wasActive = routeActive
         routeActive = false
+        routeState = null
         activeIndex = -1
         distanceMeters = 0
         currentRoad = ""
@@ -132,7 +144,10 @@ internal class RouteGuidanceState(
             return RouteGuidanceChange.NONE
         }
         if (firstManeuver != null) emptyListSinceNs = null
-        if (state != null) routeActive = true
+        if (state != null) {
+            routeState = state
+            routeActive = true
+        }
         if (firstManeuver != null) {
             activeIndex = firstManeuver!!
             routeActive = true

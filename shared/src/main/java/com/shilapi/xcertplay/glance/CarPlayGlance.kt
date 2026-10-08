@@ -20,6 +20,8 @@ object CarPlayGlance {
         val arrivalEpochSeconds: Long? = null,
         val remainingSeconds: Long? = null,
         val remainingMeters: Long? = null,
+    /** True while the iPhone guides the driver to the route's start (see RouteGuidanceState). */
+    val proceedToRoute: Boolean = false,
         val song: String? = null,
         val playing: Boolean = false,
     )
@@ -77,6 +79,7 @@ object CarPlayGlance {
             arrivalEpochSeconds = maneuver?.arrivalEpochSeconds,
             remainingSeconds = maneuver?.remainingSeconds,
             remainingMeters = maneuver?.remainingMeters,
+            proceedToRoute = maneuver?.proceedToRoute == true,
             song = current?.text,
             playing = current?.playing ?: false,
         )

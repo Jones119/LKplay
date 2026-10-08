@@ -21,7 +21,10 @@ object CarPlayTouchMapper {
         for (index in 0 until count) {
             contacts.add(
                 AirPlayContact(
-                    id = index,
+                    // Slot by the platform pointer id, not by index: with index-keyed slots the finger
+                    // that survives an ACTION_POINTER_UP inherits the lifted one's slot and CarPlay sees
+                    // it jump (EasyPlay's LegacyCarPlayTouchHandler keys by pointer id, docs/_digest/37).
+                    id = event.getPointerId(index),
                     x = ((event.getX(index) - content.left).toDouble() / width).coerceIn(0.0, 1.0),
                     y = ((event.getY(index) - content.top).toDouble() / height).coerceIn(0.0, 1.0),
                     down = !allUp && index != liftedIndex,
