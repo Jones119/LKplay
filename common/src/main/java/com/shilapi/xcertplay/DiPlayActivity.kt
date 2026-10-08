@@ -228,13 +228,23 @@ class DiPlayActivity : ComponentActivity() {
      * connection page stays underneath, so Back still reaches it.
      */
     private fun openCarPlayScreenIfConnected(): Boolean {
-        if (intent.getStringExtra("page") != null) return false
-        if (!CarPlayBackgroundSession.hasSession() || !CarPlayBackgroundSession.isOwner(this)) return false
+        val explicitPage = intent.getStringExtra("page")
+        val hasSession = CarPlayBackgroundSession.hasSession()
+        val owns = CarPlayBackgroundSession.isOwner(this)
+        if (explicitPage != null || !hasSession) {
+            android.util.Log.i(
+                "DiPlay-Open",
+                "staying on the connection page page=$explicitPage hasSession=$hasSession owner=$owns",
+            )
+            return false
+        }
         return runCatching {
             startActivity(
                 Intent(this, CarPlayHostActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),
             )
             true
+        }.onFailure {
+            android.util.Log.w("DiPlay-Open", "bringing the CarPlay screen forward failed", it)
         }.getOrDefault(false)
     }
 
