@@ -129,7 +129,14 @@ internal class PhoneMediaAudioWatchdog(private val context: Context) {
         private val vendor = VendorA2dpControl(context, phoneAddress, ::log)
 
         override fun state(): MediaAudioLinkState {
-            vendor.isConnected()?.let { return if (it) MediaAudioLinkState.CONNECTED else MediaAudioLinkState.DISCONNECTED }
+            // A2DP and HFP are released independently. Once CarPlay owns the media audio the A2DP link
+            // is already gone while HFP still carries phone calls to the head unit — and that is
+            // exactly when the head unit's own dialer takes a call over. Either profile being
+            // connected means there is still something to release, so both count here.
+            val media = vendor.isConnected()
+            val handsFree = vendor.isHfpConnected()
+            if (media == true || handsFree == true) return MediaAudioLinkState.CONNECTED
+            if (media == false && handsFree == false) return MediaAudioLinkState.DISCONNECTED
             val current = proxy as? BluetoothA2dp ?: return MediaAudioLinkState.UNKNOWN
             val target = device ?: return MediaAudioLinkState.UNKNOWN
             return when (runCatching { current.getConnectionState(target) }.getOrNull()) {
@@ -220,6 +227,12 @@ private class VendorA2dpControl(
     }
 
     fun connect(): Boolean? = request(a2dp, "reqA2dpConnect", "getA2dpConnectedAddress")
+
+    /** Whether the head unit still holds the phone's hands-free profile. */
+    fun isHfpConnected(): Boolean? {
+        val value = hfp?.let { invoke(it, "isHfpConnected") ?: invoke(it, "getHfpConnectionState") } ?: return null
+        return (value as? Boolean) ?: ((value as? Int) == CONNECTION_STATE_CONNECTED)
+    }
 
     fun connectHfp(): Boolean? = request(hfp, "reqHfpConnect", "getHfpConnectedAddress")
 
