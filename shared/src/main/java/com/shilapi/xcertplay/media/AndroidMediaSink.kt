@@ -41,7 +41,7 @@ internal class AudioFocusCoordinator(
     private val enabled: Boolean,
     private val report: (String) -> Unit = {},
 ) {
-    private data class Entry(val channel: AudioChannel, val attributes: Any?)
+    private data class Entry(val channel: AudioChannel, val attributes: Any?, val streamType: Int)
 
     private val manager = context?.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
     private val active = LinkedHashMap<AudioTrack, Entry>()
@@ -61,9 +61,9 @@ internal class AudioFocusCoordinator(
     }
 
     @Synchronized
-    fun acquire(track: AudioTrack, channel: AudioChannel, attributes: Any?) {
-        if (!enabled || manager == null || channel == AudioChannel.NAVIGATION) return
-        active[track] = Entry(channel, attributes)
+    fun acquire(track: AudioTrack, channel: AudioChannel, attributes: Any?, streamType: Int = AudioManager.STREAM_MUSIC) {
+        if (!enabled || manager == null) return
+        active[track] = Entry(channel, attributes, streamType)
         refreshRequest()
     }
 
@@ -73,7 +73,11 @@ internal class AudioFocusCoordinator(
     }
 
     private fun refreshRequest() {
-        val primary = active.values.maxByOrNull { it.channel.focusPriority() }
+        // A navigation prompt is short but must own the car's volume keys while it plays: this head
+        // unit adjusts getCurMasterStream, which follows the stream that currently holds focus, so a
+        // prompt that never takes focus leaves the keys on media (docs/_digest/35).
+        val primary = active.values.firstOrNull { it.channel == AudioChannel.NAVIGATION }
+            ?: active.values.maxByOrNull { it.channel.focusPriority() }
         if (primary == null) {
             abandonFocus()
             requestedChannel = null
@@ -85,7 +89,7 @@ internal class AudioFocusCoordinator(
             AudioChannel.MEDIA -> AudioManager.AUDIOFOCUS_GAIN
             AudioChannel.PHONE -> AudioManager.AUDIOFOCUS_GAIN_TRANSIENT
             AudioChannel.ASSISTANT -> AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK
-            AudioChannel.NAVIGATION -> return
+            AudioChannel.NAVIGATION -> AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK
         }
         // CS11: AudioFocusRequest 是 API26+；4.4 走遗留 requestAudioFocus(listener, streamType, gain)
         // API26+ 的类型全部隔离在 AudioApiBridge（Dalvik 按方法验证时会急切解析类型引用）
@@ -96,7 +100,9 @@ internal class AudioFocusCoordinator(
             request = next
             AudioApiBridge.requestFocusApi26(activeManager, next)
         } else {
-            manager?.requestAudioFocus(listener, AudioManager.STREAM_MUSIC, gain)
+            // The legacy call carries the stream the car's volume keys should follow: stream 12 on the
+            // CS11 (vendor STREAM_NAVI_TTS) for guidance, STREAM_MUSIC otherwise.
+            manager?.requestAudioFocus(listener, primary.streamType, gain)
         }
         held = true
         requestedChannel = primary.channel
@@ -832,6 +838,8 @@ private class AudioRenderer(
     private data class AudioPacket(val rtp: ByteArray, val sample: Int)
 
     private var trackAttributes: Any? = null
+    /** Stream this renderer's track actually plays on; guidance focus follows it on API 19. */
+    private var effectiveStreamType = AudioManager.STREAM_MUSIC
     private var mappedChannel: AudioChannel? = null
     private val queue = LinkedBlockingQueue<AudioPacket>(MAX_QUEUED_PACKETS)
     @Volatile private var running = true
@@ -1049,6 +1057,7 @@ private class AudioRenderer(
         } else {
             // CS11: AudioTrack.Builder 是 API23+；4.4 一律走 legacy 构造（usage 路由退为 mapper 的 streamType）
             val streamType = if (streamOverride != 0) streamOverride else streamType()
+        effectiveStreamType = streamType
             routeLabel = if (streamOverride != 0) "streamType=$streamType" else "streamType=$streamType(api<23)"
             built = LegacyAudioFallback.build(
                 createLegacy = {
@@ -1406,6 +1415,12 @@ private class AudioRenderer(
         underrunsAtPlaybackStart = trackUnderrunsCompat(track)
         track.play()
         playbackStarted = true
+        // Guidance holds the car's volume keys only while it actually plays: the head unit adjusts
+        // getCurMasterStream, which follows the stream holding focus, so the keys stay on media
+        // between prompts and switch to the navigation stream while one is speaking.
+        if (mappedChannel == AudioChannel.NAVIGATION) {
+            audioFocusCoordinator.acquire(track, AudioChannel.NAVIGATION, trackAttributes, effectiveStreamType)
+        }
     }
 
     private fun maintainPlaybackBuffer() {
@@ -1416,6 +1431,8 @@ private class AudioRenderer(
             // then use the configured start threshold again when music resumes.
             track.pause()
             playbackStarted = false
+            // Hand the volume keys back to media once the prompt stops.
+            if (mappedChannel == AudioChannel.NAVIGATION) audioFocusCoordinator.release(track)
             // Pausing retains queued PCM. Count it toward the restart threshold so a blocking write
             // cannot fill the paused track before we call play().
             prebufferBytes = bufferProgress.queuedBytes(track.playbackHeadPosition)
