@@ -2,6 +2,12 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- The instrument cluster reads album art through a Uri, and on this Android version the app's
+         external files directory is the straightforward way to hand a file to another process
+         (DiagnosticExportStore already exports reports the same way). Install-time granted here;
+         harmless elsewhere because the cluster API does not exist there. -->
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+
     <application
         android:name="androidx.multidex.MultiDexApplication"
         android:allowBackup="false"

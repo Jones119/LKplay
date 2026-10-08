@@ -50,6 +50,13 @@ object VendorClusterBridge {
     @Volatile
     private var guidanceStarted = false
 
+    /** The artwork the cluster should show, as a file the head unit's own process can read. */
+    @Volatile
+    private var artworkUri: android.net.Uri? = null
+
+    @Volatile
+    private var lastMedia: CarPlayNowPlaying? = null
+
     /** Called once from the app side; the push stays inert until the switch is on. */
     fun attach(context: Context) {
         appContext = context.applicationContext
@@ -58,6 +65,7 @@ object VendorClusterBridge {
     val enabled: Boolean get() = appContext != null && debugSwitch(SWITCH, false)
 
     fun pushMedia(now: CarPlayNowPlaying) {
+        lastMedia = now
         if (!enabled) return
         val context = appContext ?: return
         val target = mediaInteraction(context) ?: return
@@ -66,6 +74,37 @@ object VendorClusterBridge {
         call(target, "updatePlaybackInfo", info)
         call(target, "updateCurrentSourceType", SOURCE_TYPE_ONLINE)
         now.elapsedMillis?.let { call(target, "updateCurrentProgress", it) }
+    }
+
+    /**
+     * The album art arrives from the iPhone as a Bitmap, and the cluster takes it as a Uri
+     * (`IPlaybackInfo.getArtwork`). The head unit's own process has to be able to read it, so it is
+     * written into this app's external files directory — world readable on this Android version, and
+     * already how DiagnosticExportStore hands files to other apps. Each update gets a fresh file name
+     * so a consumer caching by Uri cannot keep showing the previous cover.
+     */
+    fun setArtwork(bitmap: android.graphics.Bitmap?) {
+        val context = appContext ?: return
+        if (bitmap == null) {
+            artworkUri = null
+        } else {
+            val written = runCatching {
+                val directory = context.getExternalFilesDir(null) ?: return
+                val file = java.io.File(directory, "cluster-artwork-${System.currentTimeMillis()}.png")
+                java.io.FileOutputStream(file).use { out -> bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out) }
+                directory.listFiles()?.forEach { candidate ->
+                    if (candidate.name.startsWith("cluster-artwork-") && candidate != file) runCatching { candidate.delete() }
+                }
+                android.net.Uri.fromFile(file)
+            }.getOrElse {
+                Log.w(TAG, "cluster artwork write failed", it)
+                null
+            }
+            artworkUri = written
+        }
+        Log.i(TAG, "cluster artwork uri=$artworkUri")
+        // Re-send so the cluster picks the new cover up with the current track.
+        if (enabled) lastMedia?.let { pushMedia(it) }
     }
 
     fun pushGuidance(snapshot: CarPlayGlance.Snapshot) {
@@ -160,6 +199,7 @@ object VendorClusterBridge {
             "getDuration" -> now.durationMillis ?: 0L
             "getPlaybackStatus" -> status
             "getSourceType" -> SOURCE_TYPE_ONLINE
+            "getArtwork" -> artworkUri
             "getPlayingItemPositionInQueue" -> 0
             "getLoopMode" -> 0
             "hashCode" -> System.identityHashCode(proxy)

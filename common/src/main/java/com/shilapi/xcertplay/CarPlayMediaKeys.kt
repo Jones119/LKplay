@@ -146,6 +146,8 @@ internal object CarPlayMediaKeys {
         if (nowPlaying.artworkTransferId == id) {
             artwork = decoded
             session?.setMetadata(androidMetadata(nowPlaying, shownArtworkLocked()))
+            // The instrument cluster wants the same cover, handed over as a Uri it can read.
+            runCatching { com.shilapi.xcertplay.media.VendorClusterBridge.setArtwork(shownArtworkLocked()) }
         }
     }
 
@@ -269,6 +271,7 @@ internal object CarPlayMediaKeys {
         artworkOwner = null
         artworkQueue.clear()
         MediaKeyEchoGate.reset()
+        runCatching { com.shilapi.xcertplay.media.VendorClusterBridge.setArtwork(null) }
         session?.let {
             it.isActive = false
             it.release()
