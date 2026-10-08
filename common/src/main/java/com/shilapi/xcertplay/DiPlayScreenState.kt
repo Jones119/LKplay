@@ -12,4 +12,8 @@ internal object DiPlayScreenState {
     /** True between [CarPlayHostActivity.onStart] and its [CarPlayHostActivity.onStop]. */
     @Volatile
     var carPlayHostVisible = false
+
+    /** The vendor probes run once per process, not on every screen return. */
+    @Volatile
+    var vendorProbesDone = false
 }
