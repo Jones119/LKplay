@@ -46,6 +46,8 @@ class CarPlayPlaybackStatus {
         )
         if (next == previous) return null
         nowPlaying = next
+        // Mirror what is playing onto the instrument cluster (inert unless the cluster switch is on).
+        runCatching { VendorClusterBridge.pushMedia(next) }
         return next
     }
 
@@ -67,6 +69,7 @@ class CarPlayPlaybackStatus {
     fun clearAll(): CarPlayNowPlaying? {
         if (nowPlaying == CarPlayNowPlaying()) return null
         nowPlaying = CarPlayNowPlaying()
+        runCatching { VendorClusterBridge.pushMedia(nowPlaying) }
         return nowPlaying
     }
 

@@ -85,6 +85,8 @@ object CarPlayGlance {
         )
         if (next == last) return null
         last = next
+        // Mirror guidance onto the instrument cluster (inert unless the cluster switch is on).
+        runCatching { com.shilapi.xcertplay.media.VendorClusterBridge.pushGuidance(next) }
         return next
     }
 }
