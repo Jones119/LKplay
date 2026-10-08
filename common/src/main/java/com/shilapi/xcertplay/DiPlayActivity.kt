@@ -182,14 +182,23 @@ class DiPlayActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         CenterMapOverlay.onDiPlayScreenShown()
+        carPlayScreenBroughtForward = false
     }
 
     override fun onStop() {
         cancelUsbPermissionSetup()
         startupHotspotCancelled = true
         super.onStop()
-        if (!isFinishing && !isChangingConfigurations) CenterMapOverlay.scheduleShow()
+        // Bringing the running CarPlay screen forward stops this activity too, and scheduling the
+        // centre-screen card there would drop it on top of CarPlay — which looks exactly like a black
+        // screen while frames keep flowing. Only a real departure to the car's own UI schedules it.
+        if (!isFinishing && !isChangingConfigurations && !carPlayScreenBroughtForward) {
+            CenterMapOverlay.scheduleShow()
+        }
     }
+
+    /** Set while this activity hands the foreground to the running CarPlay screen. */
+    private var carPlayScreenBroughtForward = false
 
     override fun onResume() {
         super.onResume()
@@ -242,6 +251,7 @@ class DiPlayActivity : ComponentActivity() {
             startActivity(
                 Intent(this, CarPlayHostActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),
             )
+            carPlayScreenBroughtForward = true
             true
         }.onFailure {
             android.util.Log.w("DiPlay-Open", "bringing the CarPlay screen forward failed", it)
