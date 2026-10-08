@@ -135,6 +135,9 @@ internal class PhoneMediaAudioWatchdog(private val context: Context) {
             // connected means there is still something to release, so both count here.
             val media = vendor.isConnected()
             val handsFree = vendor.isHfpConnected()
+            // Raw profile states every tick: the vendor API is the only source on this head unit, and
+            // whether it reports a connection decides if the release below ever runs.
+            if (media != null || handsFree != null) log("bluetooth profiles a2dp=$media hfp=$handsFree")
             if (media == true || handsFree == true) return MediaAudioLinkState.CONNECTED
             if (media == false && handsFree == false) return MediaAudioLinkState.DISCONNECTED
             val current = proxy as? BluetoothA2dp ?: return MediaAudioLinkState.UNKNOWN
