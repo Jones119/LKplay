@@ -211,25 +211,14 @@ private class VendorA2dpControl(
     }
 
     /** True when the head unit accepted a disconnect for the phone's media profile. */
-    fun disconnect(): Boolean? {
-        val target = a2dp ?: return null
-        val connected = invoke(target, "getA2dpConnectedAddress") as? String
-        // The API takes the address to release; try the live one first, then the paired address.
-        val candidates = listOfNotNull(connected?.takeIf { it.isNotBlank() }, phoneAddress?.takeIf { it.isNotBlank() })
-        for (address in candidates.distinct()) {
-            val result = invoke(target, "reqA2dpDisconnect", address) as? Boolean
-            log("reqA2dpDisconnect($address)=$result")
-            if (result == true) return true
-        }
-        return false
-    }
+    fun disconnect(): Boolean? = request(a2dp, "reqA2dpDisconnect", "getA2dpConnectedAddress", disconnecting = true)
 
     /** The hands-free profile of the same adapter API, so CarPlay can own phone calls. */
     private val hfp: Any? = bt?.let { owner ->
         invoke(owner, "getHfp")?.also { log("adaptapi hfp=${it.javaClass.name}") }
     }
 
-    fun connect(): Boolean? = request(a2dp, "reqA2dpConnect", "getA2dpConnectedAddress")
+    fun connect(): Boolean? = request(a2dp, "reqA2dpConnect", "getA2dpConnectedAddress", disconnecting = false)
 
     /** Whether the head unit still holds the phone's hands-free profile. */
     fun isHfpConnected(): Boolean? {
@@ -237,15 +226,31 @@ private class VendorA2dpControl(
         return (value as? Boolean) ?: ((value as? Int) == CONNECTION_STATE_CONNECTED)
     }
 
-    fun connectHfp(): Boolean? = request(hfp, "reqHfpConnect", "getHfpConnectedAddress")
+    fun connectHfp(): Boolean? = request(hfp, "reqHfpConnect", "getHfpConnectedAddress", disconnecting = false)
 
-    fun disconnectHfp(): Boolean? = request(hfp, "reqHfpDisconnect", "getHfpConnectedAddress")
+    fun disconnectHfp(): Boolean? = request(hfp, "reqHfpDisconnect", "getHfpConnectedAddress", disconnecting = true)
 
-    /** Tries the live address first, then the paired one, logging every attempt's result. */
-    private fun request(target: Any?, method: String, addressGetter: String): Boolean? {
+    /**
+     * Tries the live address first, then the paired one, logging every attempt's result.
+     *
+     * When releasing, the vendor's connected address must be *our* phone: this head unit can hold
+     * another paired device, and disconnecting whatever it reports would drop that device instead
+     * (EasyPlay guards its handoff the same way, docs/_digest/37). Connecting ignores that check,
+     * because restoring our own link is always the intent.
+     */
+    private fun request(target: Any?, method: String, addressGetter: String, disconnecting: Boolean): Boolean? {
         if (target == null) return null
         val connected = invoke(target, addressGetter) as? String
-        val candidates = listOfNotNull(connected?.takeIf { it.isNotBlank() }, phoneAddress?.takeIf { it.isNotBlank() })
+        val paired = phoneAddress?.takeIf { it.isNotBlank() }
+        val candidates = when {
+            connected.isNullOrBlank() -> listOfNotNull(paired)
+            paired == null || connected.equals(paired, ignoreCase = true) -> listOf(connected)
+            disconnecting -> {
+                log("$method skipped: connected device is not the selected phone")
+                return false
+            }
+            else -> listOf(paired)
+        }
         for (address in candidates.distinct()) {
             val result = invoke(target, method, address) as? Boolean
             log("$method($address)=$result")

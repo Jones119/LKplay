@@ -16,6 +16,9 @@ class MediaButtonReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != Intent.ACTION_MEDIA_BUTTON) return
         val event = intent.getParcelableExtra(Intent.EXTRA_KEY_EVENT) as? KeyEvent ?: return
-        CarPlayMediaKeys.onLegacyMediaKeyEvent(event)
+        val consumed = CarPlayMediaKeys.onLegacyMediaKeyEvent(event)
+        // Stop the car's own receiver from acting on a key CarPlay already used. Only an ordered
+        // broadcast can be aborted; on a normal one this is a no-op (EasyPlay does the same).
+        if (consumed && isOrderedBroadcast) runCatching { abortBroadcast() }
     }
 }

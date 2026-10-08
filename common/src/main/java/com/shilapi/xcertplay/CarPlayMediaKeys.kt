@@ -253,6 +253,12 @@ internal object CarPlayMediaKeys {
             Log.i(TAG, "legacy media key unmapped code=${event.keyCode}")
             return false
         }
+        // The same press can also arrive through the host activity or the wheel-key service; only the
+        // first delivery of that exact press acts (docs/_digest/37, EasyPlay's LegacyMediaKeyGate).
+        if (!MediaKeyEchoGate.accept(event.keyCode, event.downTime, event.eventTime)) {
+            Log.i(TAG, "legacy media key repeat ignored code=${event.keyCode}")
+            return true
+        }
         if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
             send(index, KeyEvent.keyCodeToString(event.keyCode))
         }
@@ -262,6 +268,7 @@ internal object CarPlayMediaKeys {
     private fun releaseLocked() {
         artworkOwner = null
         artworkQueue.clear()
+        MediaKeyEchoGate.reset()
         session?.let {
             it.isActive = false
             it.release()

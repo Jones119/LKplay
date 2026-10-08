@@ -822,6 +822,12 @@ class CarPlayHostActivity : ComponentActivity() {
         // During a CarPlay call the wheel's call key answers on the iPhone.
         // Keep DiPlay's existing steering-wheel/voice-key Siri handling intact.
         if (!CarPlayMediaButton.opensSiri(event.keyCode)) return super.dispatchKeyEvent(event)
+        // The same press may also arrive through the wheel-key accessibility service or the
+        // MEDIA_BUTTON broadcast; only the first delivery opens Siri (docs/_digest/37).
+        if (!MediaKeyEchoGate.accept(event.keyCode, event.downTime, event.eventTime)) {
+            appendLog("Siri: voice key ${event.keyCode} repeat ignored")
+            return true
+        }
         if (event.action == KeyEvent.ACTION_UP) {
             val sent = controller?.requestSiri() == true
             appendLog("Siri: voice key ${event.keyCode} sent=$sent")
