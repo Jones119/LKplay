@@ -711,6 +711,11 @@ class CarPlayHostActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        // Coming back from the car's launcher can restore the window without a fresh
+        // SurfaceTexture callback, so the decoder stayed detached from the surface the log recorded
+        // ("video decoder detached from surface") and the screen stayed black while frames kept
+        // decoding. Re-attaching the live surface is a no-op when the decoder already has it.
+        currentSurface?.takeIf { it.isValid }?.let(::attachSurface)
         val savedNightMode = AirPlayPersistence.loadCarPlayNightMode(this)
         val savedThreshold = AirPlayPersistence.loadAmbientLightThreshold(this)
         val savedDelay = AirPlayPersistence.loadAmbientDelaySeconds(this)
