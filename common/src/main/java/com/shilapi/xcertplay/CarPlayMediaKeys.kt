@@ -239,6 +239,16 @@ internal object CarPlayMediaKeys {
 
     /** A legacy MEDIA_BUTTON KeyEvent from [MediaButtonReceiver]; same mapping as the media session. */
     fun onLegacyMediaKeyEvent(event: KeyEvent): Boolean {
+        // CS11 / 4.4: with the car's own voice assistant switched off, the steering wheel's voice key
+        // reaches us as a MEDIA_BUTTON broadcast. Open Siri with it instead of dropping it as an
+        // unmapped key, matching what the host activity does when the key arrives there instead.
+        if (CarPlayMediaButton.opensSiri(event.keyCode)) {
+            if (event.action == KeyEvent.ACTION_UP) {
+                val sent = controller?.requestSiri() == true
+                Log.i(TAG, "legacy voice key opens Siri sent=$sent")
+            }
+            return true
+        }
         val index = CarPlayMediaButton.forKeyCode(event.keyCode) ?: run {
             Log.i(TAG, "legacy media key unmapped code=${event.keyCode}")
             return false
