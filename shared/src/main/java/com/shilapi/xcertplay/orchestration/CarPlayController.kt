@@ -373,7 +373,15 @@ class CarPlayController(
         }
 
         override fun onDebugLog(message: String) {
-            debugLog(message)
+            // The session already wrote this line to logcat (AirPlaySession.debugLog); this callback
+            // only feeds the UI and the on-device diagnostic buffer. Calling debugLog() here logged
+            // the same message a second time under the same tag and millisecond, which duplicated
+            // every session line in the field logs (docs/_digest/43).
+            try {
+                uiListener?.onDebugLog(message)
+            } catch (error: Exception) {
+                Log.w(IphoneCarPlayConfiguration.TAG, "debug log callback failed", error)
+            }
         }
     }
 
