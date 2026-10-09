@@ -1015,6 +1015,8 @@ private class AudioRenderer(
     private var droppedPacketsLogged = false
     private var firstAacPayloadLogged = false
     private var firstOpusShortPacketLogged = false
+    /** One log line for a dropped over-long AAC access unit; inputDropped carries the count. */
+    private var oversizedAacPacketLogged = false
     private var firstInputQueuedLogged = false
     private var inputQueued = 0
     private var inputDropped = 0
@@ -1438,6 +1440,24 @@ private class AudioRenderer(
             AudioCodecKind.AAC_LC -> {
                 val accessUnit = rtp.copyOfRange(12, rtp.size)
                 if (accessUnit.isNotEmpty()) {
+                    // ADTS frame_length is 13 bits: a longer access unit cannot be described by an
+                    // ADTS header, and adtsFrame would otherwise have to either truncate the audio or
+                    // describe the wrong stream. Drop the packet like the short Opus packet below -
+                    // dropping one frame keeps the stream alive, while throwing would end the track,
+                    // and a real AAC-LC access unit is far below this bound.
+                    if (accessUnit.size > MediaCodecSupport.ADTS_MAX_ACCESS_UNIT_BYTES) {
+                        inputDropped++
+                        if (!oversizedAacPacketLogged) {
+                            oversizedAacPacketLogged = true
+                            Log.w(
+                                TAG,
+                                "audio AAC skipping oversized access unit bytes=${accessUnit.size} " +
+                                    "max=${MediaCodecSupport.ADTS_MAX_ACCESS_UNIT_BYTES} " +
+                                    "queued=$inputQueued dropped=$inputDropped",
+                            )
+                        }
+                        return
+                    }
                     if (!firstAacPayloadLogged) {
                         firstAacPayloadLogged = true
                         Log.i(

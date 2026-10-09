@@ -44,6 +44,9 @@ class ScreenStream(private val key: ByteArray, private val onDiagnostic: (String
     private val closed = AtomicBoolean(false)
     private val frameCounter = AtomicLong(0)
     private val firstFrameLogged = AtomicBoolean(false)
+
+    /** One report per stream for a short AEAD write, which is a bug rather than a wire condition. */
+    private val plaintextMismatchLogged = AtomicBoolean(false)
     private var server: ServerSocket? = null
     private var socket: Socket? = null
     private var thread: Thread? = null
@@ -130,7 +133,7 @@ class ScreenStream(private val key: ByteArray, private val onDiagnostic: (String
                     return
                 }
                 val frame = frames.acquire(bodySize - ScreenCodec.TAG_SIZE)
-                try {
+                val plaintextLength = try {
                     AirPlayCrypto.chachaOpenInto(
                         key = key,
                         nonce = AirPlayCrypto.nonce64(frameCounter.get()),
@@ -143,10 +146,27 @@ class ScreenStream(private val key: ByteArray, private val onDiagnostic: (String
                         output = frame.bytes,
                         outputOffset = 0,
                     )
-                    frameCounter.incrementAndGet()
                 } catch (error: Throwable) {
                     frame.close()
                     throw error
+                }
+                // The frame was acquired for exactly bodySize - TAG_SIZE bytes, and every nonce
+                // belongs to the sender's sequence, so the counter advances even when the check
+                // below rejects the frame.
+                frameCounter.incrementAndGet()
+                if (plaintextLength != frame.length) {
+                    // A short write would leave the tail of this recycled buffer holding bytes from
+                    // the frame that used it last, and the decoder would read them as this frame
+                    // (the audio path refuses the same mismatch). Drop the frame instead of decoding
+                    // stale video, and report once so a flood of frames cannot flood the log.
+                    frame.close()
+                    if (plaintextMismatchLogged.compareAndSet(false, true)) {
+                        onDiagnostic(
+                            "video frame plaintext mismatch expected=${frame.length} " +
+                                "actual=$plaintextLength sealed=$bodySize",
+                        )
+                    }
+                    return
                 }
                 if (firstFrameLogged.compareAndSet(false, true)) {
                     Log.i(
@@ -229,7 +249,10 @@ object ScreenCodec {
         while (offset + 4 <= length) {
             val nalLength = readU32Be(payload, offset)
             offset += 4
-            if (nalLength <= 0 || offset + nalLength > length) return payload
+            // Bounded subtraction rather than offset + nalLength: a wire length of 0x7FFFFFFF
+            // wraps the sum negative, passes this check, and the read below then indexes at a
+            // negative offset. Malformed input must leave the payload untouched, as documented.
+            if (nalLength <= 0 || nalLength > length - offset) return payload
             offset += nalLength
         }
         if (offset != length) return payload

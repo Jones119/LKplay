@@ -2,6 +2,7 @@ package com.shilapi.xcertplay.airplay
 
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
 
@@ -81,6 +82,28 @@ class AirPlayCryptoIntoTest {
         assertArrayEquals(payload, frame.bytes.copyOf(written))
         frame.close()
         assertEquals(1, pool.retainedFrames())
+    }
+
+    @Test
+    fun aShortOpenLeavesTheReusedTailOfThePooledBufferAlone() {
+        // The guard in ScreenStream.onMessage depends on this property: openInto fills exactly the
+        // plaintext it returns and touches nothing after it. Were that ever false, the decoder would
+        // read the previous frame's bytes as this frame, because pooled buffers are recycled dirty.
+        val sealed = AirPlayCrypto.chachaSeal(key, nonce, payload, header)
+        val frame = VideoFramePool().acquire(sealed.size + 64)
+        frame.bytes.fill(0xA5.toByte())
+
+        val written = AirPlayCrypto.chachaOpenInto(
+            key, nonce, sealed, 0, sealed.size, header, 0, header.size, frame.bytes, 0,
+        )
+
+        assertEquals(sealed.size - 16, written)
+        assertArrayEquals(payload, frame.bytes.copyOf(written))
+        assertTrue(
+            "openInto wrote past the plaintext it returned",
+            frame.bytes.copyOfRange(written, frame.bytes.size).all { it == 0xA5.toByte() },
+        )
+        frame.close()
     }
 
     @Test

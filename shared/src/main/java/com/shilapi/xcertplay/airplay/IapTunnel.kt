@@ -1,6 +1,7 @@
 package com.shilapi.xcertplay.airplay
 
 import java.io.Closeable
+import java.io.IOException
 import java.io.InputStream
 import java.net.Inet4Address
 import java.net.InetAddress
@@ -38,6 +39,17 @@ class IapTunnel(
     private val threads = mutableListOf<Thread>()
     private val peerConnected = CountDownLatch(1)
     @Volatile private var listener: Listener = object : Listener {}
+
+    /**
+     * Framing state for the APTransportPackage stream, kept as its own object so the framing rules
+     * stay testable without a socket (see [IapPackageParser]).
+     */
+    private val packages = IapPackageParser { messageType, body ->
+        if (messageType == MSG_TYPE_COMM) {
+            listener.onDebug("AirPlay iAP tunnel package type=comm body=${body.size}")
+            listener.onIap(body)
+        }
+    }
 
     fun listen(listener: Listener): Int {
         this.listener = listener
@@ -150,7 +162,7 @@ class IapTunnel(
                 val decrypted = decryptFrames(ciphertext)
                 plaintext += decrypted.first
                 ciphertext = decrypted.second
-                plaintext = parsePackages(plaintext)
+                plaintext = packages.parse(plaintext)
             }
         } catch (error: Exception) {
             failure = error
@@ -180,26 +192,49 @@ class IapTunnel(
         return concatBytes(*output.toTypedArray()) to buffer.copyOfRange(offset, buffer.size)
     }
 
-    private fun parsePackages(buffer: ByteArray): ByteArray {
+    private fun readU16Le(source: ByteArray, offset: Int): Int =
+        (source[offset].toInt() and 0xff) or ((source[offset + 1].toInt() and 0xff) shl 8)
+
+    private companion object {
+        const val FRAME_HEADER_LEN = 2
+        const val TAG_SIZE = 16
+        const val MSG_TYPE_COMM = 0x636f6d6d
+        const val READ_CHUNK_BYTES = 16 * 1024
+    }
+}
+
+/**
+ * Splits the decrypted iAP tunnel stream into APTransportPackage records.
+ *
+ * The stream is not self-synchronizing: a package's declared size is the only thing that says where
+ * the next header starts. A size below the 32-byte package header or above 4 MiB therefore means
+ * the framing is lost, and that is reported as an [IOException] instead of retaining the tail.
+ *
+ * Retaining it (the previous behavior) kept the unparseable prefix at offset 0 of every later read,
+ * so each read appended a chunk to a buffer that could never be parsed again: quadratic copying of
+ * a buffer that grows without bound - an OOM on a 1 GB device - while no iAP2 message could ever be
+ * delivered again. Failing the tunnel is also what the decryption step above already does with
+ * garbage input, so the supervisor sees one consistent failure mode.
+ *
+ * Extracted from [IapTunnel.run] so the framing rules are unit-testable without a socket; it holds
+ * no state beyond the callback, which receives every complete package's message type and body.
+ */
+internal class IapPackageParser(private val onPackage: (Int, ByteArray) -> Unit) {
+    /** Returns the bytes that are not yet a complete package, or throws on an unparseable size. */
+    fun parse(buffer: ByteArray): ByteArray {
         var offset = 0
         while (buffer.size - offset >= PACKAGE_HEADER_LEN) {
             val size = readU32Be(buffer, offset)
-            if (size < PACKAGE_HEADER_LEN || size > MAX_PACKAGE) break
+            if (size < PACKAGE_HEADER_LEN || size > MAX_PACKAGE) {
+                throw IOException("AirPlay iAP tunnel package size out of range: $size")
+            }
             if (buffer.size - offset < size) break
             val messageType = readU32Be(buffer, offset + MESSAGE_TYPE_OFFSET)
-            if (messageType == MSG_TYPE_COMM) {
-                listener.onDebug(
-                    "AirPlay iAP tunnel package type=comm body=${size - PACKAGE_HEADER_LEN}",
-                )
-                listener.onIap(buffer.copyOfRange(offset + PACKAGE_HEADER_LEN, offset + size))
-            }
+            onPackage(messageType, buffer.copyOfRange(offset + PACKAGE_HEADER_LEN, offset + size))
             offset += size
         }
         return buffer.copyOfRange(offset, buffer.size)
     }
-
-    private fun readU16Le(source: ByteArray, offset: Int): Int =
-        (source[offset].toInt() and 0xff) or ((source[offset + 1].toInt() and 0xff) shl 8)
 
     private fun readU32Be(source: ByteArray, offset: Int): Int =
         ((source[offset].toInt() and 0xff) shl 24) or
@@ -208,12 +243,8 @@ class IapTunnel(
             (source[offset + 3].toInt() and 0xff)
 
     private companion object {
-        const val FRAME_HEADER_LEN = 2
-        const val TAG_SIZE = 16
         const val PACKAGE_HEADER_LEN = 32
         const val MESSAGE_TYPE_OFFSET = 16
-        const val MSG_TYPE_COMM = 0x636f6d6d
         const val MAX_PACKAGE = 4 * 1024 * 1024
-        const val READ_CHUNK_BYTES = 16 * 1024
     }
 }

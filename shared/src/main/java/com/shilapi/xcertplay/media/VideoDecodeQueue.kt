@@ -64,11 +64,15 @@ internal class VideoDecodeQueue(
                 return
             }
         }
-        jobs.offer(job)
+        // CS11: count before publishing. poll() dequeues without this monitor, so incrementing after
+        // jobs.offer() let the decoder thread decrement a frame that had not been counted yet - the
+        // counters went negative, and an offer() running in that window missed an overflow it should
+        // have seen. Counting under this monitor, first, makes every removal balance an increment.
         if (job is VideoJob.Frame) {
             frameCount.incrementAndGet()
             frameBytes.addAndGet(job.length.toLong())
         }
+        jobs.offer(job)
     }
 
     /** Drops queued frames (and their pooled buffers) but keeps configuration and surface changes. */
@@ -95,8 +99,14 @@ internal class VideoDecodeQueue(
     fun poll(timeoutMillis: Long): VideoJob? {
         val job = jobs.poll(timeoutMillis, TimeUnit.MILLISECONDS)
         if (job is VideoJob.Frame) {
-            frameCount.decrementAndGet()
-            frameBytes.addAndGet(-job.length.toLong())
+            // The dequeue itself stays outside the monitor: the decoder thread waits here for up to
+            // its 5 ms frame timeout, and holding the monitor across that wait would stall the
+            // screen receive thread's offer() for just as long (the counters exist to keep that path
+            // cheap). Only the mutation is locked, so a producer never observes a half-finished poll.
+            synchronized(this) {
+                frameCount.decrementAndGet()
+                frameBytes.addAndGet(-job.length.toLong())
+            }
         }
         return job
     }

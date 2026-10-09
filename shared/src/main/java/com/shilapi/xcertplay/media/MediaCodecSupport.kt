@@ -122,16 +122,28 @@ object MediaCodecSupport {
         return false
     }
 
-    /** Wraps one raw AAC-LC access unit in an MPEG-4 ADTS frame. */
+    /**
+     * Wraps one raw AAC-LC access unit in an MPEG-4 ADTS frame; empty for an access unit ADTS
+     * cannot describe.
+     *
+     * ADTS `frame_length` is 13 bits and includes the 7-byte header, so an access unit longer than
+     * [ADTS_MAX_ACCESS_UNIT_BYTES] would spill its high bits into `channel_configuration`
+     * (header[3]) and describe a stream the decoder would then misread. Such a unit is rejected
+     * here for the same reason [toAnnexB] and [aacAccessUnit] return an empty array for malformed
+     * input: an empty result is a drop, not a torn-down stream (see AndroidMediaSink.handle(),
+     * which drops the packet before calling this and counts it).
+     */
     fun adtsFrame(accessUnit: ByteArray, sampleRate: Int, channels: Int): ByteArray {
+        if (accessUnit.size > ADTS_MAX_ACCESS_UNIT_BYTES) return ByteArray(0)
         val frequencyIndex = aacFrequencyIndex(sampleRate)
         val channelConfig = channels.coerceIn(1, 7)
-        val frameLength = accessUnit.size + 7
-        val header = ByteArray(7)
+        val frameLength = accessUnit.size + ADTS_HEADER_BYTES
+        val header = ByteArray(ADTS_HEADER_BYTES)
         header[0] = 0xff.toByte()
         header[1] = 0xf1.toByte()
         header[2] = ((1 shl 6) or (frequencyIndex shl 2) or (channelConfig ushr 2)).toByte()
-        header[3] = (((channelConfig and 0x3) shl 6) or (frameLength ushr 11)).toByte()
+        // frame_length is 13 bits: 2 bits of it live next to channel_configuration, hence the mask.
+        header[3] = (((channelConfig and 0x3) shl 6) or ((frameLength ushr 11) and 0x3)).toByte()
         header[4] = ((frameLength ushr 3) and 0xff).toByte()
         header[5] = (((frameLength and 0x7) shl 5) or 0x1f).toByte()
         header[6] = 0xfc.toByte()
@@ -197,4 +209,18 @@ object MediaCodecSupport {
 
     private const val HEVC_FIXED_RECORD_SIZE = 23
     private const val HEVC_ARRAY_COUNT_OFFSET = 22
+    private const val ADTS_HEADER_BYTES = 7
+
+    /** ADTS `frame_length` is 13 bits wide and counts the [ADTS_HEADER_BYTES]-byte header. */
+    private const val ADTS_MAX_FRAME_LENGTH = 0x1fff
+
+    /**
+     * Largest access unit an ADTS header can describe: 8184 bytes.
+     *
+     * The type-103 buffered path frames access units by a u16 length, so a malformed or hostile
+     * frame can reach [adtsFrame] with far more than this; a real AAC-LC access unit is two orders
+     * of magnitude smaller. Exposed so the audio path can drop such a packet before wrapping it,
+     * which keeps the failure visible in the drop counters instead of silently truncating audio.
+     */
+    const val ADTS_MAX_ACCESS_UNIT_BYTES = ADTS_MAX_FRAME_LENGTH - ADTS_HEADER_BYTES
 }

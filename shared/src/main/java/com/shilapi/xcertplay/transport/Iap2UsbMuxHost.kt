@@ -273,8 +273,31 @@ class Iap2UsbMuxHost private constructor(
         private const val MUX_MAGIC = 0xfeedface.toInt()
         private const val VERSION_MESSAGE_BYTES = 20
         private const val NANOS_PER_MILLISECOND = 1_000_000L
-        private const val MUX_HEADER_BYTES = 16
-        private const val TCP_HEADER_BYTES = 20
+
+        /** USBMUX header in front of every payload written to the bulk pipe. */
+        internal const val MUX_HEADER_BYTES = 16
+
+        /** USBMUX TCP header carried inside a PROTOCOL_TCP frame's payload. */
+        internal const val TCP_HEADER_BYTES = 20
+
+        /**
+         * Largest TCP payload whose MUX frame still fits one usbfs bulk transfer.
+         *
+         * The read path has to stay under the same 16 KiB single-URB ceiling
+         * ([USBFS_BULK_URB_CEILING_BYTES], see UsbReadQueuePolicy): Android documents the bound for
+         * `UsbRequest.queue` on API < 28, and this ROM's usbfs is the same driver, so the write path
+         * is chunked to it as well. Derived from the two header sizes so the frame - not just the
+         * payload - is what fits; the previous 16 KiB payload allowed a 16420-byte bulkTransfer,
+         * which is 36 bytes over the ceiling.
+         *
+         * `bulkTransfer`'s own limit is not documented - the 16 KiB value is verified for this
+         * platform's read path, not measured for bulk writes - so this is deliberately unconditional
+         * insurance rather than a platform test. One -1 returned by a 16420-byte bulkTransfer on the
+         * head unit would prove the write path needs it too (docs/_digest/44).
+         */
+        internal const val MAX_TCP_SEND_PAYLOAD_BYTES =
+            USBFS_BULK_URB_CEILING_BYTES - MUX_HEADER_BYTES - TCP_HEADER_BYTES
+
         private const val TCP_WINDOW_FIELD = 512
         private const val FIRST_SOURCE_PORT = 1
         private const val HANDSHAKE_TIMEOUT_MILLIS = 60_000L
@@ -338,12 +361,16 @@ class Iap2UsbMuxTcpConnection internal constructor(
     private var closed = false
     private var failure: IphoneUsbException? = null
 
-    /** Sends [data] as an ordered byte stream, split into USBMUX TCP payloads of at most 16 KiB. */
+    /**
+     * Sends [data] as an ordered byte stream, split into USBMUX TCP payloads small enough that one
+     * USBMUX frame still fits a single usbfs bulk transfer
+     * ([Iap2UsbMuxHost.MAX_TCP_SEND_PAYLOAD_BYTES]).
+     */
     override fun send(data: ByteArray) {
         synchronized(stateLock) { checkConnectedLocked() }
         var offset = 0
         while (offset < data.size) {
-            val count = minOf(MAX_SEND_PAYLOAD_BYTES, data.size - offset)
+            val count = minOf(Iap2UsbMuxHost.MAX_TCP_SEND_PAYLOAD_BYTES, data.size - offset)
             val chunk = data.copyOfRange(offset, offset + count)
             synchronized(writeLock) {
                 val sequenceAndAck = synchronized(stateLock) {
@@ -540,7 +567,6 @@ class Iap2UsbMuxTcpConnection internal constructor(
         const val TCP_SYN = 0x02
         const val TCP_RST = 0x04
         const val TCP_ACK = 0x10
-        const val MAX_SEND_PAYLOAD_BYTES = 16 * 1024
         const val NANOS_PER_MILLISECOND = 1_000_000L
     }
 }

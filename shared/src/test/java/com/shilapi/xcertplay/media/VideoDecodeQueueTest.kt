@@ -2,6 +2,9 @@ package com.shilapi.xcertplay.media
 
 import com.shilapi.xcertplay.airplay.VideoCodec
 import com.shilapi.xcertplay.airplay.VideoFramePool
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -115,5 +118,66 @@ class VideoDecodeQueueTest {
         assertEquals(1, pool.retainedFrames())
         assertEquals(VideoJob.Resync, queue.poll(0))
         assertNull(queue.poll(0))
+    }
+
+    @Test fun concurrentOfferAndPollKeepTheDepthInsideItsBudget() {
+        // poll() dequeues without the monitor offer()/discardFrames() hold, so it used to be able to
+        // decrement a frame the producer had published but not counted yet: the depth read negative,
+        // and an offer() in that window skipped the overflow it should have seen. This is a stress
+        // test rather than a deterministic one - the window is nanoseconds wide - so it asserts the
+        // invariant the fix guarantees (a depth between zero and maxFrames at every observation, and
+        // an empty queue with a zero depth at rest) rather than reproducing an interleaving.
+        val maxFrames = 8
+        val queue = VideoDecodeQueue(maxFrames = maxFrames, maxBytes = 1 shl 20)
+        val stop = AtomicBoolean(false)
+        val violations = CopyOnWriteArrayList<String>()
+        val threads = listOf(
+            Thread { while (!stop.get()) queue.offer(VideoJob.Frame(ByteArray(8))) },
+            Thread { while (!stop.get()) queue.offer(VideoJob.Frame(ByteArray(8))) },
+            Thread {
+                while (!stop.get()) {
+                    val job = queue.poll(1)
+                    if (job is VideoJob.Frame) job.release()
+                }
+            },
+            Thread {
+                while (!stop.get()) {
+                    val job = queue.poll(1)
+                    if (job is VideoJob.Frame) job.release()
+                }
+            },
+        )
+        threads.forEach { it.isDaemon = true; it.start() }
+        var samples = 0
+        try {
+            val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(STRESS_MILLIS)
+            while (System.nanoTime() < deadline) {
+                val pending = queue.pendingFrames()
+                samples++
+                if ((pending < 0 || pending > maxFrames) && violations.size < MAX_RECORDED_VIOLATIONS) {
+                    violations += "pending=$pending"
+                }
+            }
+        } finally {
+            stop.set(true)
+            threads.forEach { it.join(5_000) }
+        }
+
+        var drained = 0
+        while (true) {
+            val job = queue.poll(0) ?: break
+            if (job is VideoJob.Frame) drained++
+        }
+        assertTrue("no sample was taken while the queue was under load", samples > 0)
+        assertTrue("the depth left its budget: $violations", violations.isEmpty())
+        assertTrue("the queue held more frames than its budget: $drained", drained in 0..maxFrames)
+        // At rest every counted frame has been removed again, so the depth must be exactly zero.
+        assertEquals(0, queue.pendingFrames())
+    }
+
+    private companion object {
+        /** How long the producers and consumers race; long enough for many samples, still fast. */
+        const val STRESS_MILLIS = 200L
+        const val MAX_RECORDED_VIOLATIONS = 8
     }
 }

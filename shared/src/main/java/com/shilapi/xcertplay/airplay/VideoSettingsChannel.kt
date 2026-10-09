@@ -76,13 +76,27 @@ class VideoSettingsChannel(
         }
     }
 
-    private fun handlePackages(buffer: ByteArray, output: OutputStream): ByteArray {
+    /**
+     * Consumes every complete package in [buffer] and returns the tail that is not one yet.
+     *
+     * Internal rather than private so the package framing can be exercised without a socket: the
+     * slice below reads bytes 20..28 of the package, which is the part that used to be able to run
+     * off the end of a short package.
+     */
+    internal fun handlePackages(buffer: ByteArray, output: OutputStream): ByteArray {
         var offset = 0
         while (buffer.size - offset >= HEADER) {
             val size = u32(buffer, offset)
             if (size < HEADER || size > MAX_PACKAGE) throw IllegalStateException("bad package size $size")
             if (buffer.size - offset < size) break
-            if (ascii(buffer, offset + 4, 12) == "sync") reply(output, buffer.copyOfRange(offset + 20, offset + 28))
+            if (ascii(buffer, offset + 4, 12) == "sync") {
+                // The reply echoes the 8-byte sequence number at offset 20..28, so the declared size
+                // must cover SEQUENCE_END bytes. HEADER (the full package header reply() writes) is
+                // larger, which is what already rejects a 20..27-byte package above; this check keeps
+                // the slice inside the package if HEADER is ever lowered below the fields it reads.
+                if (size < SEQUENCE_END) throw IllegalStateException("sync package too short: $size")
+                reply(output, buffer.copyOfRange(offset + SEQUENCE_OFFSET, offset + SEQUENCE_END))
+            }
             offset += size
         }
         return buffer.copyOfRange(offset, buffer.size)
@@ -92,7 +106,7 @@ class VideoSettingsChannel(
         val header = ByteArray(HEADER)
         header[3] = HEADER.toByte()
         "rply".toByteArray(Charsets.US_ASCII).copyInto(header, 4)
-        seq.copyInto(header, 20)
+        seq.copyInto(header, SEQUENCE_OFFSET)
         val aad = byteArrayOf((header.size and 0xff).toByte(), (header.size shr 8).toByte())
         val sealed = AirPlayCrypto.chachaSeal(writeKey, AirPlayCrypto.nonce64(writeCounter++), header, aad)
         output.write(aad + sealed)
@@ -114,6 +128,13 @@ class VideoSettingsChannel(
 
     private companion object {
         const val HEADER = 32
+
+        /** Offset of the 8-byte sequence number that "sync" and "rply" exchange. */
+        const val SEQUENCE_OFFSET = 20
+
+        /** First byte past the sequence number: the last field [handlePackages] reads. */
+        const val SEQUENCE_END = SEQUENCE_OFFSET + 8
+
         const val TAG = 16
         const val MAX_PACKAGE = 8 * 1024 * 1024
     }

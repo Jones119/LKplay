@@ -33,6 +33,42 @@ class ScreenCodecTest {
     }
 
     @Test
+    fun anOverflowingNalLengthLeavesThePayloadUntouched() {
+        // 0x7FFFFFFF is a legal u32 on the wire. offset + nalLength used to wrap negative, pass the
+        // bounds check, and the next length read then indexed at a negative offset
+        // (ArrayIndexOutOfBoundsException), which escaped onMessage and closed the whole stream - the
+        // clear-frame branch made that reachable from any host on the link with a header plus a
+        // four-byte body.
+        val payload = byteArrayOf(0x7F, 0xFF.toByte(), 0xFF.toByte(), 0xFF.toByte(), 0, 0, 0, 0)
+        val original = payload.copyOf()
+
+        assertSame(payload, ScreenCodec.lengthPrefixedToAnnexB(payload))
+        assertArrayEquals(original, payload)
+    }
+
+    @Test
+    fun anOverflowingLengthAfterAValidNalAlsoLeavesThePayloadUntouched() {
+        // The realistic frame shape: the first NAL is well formed, the second declares 0x7FFFFFFF.
+        val payload =
+            byteArrayOf(0, 0, 0, 2, 0x40, 0x01) +
+                byteArrayOf(0x7F, 0xFF.toByte(), 0xFF.toByte(), 0xFF.toByte(), 0, 0, 0, 0)
+        val original = payload.copyOf()
+
+        assertSame(payload, ScreenCodec.lengthPrefixedToAnnexB(payload))
+        assertArrayEquals(original, payload)
+    }
+
+    @Test
+    fun aNalLengthPastTheEndOfThePayloadLeavesItUntouched() {
+        // The same branch without an overflow: the length fits an Int but not the payload.
+        val payload = byteArrayOf(0, 0, 0, 7, 0, 0, 0, 0)
+        val original = payload.copyOf()
+
+        assertSame(payload, ScreenCodec.lengthPrefixedToAnnexB(payload))
+        assertArrayEquals(original, payload)
+    }
+
+    @Test
     fun aPooledBufferConvertsOnlyUpToTheFrameLength() {
         val first = byteArrayOf(0x40, 0x01)
         val frameLength = 4 + first.size
