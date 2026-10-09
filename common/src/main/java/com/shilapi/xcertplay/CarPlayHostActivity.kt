@@ -329,6 +329,13 @@ class CarPlayHostActivity : ComponentActivity() {
     private var safeAreaDrawOutside = true
     private var locationReportingEnabled = false
     private var locationPermissionAvailable = false
+    /**
+     * The persisted cluster-push switch, handed to [VendorClusterBridge.attach] on every start.
+     *
+     * Initialised to the persistence default so a settings screen opened before
+     * [loadPersistedSettings] has run cannot leave the push off by accident.
+     */
+    private var clusterBridgeEnabled = true
     private var microphoneAvailable = false
     private var microphonePermissionResolved = false
     private var wirelessEnabled = false
@@ -565,6 +572,7 @@ class CarPlayHostActivity : ComponentActivity() {
                 AirPlayPersistence.loadAdvancedAudioChannelMapping(this)
         navigationStreamType = AirPlayPersistence.loadNavigationStreamType(this)
         debugLogsEnabled = AirPlayPersistence.loadDebugLogsEnabled(this)
+        clusterBridgeEnabled = AirPlayPersistence.loadClusterBridgeEnabled(this)
         // The high-rate diagnostic traces follow this setting; they are off unless it is on.
         com.shilapi.xcertplay.diag.DiagLog.update(debugLogsEnabled)
         autoStartOnBoot = AirPlayPersistence.loadAutoStartOnBoot(this)
@@ -728,14 +736,11 @@ class CarPlayHostActivity : ComponentActivity() {
         // wireless CarPlay must keep advertising Opus even though the platform has none, because
         // dropping it from the advertisement makes iOS stop routing audio to the car at all.
         runCatching { appendLog(com.shilapi.xcertplay.media.CodecCapabilityReport.line()) }
-        // Give the cluster bridge its context and its arrow renderer; both stay inert until
-        // `debug.diplay.cluster` is set.
-        runCatching {
-            com.shilapi.xcertplay.media.VendorClusterBridge.attach(this)
-            com.shilapi.xcertplay.media.VendorClusterBridge.arrowRenderer = { type, side ->
-                ManeuverArrowRenderer.render(this, type, side)
-            }
-        }
+        // Give the cluster bridge its context, its arrow renderer and the persisted on/off setting. The
+        // setting is re-read here rather than trusted from onCreate so a change made in the settings
+        // screen takes effect on the way back, and so the push is on after an ignition without adb.
+        clusterBridgeEnabled = AirPlayPersistence.loadClusterBridgeEnabled(this)
+        attachClusterBridge()
         // One-off reconnaissance for the two vendor integrations worth doing next (docs/_digest/37):
         // what the car's media centre answers, and what the DIM navigation API offers. Log-only.
         if (!DiPlayScreenState.vendorProbesDone) {
@@ -825,6 +830,22 @@ class CarPlayHostActivity : ComponentActivity() {
         }
     }
 
+
+    /**
+     * Hands the cluster bridge its context, its arrow renderer and the persisted on/off setting.
+     *
+     * Called from [onStart] and again when the settings menu closes, because the bridge reads its
+     * enablement on every media and guidance update: without the second call a new switch position
+     * would only apply at the next ignition, which is the very delay the persisted setting removes.
+     */
+    private fun attachClusterBridge() {
+        runCatching {
+            com.shilapi.xcertplay.media.VendorClusterBridge.attach(this, clusterBridgeEnabled)
+            com.shilapi.xcertplay.media.VendorClusterBridge.arrowRenderer = { type, side ->
+                ManeuverArrowRenderer.render(this, type, side)
+            }
+        }
+    }
 
     // The CarPlay instrument-cluster stream: this head unit exposes no cluster projection display, so
     // DiPlay asks the iPhone for the standard virtual cluster stream (1280x720) and mirrors it into the
@@ -1378,6 +1399,23 @@ class CarPlayHostActivity : ComponentActivity() {
             ).apply { topMargin = dp(12) },
         )
 
+        // The cluster push, right after startup because it is the other thing that must survive a
+        // reboot: it was an adb property before, and one ignition dropped it (docs/_digest/38).
+        content.addView(
+            settingsCategoryHeader(getString(R.string.cluster_push)),
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = dp(36) },
+        )
+        content.addView(
+            buildClusterPushSection(),
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = dp(12) },
+        )
+
         if (advancedAudioChannelMappingSupported) {
             content.addView(
                 settingsCategoryHeader(getString(R.string.audio)),
@@ -1783,6 +1821,7 @@ class CarPlayHostActivity : ComponentActivity() {
         AirPlayPersistence.saveManualHotspotSecurity(this, manualHotspotSecurity)
         AirPlayPersistence.saveLocationReportingEnabled(this, locationReportingEnabled)
         AirPlayPersistence.saveAutoStartOnBoot(this, autoStartOnBoot)
+        AirPlayPersistence.saveClusterBridgeEnabled(this, clusterBridgeEnabled)
         AirPlayPersistence.saveAdvancedAudioChannelMapping(this, advancedAudioChannelMapping)
         AirPlayPersistence.saveDisplayScaleTenths(this, displayScaleTenths)
         AirPlayPersistence.saveDisplayScalePercent(this, displayScalePercent)
@@ -2073,6 +2112,48 @@ class CarPlayHostActivity : ComponentActivity() {
                     14f,
                     MENU_SECONDARY,
                 ),
+                LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                ).apply { topMargin = dp(6) },
+            )
+        }
+
+    /**
+     * The DIM media/guidance push (docs/_digest/38): the now-playing card and the turn-by-turn fields
+     * are one switch, on by default and persisted, because the `debug.diplay.cluster` property it
+     * replaces is lost with every ignition and left the cluster empty until adb set it again.
+     *
+     * The CS11 has no head-up display -- its only cluster is the LCD instrument panel behind the
+     * steering wheel -- so this row carries its own strings. Reusing the upstream
+     * `navigation_on_hud_and_instrument_cluster` (and the BYD-era `cluster_song`, about a song-only
+     * card) read as a HUD feature and hid the fact that this is the switch for the dashboard push. The
+     * adb property still overrides the setting: see `VendorClusterBridge.enabled`.
+     */
+    private fun buildClusterPushSection(): View =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(
+                settingsSwitchRow(
+                    label = getString(R.string.cluster_push_music_and_navigation),
+                    checked = clusterBridgeEnabled,
+                    description = getString(R.string.cluster_push_description),
+                ) { checked ->
+                    clusterBridgeEnabled = checked
+                    appendLog(
+                        "Cluster push ${if (checked) "enabled" else "disabled"}; " +
+                            "applies when settings close",
+                    )
+                },
+                LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                ),
+            )
+            // The overlay theme drops a switch row's description, and this sentence is the one that tells
+            // the owner the push is about the dashboard rather than a HUD, so it is drawn as its own line.
+            addView(
+                menuText(getString(R.string.cluster_push_description), 14f, MENU_SECONDARY),
                 LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -4113,6 +4194,9 @@ class CarPlayHostActivity : ComponentActivity() {
         menuOpen = false
         settingsMenu?.visibility = View.GONE
         gestureOverlay?.visibility = View.VISIBLE
+        // The cluster switch may have changed in here (or been restored by a cancel); the bridge is
+        // inert until it is told, so hand it the settled value before the session carries on.
+        attachClusterBridge()
         settingsGestureHint?.text = getString(R.string.open_diplay_settings_hint, gestureFingerCount)
         updateDebugOverlays()
         logLines.clear()

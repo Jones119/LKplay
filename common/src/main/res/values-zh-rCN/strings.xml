@@ -513,6 +513,9 @@
     <string name="video_while_parked">驻车时播放视频</string>
     <string name="video_while_parked_description">iOS 27：在 iPhone 上投送到 CarPlay 的视频会在车辆处于 P 挡时在车机屏幕上播放。挂出 P 挡时播放器会关闭；没有 ADB 时视频保持关闭，iPhone 只播放声音。普通 HTTPS 视频（例如来自 Safari）可以播放；受 FairPlay 保护的视频（例如 Apple TV+）需要获得授权的接收器，在这里无法播放。会重新连接 CarPlay。需要车机开启网络 ADB。</string>
     <string name="cluster_song">仪表盘显示歌曲</string>
+    <string name="cluster_push">仪表盘投屏</string>
+    <string name="cluster_push_music_and_navigation">媒体与导航</string>
+    <string name="cluster_push_description">把正在播放的曲目、歌手和导航指引送到液晶仪表，由仪表自己的音乐卡片和导航栏显示。本车没有抬头显示（HUD）。</string>
     <string name="video_back_to_carplay">返回 CarPlay</string>
     <string name="video_play">播放</string>
     <string name="video_pause">暂停</string>

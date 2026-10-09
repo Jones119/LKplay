@@ -65,6 +65,7 @@ object AirPlayPersistence {
     private const val KEY_MEDIA_BUFFER_MS = "media_buffer_ms"
     private const val KEY_MAIN_BUFFERED_AUDIO = "main_buffered_audio"
     private const val KEY_CLUSTER_MAP = "cluster_map_enabled"
+    private const val KEY_CLUSTER_BRIDGE_ENABLED = "cluster_bridge_enabled"
     private const val KEY_ADB_CLUSTER_ACTIVITY = "adb_cluster_activity_enabled"
     private const val KEY_CENTER_MAP_OVERLAY = "center_map_overlay"
     private const val KEY_CENTER_MAP_AUTO_HIDE = "center_map_auto_hide"
@@ -568,6 +569,27 @@ object AirPlayPersistence {
 
     fun saveClusterMapEnabled(context: Context, enabled: Boolean) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_CLUSTER_MAP, enabled).apply()
+    }
+
+    /**
+     * Whether the cluster bridge pushes the current track and the turn-by-turn guidance onto the
+     * instrument cluster (docs/_digest/38).
+     *
+     * Default on, and deliberately a separate key from [loadClusterMapEnabled]: the map stream is a
+     * different experiment from the DIM media/guidance push. The push used to sit behind
+     * `debug.diplay.cluster` alone, which no ignition survives, so the cluster came back empty after
+     * every restart until someone ran setprop again. `VendorClusterBridge` still lets that property
+     * override this setting both ways while it is set, so persisting the switch does not cost the
+     * bench path.
+     */
+    fun loadClusterBridgeEnabled(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getBoolean(KEY_CLUSTER_BRIDGE_ENABLED, true)
+
+    fun saveClusterBridgeEnabled(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putBoolean(KEY_CLUSTER_BRIDGE_ENABLED, enabled)
+            .apply()
     }
 
     /** The dashboard map as a card on the centre screen while DiPlay is in the background. */
