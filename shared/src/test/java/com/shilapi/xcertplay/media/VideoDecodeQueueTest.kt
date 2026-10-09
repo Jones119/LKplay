@@ -1,6 +1,7 @@
 package com.shilapi.xcertplay.media
 
 import com.shilapi.xcertplay.airplay.VideoCodec
+import com.shilapi.xcertplay.airplay.VideoFramePool
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -72,5 +73,47 @@ class VideoDecodeQueueTest {
         ))
         assertEquals(3, attempts)
         assertEquals(-1, VideoInputPump.acquire(running = { false }, drain = { fail() }, dequeue = { fail(); 0 }))
+    }
+
+    @Test fun pendingFramesTracksDepthWithoutScanningTheQueue() {
+        val queue = VideoDecodeQueue()
+        queue.offer(VideoJob.Frame(ByteArray(4)))
+        queue.offer(VideoJob.Frame(ByteArray(4)))
+        assertEquals(2, queue.pendingFrames())
+
+        queue.poll(0)
+        assertEquals(1, queue.pendingFrames())
+
+        queue.discardFrames()
+        assertEquals(0, queue.pendingFrames())
+    }
+
+    @Test fun discardingFramesReleasesTheirPooledBuffers() {
+        val pool = VideoFramePool()
+        val queue = VideoDecodeQueue(maxFrames = 1)
+        val first = pool.acquire(8)
+        val second = pool.acquire(8)
+
+        queue.offer(VideoJob.Frame(first.bytes, length = first.length, owned = first))
+        // The second frame overflows maxFrames = 1, which drops - and releases - the first.
+        queue.offer(VideoJob.Frame(second.bytes, length = second.length, owned = second))
+        assertEquals(1, pool.retainedFrames())
+
+        // The queue still owns the second frame's buffer, and dropping it returns that one too.
+        queue.discardFrames()
+        assertEquals(2, pool.retainedFrames())
+    }
+
+    @Test fun discardedOversizedFrameReturnsItsBuffer() {
+        val pool = VideoFramePool()
+        val queue = VideoDecodeQueue(maxBytes = 4)
+        val frame = pool.acquire(8)
+
+        queue.offer(VideoJob.Frame(frame.bytes, length = frame.length, owned = frame))
+
+        // The oversized frame is dropped (its buffer returned) and a resync is queued in its place.
+        assertEquals(1, pool.retainedFrames())
+        assertEquals(VideoJob.Resync, queue.poll(0))
+        assertNull(queue.poll(0))
     }
 }

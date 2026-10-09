@@ -31,4 +31,18 @@ class ScreenCodecTest {
         assertSame(payload, ScreenCodec.lengthPrefixedToAnnexB(payload))
         assertArrayEquals(original, payload)
     }
+
+    @Test
+    fun aPooledBufferConvertsOnlyUpToTheFrameLength() {
+        val first = byteArrayOf(0x40, 0x01)
+        val frameLength = 4 + first.size
+        val buffer = byteArrayOf(0, 0, 0, first.size.toByte()) + first + ByteArray(8) { 0x7F }
+
+        val converted = ScreenCodec.lengthPrefixedToAnnexB(buffer, frameLength)
+
+        assertSame(buffer, converted)
+        assertArrayEquals(byteArrayOf(0, 0, 0, 1) + first, buffer.copyOf(frameLength))
+        // Bytes past the frame belong to a recycled buffer and must stay untouched.
+        assertArrayEquals(ByteArray(8) { 0x7F }, buffer.copyOfRange(frameLength, buffer.size))
+    }
 }

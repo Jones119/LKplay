@@ -62,6 +62,36 @@ object AirPlayCrypto {
         return cipher.doFinal(input)
     }
 
+    /** [nativeAead] writing into the caller's [output] instead of allocating a fresh array. */
+    private fun nativeAeadInto(
+        mode: Int,
+        cache: ThreadLocal<javax.crypto.Cipher>,
+        key: ByteArray,
+        nonce: ByteArray,
+        aad: ByteArray,
+        aadOffset: Int,
+        aadLength: Int,
+        input: ByteArray,
+        inputOffset: Int,
+        inputLength: Int,
+        output: ByteArray,
+        outputOffset: Int,
+    ): Int {
+        val provider = nativeProvider ?: throw IllegalStateException("native AEAD unavailable")
+        var cipher = cache.get()
+        if (cipher == null) {
+            cipher = javax.crypto.Cipher.getInstance("ChaCha20-Poly1305", provider)
+            cache.set(cipher)
+        }
+        cipher.init(
+            mode,
+            javax.crypto.spec.SecretKeySpec(key, "ChaCha20"),
+            javax.crypto.spec.IvParameterSpec(nonce),
+        )
+        cipher.updateAAD(aad, aadOffset, aadLength)
+        return cipher.doFinal(input, inputOffset, inputLength, output, outputOffset)
+    }
+
     data class X25519KeyPair(val privateKey: ByteArray, val publicKey: ByteArray)
     data class Ed25519KeyPair(val privateKey: ByteArray, val publicKey: ByteArray)
 
@@ -163,6 +193,61 @@ object AirPlayCrypto {
         val finalized = cipher.doFinal(output, processed)
         val outputLength = processed + finalized
         return if (outputLength == output.size) output else output.copyOf(outputLength)
+    }
+
+    /**
+     * Opens [ciphertextAndTag] straight into [output] and returns the plaintext length.
+     *
+     * The caller owns both buffers, which is what lets the screen stream decrypt a frame into a pooled
+     * buffer instead of allocating a fresh array per frame (see `docs/_digest/41` §9). Offsets let the
+     * audio path decrypt a packet in place inside its reused wire buffer.
+     */
+    fun chachaOpenInto(
+        key: ByteArray,
+        nonce: ByteArray,
+        ciphertextAndTag: ByteArray,
+        ciphertextOffset: Int,
+        ciphertextLength: Int,
+        aad: ByteArray,
+        aadOffset: Int,
+        aadLength: Int,
+        output: ByteArray,
+        outputOffset: Int,
+    ): Int {
+        if (nativeProvider != null) {
+            // Auth failures (AEADBadTagException) must propagate to the caller unchanged; only
+            // setup-level problems fall through to BouncyCastle (same contract as chachaOpen).
+            try {
+                return nativeAeadInto(
+                    javax.crypto.Cipher.DECRYPT_MODE,
+                    nativeOpenCiphers,
+                    key,
+                    nonce,
+                    aad,
+                    aadOffset,
+                    aadLength,
+                    ciphertextAndTag,
+                    ciphertextOffset,
+                    ciphertextLength,
+                    output,
+                    outputOffset,
+                )
+            } catch (error: javax.crypto.AEADBadTagException) {
+                throw error
+            } catch (error: java.security.GeneralSecurityException) {
+                android.util.Log.w("xcertplay", "AirPlayCrypto: native open-into failed, using BouncyCastle", error)
+            }
+        }
+        val aadSlice = if (aadOffset == 0 && aadLength == aad.size) {
+            aad
+        } else {
+            aad.copyOfRange(aadOffset, aadOffset + aadLength)
+        }
+        val cipher = ChaCha20Poly1305()
+        cipher.init(false, AEADParameters(KeyParameter(key), MAC_BITS, nonce, aadSlice))
+        val processed = cipher.processBytes(ciphertextAndTag, ciphertextOffset, ciphertextLength, output, outputOffset)
+        val finalized = cipher.doFinal(output, outputOffset + processed)
+        return processed + finalized
     }
 
     /** 12-byte nonce: four zero bytes followed by an eight-byte little-endian counter. */

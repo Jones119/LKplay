@@ -24,6 +24,20 @@ class ScreenStream(private val key: ByteArray, private val onDiagnostic: (String
         fun onCodec(codec: VideoCodec) {}
         fun onConfig(codecData: ByteArray) {}
         fun onFrame(naluBytes: ByteArray) {}
+
+        /**
+         * The same frame as [onFrame], but its bytes live in a pooled buffer: the implementation must
+         * call [OwnedVideoFrame.close] once it no longer needs them. The default copy keeps
+         * byte-array-only listeners working unchanged.
+         */
+        fun onOwnedFrame(frame: OwnedVideoFrame) {
+            try {
+                onFrame(frame.copyOfBytes())
+            } finally {
+                frame.close()
+            }
+        }
+
         fun onClosed(cause: Throwable?) {}
     }
 
@@ -77,65 +91,101 @@ class ScreenStream(private val key: ByteArray, private val onDiagnostic: (String
     private fun run(sock: Socket) {
         var failure: Throwable? = null
         val stats = StreamReceiveStats("video", onDiagnostic)
+        // CS11: one receive thread, so one header buffer and one body buffer are reused; the plaintext
+        // goes into a pooled frame that the decoder thread releases after feeding the codec
+        // (see docs/_digest/41 §9 - this replaced two multi-kilobyte allocations per frame).
+        val frames = VideoFramePool()
         try {
             val input = sock.getInputStream()
+            val header = ByteArray(HEADER_LEN)
+            var body = ByteArray(0)
             while (!closed.get()) {
                 stats.reading()
-                val header = readFully(input, HEADER_LEN) ?: break
+                if (!readFully(input, header, 0, HEADER_LEN)) break
                 val bodySize = readU32Le(header, 0)
                 if (bodySize > MAX_BODY) break
-                val body = readFully(input, bodySize) ?: break
+                if (body.size < bodySize) body = ByteArray(bodySize)
+                if (!readFully(input, body, 0, bodySize)) break
                 stats.received(HEADER_LEN + bodySize)
-                onMessage(header, body)
+                onMessage(header, body, bodySize, frames)
                 stats.processed()
             }
         } catch (error: Exception) {
             failure = error
         } finally {
             stats.flush(ended = true)
+            frames.close()
             if (socket === sock) socket = null
             safeClose(sock)
             if (!closed.get()) listener.onClosed(failure)
         }
     }
 
-    private fun onMessage(header: ByteArray, body: ByteArray) {
+    private fun onMessage(header: ByteArray, body: ByteArray, bodySize: Int, frames: VideoFramePool) {
         when (header[OPCODE_OFFSET].toInt() and 0xff) {
             OP_VIDEO_FRAME -> {
-                val payload = if (body.size >= ScreenCodec.TAG_SIZE) {
-                    ScreenCodec.decryptFrame(key, frameCounter.get(), header, body)
-                        .also { frameCounter.incrementAndGet() }
-                } else {
-                    body
+                if (bodySize < ScreenCodec.TAG_SIZE) {
+                    // A clear (unsealed) frame; rare. The reused body buffer must not escape, so copy.
+                    listener.onFrame(ScreenCodec.lengthPrefixedToAnnexB(body.copyOf(bodySize)))
+                    return
+                }
+                val frame = frames.acquire(bodySize - ScreenCodec.TAG_SIZE)
+                try {
+                    AirPlayCrypto.chachaOpenInto(
+                        key = key,
+                        nonce = AirPlayCrypto.nonce64(frameCounter.get()),
+                        ciphertextAndTag = body,
+                        ciphertextOffset = 0,
+                        ciphertextLength = bodySize,
+                        aad = header,
+                        aadOffset = 0,
+                        aadLength = HEADER_LEN,
+                        output = frame.bytes,
+                        outputOffset = 0,
+                    )
+                    frameCounter.incrementAndGet()
+                } catch (error: Throwable) {
+                    frame.close()
+                    throw error
                 }
                 if (firstFrameLogged.compareAndSet(false, true)) {
                     Log.i(
                         TAG,
-                        "video first decrypted frame sealed=${body.size} plain=${payload.size} " +
-                        "head=${payload.hexPrefix(16)}",
+                        "video first decrypted frame sealed=$bodySize plain=${frame.length} " +
+                            "head=${frame.bytes.hexPrefix(minOf(16, frame.length))}",
                     )
                 }
-                listener.onFrame(ScreenCodec.lengthPrefixedToAnnexB(payload))
+                ScreenCodec.lengthPrefixedToAnnexB(frame.bytes, frame.length)
+                try {
+                    listener.onOwnedFrame(frame)
+                } catch (error: Throwable) {
+                    // The listener never took ownership, so return the buffer before propagating.
+                    frame.close()
+                    throw error
+                }
             }
             OP_VIDEO_CONFIG -> {
-                val (codec, codecData) = ScreenCodec.detectConfig(body)
-                Log.i(TAG, "video codec config codec=$codec body=${body.size} data=${codecData.size}")
+                // The decoder (and any mirrored decoder) retains the config data, so it must not point
+                // into the reused body buffer.
+                val config = body.copyOf(bodySize)
+                val (codec, codecData) = ScreenCodec.detectConfig(config)
+                Log.i(TAG, "video codec config codec=$codec body=${config.size} data=${codecData.size}")
                 listener.onCodec(codec)
                 listener.onConfig(codecData)
             }
         }
     }
 
-    private fun readFully(input: InputStream, length: Int): ByteArray? {
-        if (length < 0) return null
-        val output = ByteArray(length)
-        var offset = 0
-        while (offset < length) {
-            val read = input.read(output, offset, length - offset)
-            if (read < 0) return null
-            offset += read
+    /** Reads exactly [length] bytes into [buffer] at [offset]; false at end of stream. */
+    private fun readFully(input: InputStream, buffer: ByteArray, offset: Int, length: Int): Boolean {
+        if (length < 0) return false
+        var read = 0
+        while (read < length) {
+            val count = input.read(buffer, offset + read, length - read)
+            if (count < 0) return false
+            read += count
         }
-        return output
+        return true
     }
 
     private companion object {
@@ -165,26 +215,33 @@ object ScreenCodec {
      * The payload is left untouched unless every length-prefixed NAL is valid, so malformed
      * input keeps its original bytes for the normal decoder error path.
      */
-    fun lengthPrefixedToAnnexB(payload: ByteArray): ByteArray {
-        if (payload.size < 4 || payload.startsWithStartCode()) return payload
+    fun lengthPrefixedToAnnexB(payload: ByteArray): ByteArray =
+        lengthPrefixedToAnnexB(payload, payload.size)
+
+    /**
+     * [lengthPrefixedToAnnexB] for a pooled buffer that can be longer than the frame it holds: only
+     * the first [length] bytes are inspected and converted.
+     */
+    fun lengthPrefixedToAnnexB(payload: ByteArray, length: Int): ByteArray {
+        if (length < 4 || payload.startsWithStartCode()) return payload
 
         var offset = 0
-        while (offset + 4 <= payload.size) {
-            val length = readU32Be(payload, offset)
+        while (offset + 4 <= length) {
+            val nalLength = readU32Be(payload, offset)
             offset += 4
-            if (length <= 0 || offset + length > payload.size) return payload
-            offset += length
+            if (nalLength <= 0 || offset + nalLength > length) return payload
+            offset += nalLength
         }
-        if (offset != payload.size) return payload
+        if (offset != length) return payload
 
         offset = 0
-        while (offset + 4 <= payload.size) {
-            val length = readU32Be(payload, offset)
+        while (offset + 4 <= length) {
+            val nalLength = readU32Be(payload, offset)
             payload[offset] = 0
             payload[offset + 1] = 0
             payload[offset + 2] = 0
             payload[offset + 3] = 1
-            offset += 4 + length
+            offset += 4 + nalLength
         }
         return payload
     }

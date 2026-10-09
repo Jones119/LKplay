@@ -15,7 +15,15 @@ internal class AudioBufferProgress(private val frameBytes: Int) {
         return (writtenBytes - playedFrames * frameBytes).coerceAtLeast(0)
     }
 
+    /**
+     * Upstream `f5452c5` — "re-arm the media audio prebuffer after underruns".
+     *
+     * The condition is a *floor* ([floorBytes]), not "exactly empty": the call site passes half the
+     * start threshold, so a track that starved with a little PCM still in it pauses and re-arms, and
+     * [AndroidMediaSink]'s renderer then counts that residual toward the restart threshold.
+     * Ported together with upstream's `AudioRebufferCapacityTest` (docs/_digest/31 §6).
+     */
     fun shouldRebuffer(isMedia: Boolean, playing: Boolean, underrunSinceStart: Boolean,
-        compressedQueueEmpty: Boolean, rawHead: Int): Boolean =
-        isMedia && playing && underrunSinceStart && compressedQueueEmpty && queuedBytes(rawHead) == 0L
+        compressedQueueEmpty: Boolean, rawHead: Int, floorBytes: Long): Boolean =
+        isMedia && playing && underrunSinceStart && compressedQueueEmpty && queuedBytes(rawHead) <= floorBytes
 }

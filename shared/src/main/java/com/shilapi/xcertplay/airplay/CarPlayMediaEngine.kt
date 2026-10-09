@@ -20,6 +20,20 @@ interface MediaSink {
     fun onVideoCodec(type: Int, codec: VideoCodec) {}
     fun onVideoConfig(type: Int, codecData: ByteArray) {}
     fun onVideoFrame(type: Int, naluBytes: ByteArray) {}
+
+    /**
+     * The same frame, but its bytes live in a pooled buffer from [VideoFramePool]: the implementation
+     * must call [OwnedVideoFrame.close] once the decoder no longer needs them. The default copy keeps
+     * byte-array-only sinks working unchanged.
+     */
+    fun onVideoFrame(type: Int, frame: OwnedVideoFrame) {
+        try {
+            onVideoFrame(type, frame.copyOfBytes())
+        } finally {
+            frame.close()
+        }
+    }
+
     fun setVideoRecoveryHandler(type: Int, handler: () -> Unit) {}
     fun setVideoDiagnosticHandler(type: Int, handler: (String) -> Unit) {}
     fun onScreenStreamActive(type: Int, active: Boolean) {}
@@ -126,6 +140,7 @@ class CarPlayMediaEngine(
                 override fun onCodec(codec: VideoCodec) = sink.onVideoCodec(type, codec)
                 override fun onConfig(codecData: ByteArray) = sink.onVideoConfig(type, codecData)
                 override fun onFrame(naluBytes: ByteArray) = sink.onVideoFrame(type, naluBytes)
+                override fun onOwnedFrame(frame: OwnedVideoFrame) = sink.onVideoFrame(type, frame)
                 override fun onClosed(cause: Throwable?) {
                     Log.w(
                         TAG,

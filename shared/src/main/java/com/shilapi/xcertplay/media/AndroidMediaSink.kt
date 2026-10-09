@@ -17,6 +17,7 @@ import com.shilapi.xcertplay.airplay.AudioFormat
 import com.shilapi.xcertplay.airplay.AudioStreamId
 import com.shilapi.xcertplay.airplay.MediaSink
 import com.shilapi.xcertplay.airplay.MicrophoneConfig
+import com.shilapi.xcertplay.airplay.OwnedVideoFrame
 import com.shilapi.xcertplay.airplay.VideoCodec
 import com.shilapi.xcertplay.airplay.toHexString
 import java.io.Closeable
@@ -278,6 +279,27 @@ class AndroidMediaSink(
         mirrorDecoders(type).forEach { it.submit(naluBytes) }
     }
 
+    override fun onVideoFrame(type: Int, frame: OwnedVideoFrame) {
+        try {
+            val mirrors = mirrorDecoders(type)
+            if (mirrors.isEmpty()) {
+                // The pooled buffer goes straight to the decoder, which releases it after feeding the
+                // codec. This is the last statement, so a failure here cannot leave it queued.
+                videoDecoder(type).submit(frame)
+                return
+            }
+            // A mirror decodes the same stream on another thread, so it cannot share the pooled buffer:
+            // give the mirrors one copy (as before this change) and let the primary decoder own it.
+            val copy = frame.copyOfBytes()
+            mirrors.forEach { it.submit(copy) }
+            videoDecoder(type).submit(frame)
+        } catch (error: Throwable) {
+            // Nothing has taken ownership yet (submit is the last call on each path), so return it.
+            frame.close()
+            throw error
+        }
+    }
+
     override fun onScreenStreamActive(type: Int, active: Boolean) {
         if (!active) {
             videoRecoveryHandlers.remove(type)
@@ -483,6 +505,13 @@ private class VideoDecoder(
         queue.offer(VideoJob.Frame(nalus))
     }
 
+    /** Takes ownership of a pooled frame; it is released once the decoder has fed it to the codec. */
+    fun submit(frame: OwnedVideoFrame) {
+        stats.onReceived(frame.length)
+        receivedSinceConfigure++
+        queue.offer(VideoJob.Frame(frame.bytes, length = frame.length, owned = frame))
+    }
+
     fun setSurface(surface: Surface?) {
         queue.offer(VideoJob.SurfaceChanged(surface))
         // A new surface rebuilds the decoder, which then starts mid-GOP: without a fresh IDR the panel
@@ -495,6 +524,8 @@ private class VideoDecoder(
     override fun close() {
         running = false
         thread.interrupt()
+        // Release pooled frames the decoder thread will never reach.
+        queue.discardFrames()
     }
 
     private fun run() {
@@ -509,9 +540,10 @@ private class VideoDecoder(
                             // visibly stuttered. Feed every frame and let drainOutput drop stale displays
                             // instead; only a real one-second stall recreates the decoder.
                             if (System.nanoTime() - job.receivedNs > STALL_RECOVERY_NS) {
+                                job.release()
                                 queue.discardFrames()
                                 recover("video backlog exceeded 1 s")
-                            } else feed(job.nalus)
+                            } else feed(job)
                         }
                         is VideoJob.SurfaceChanged -> changeSurface(job.surface)
                         is VideoJob.Resync -> recover("video queue overflow")
@@ -746,41 +778,50 @@ private class VideoDecoder(
         lastConfig?.let(::configureDecoder)
     }
 
-    private fun feed(nalus: ByteArray) {
-        val annexB = MediaCodecSupport.toAnnexB(nalus)
-        val config = lastConfig ?: return
-        if (outputSurface == null) return
-        if (annexB.isEmpty()) { recover("invalid video access unit"); return }
-        if (!referenceChain.accepts(annexB, config.codec)) {
-            requestKeyFrameIfDue()
-            return
-        }
-        if (decoder == null) configureDecoder(config)
-        val codec = decoder ?: return
-        if (!submittedFrameLogged) {
-            submittedFrameLogged = true
-            Log.i(
-                TAG,
-                "video decoder first input avcc=${nalus.size} annexB=${annexB.size}",
+    private fun feed(job: VideoJob.Frame) {
+        try {
+            val nalus = job.nalus
+            // A pooled frame is already Annex B (the screen stream converts it in place); a borrowed
+            // array may still carry four-byte NAL lengths.
+            val annexB = if (job.owned != null) nalus else MediaCodecSupport.toAnnexB(nalus)
+            val annexBLength = if (job.owned != null) job.length else annexB.size
+            val config = lastConfig ?: return
+            if (outputSurface == null) return
+            if (annexBLength <= 0) { recover("invalid video access unit"); return }
+            if (!referenceChain.accepts(annexB, annexBLength, config.codec)) {
+                requestKeyFrameIfDue()
+                return
+            }
+            if (decoder == null) configureDecoder(config)
+            val codec = decoder ?: return
+            if (!submittedFrameLogged) {
+                submittedFrameLogged = true
+                Log.i(
+                    TAG,
+                    "video decoder first input avcc=${job.length} annexB=$annexBLength",
+                )
+            }
+            val index = VideoInputPump.acquire(
+                running = { running }, drain = { drainOutput(codec) },
+                dequeue = { codec.dequeueInputBuffer(INPUT_TIMEOUT_US) },
             )
+            if (index < 0) { recover("video decoder input stalled"); return }
+            val input = checkNotNull(codec.inputBufferCompat(index)) { "Decoder input buffer unavailable" }
+            input.clear()
+            if (annexBLength <= input.remaining()) {
+                input.put(annexB, 0, annexBLength)
+                codec.queueInputBuffer(index, 0, annexBLength, System.nanoTime() / 1000, 0)
+            inputsSinceConfigure++
+                referenceChain.onQueued()
+            } else {
+                recover("video frame exceeded codec input capacity")
+                return
+            }
+            drainOutput(codec)
+        } finally {
+            // The pooled buffer is reusable as soon as the frame is in the codec's input queue.
+            job.release()
         }
-        val index = VideoInputPump.acquire(
-            running = { running }, drain = { drainOutput(codec) },
-            dequeue = { codec.dequeueInputBuffer(INPUT_TIMEOUT_US) },
-        )
-        if (index < 0) { recover("video decoder input stalled"); return }
-        val input = checkNotNull(codec.inputBufferCompat(index)) { "Decoder input buffer unavailable" }
-        input.clear()
-        if (annexB.size <= input.remaining()) {
-            input.put(annexB)
-            codec.queueInputBuffer(index, 0, annexB.size, System.nanoTime() / 1000, 0)
-        inputsSinceConfigure++
-            referenceChain.onQueued()
-        } else {
-            recover("video frame exceeded codec input capacity")
-            return
-        }
-        drainOutput(codec)
     }
 
     private fun recover(reason: String) {
@@ -947,6 +988,12 @@ private class AudioRenderer(
     private var firstPcmLogged = false
     private val packetsReceived = AtomicInteger()
     private val packetsDropped = AtomicInteger()
+    /** Audio skipped forward to keep the jitter queue near its target (docs/_digest/41 §12). */
+    private val packetsSkipped = AtomicInteger()
+    /** Frames carried by one packet, learned from consecutive RTP timestamps; 0 while unknown. */
+    private var framesPerPacket = 0
+    private var hasSubmittedSample = false
+    private var lastSubmittedSample = 0
     private val lastArrivalNs = AtomicLong()
     private val maxArrivalGapMs = AtomicLong()
     private val frameBytes = if (format.channels >= 2) 4 else 2
@@ -987,15 +1034,38 @@ private class AudioRenderer(
             val now = System.nanoTime()
             val previous = lastArrivalNs.getAndSet(now)
             if (previous != 0L) maxArrivalGapMs.accumulateAndGet((now - previous) / 1_000_000L, ::maxOf)
+            observePacketFrames(sample)
         }
-        if (!started || !queue.offer(AudioPacket(rtp, sample))) {
-            if (started) packetsDropped.incrementAndGet()
-            if (started && !droppedPacketsLogged) {
+        if (!started) return
+        if (queue.offer(AudioPacket(rtp, sample))) return
+        // Full. Drop the *oldest* packet to make room instead of refusing the newest: the old shape tore
+        // holes exactly when a burst arrived, which is what the tablet bench heard (docs/_digest/41 §12).
+        // NOTE: deliberately no "trim to a target depth" here - audio arrives in ~400 ms bursts, so
+        // trimming a healthy buffer on every arrival throws away most of the music (that mistake made
+        // the stutter far worse: skippedMs was ~2400 ms per 5000 ms window).
+        if (queue.poll() != null) packetsSkipped.incrementAndGet()
+        if (!queue.offer(AudioPacket(rtp, sample))) {
+            packetsDropped.incrementAndGet()
+            if (!droppedPacketsLogged) {
                 droppedPacketsLogged = true
-                Log.w(TAG, "audio queue full; dropping newest packets to bound latency")
+                Log.w(TAG, "audio queue full; dropping packets to bound latency")
                 report("Audio: queue full audioType=${format.audioType}")
             }
         }
+    }
+
+    /** Learns the packet duration from consecutive RTP timestamps, so skip counters are in audio time. */
+    private fun observePacketFrames(sample: Int) {
+        if (framesPerPacket != 0) return
+        val frames = AudioJitterTarget.packetFrames(
+            previous = lastSubmittedSample,
+            current = sample,
+            hasPrevious = hasSubmittedSample,
+            sampleRate = format.sampleRate,
+        )
+        hasSubmittedSample = true
+        lastSubmittedSample = sample
+        if (frames > 0) framesPerPacket = frames
     }
 
     override fun close() {
@@ -1525,7 +1595,8 @@ private class AudioRenderer(
     private fun maintainPlaybackBuffer() {
         val track = track ?: return
         if (bufferProgress.shouldRebuffer(mappedChannel == AudioChannel.MEDIA, playbackStarted,
-                trackUnderrunsCompat(track) > underrunsAtPlaybackStart, queue.isEmpty(), track.playbackHeadPosition)) {
+                trackUnderrunsCompat(track) > underrunsAtPlaybackStart, queue.isEmpty(), track.playbackHeadPosition,
+                startThresholdBytes / 2L)) {
             // The hardware buffer has actually drained. Pause without flushing or discarding PCM,
             // then use the configured start threshold again when music resumes.
             track.pause()
@@ -1562,13 +1633,18 @@ private class AudioRenderer(
             previous?.let { (current - it) and 0xffff_ffffL }
         }
         val queuedFrames = playbackHeadFrames?.let { (totalWrittenFrames - it).coerceAtLeast(0L) }
+        // Windowed skip counters, so audio dropped to stay bounded is visible in the field.
+        val skippedPackets = packetsSkipped.getAndSet(0)
+        val skippedAudioMs = skippedPackets.toLong() *
+            AudioJitterTarget.packetMillis(framesPerPacket, format.sampleRate)
         val line = "audio stats audioType=${format.audioType} channel=$mappedChannel " +
             "routeType=${currentTrack?.let { trackRouteTypeCompat(it) } ?: -1} codec=${format.codec} " +
             "trackState=${currentTrack?.state ?: -1} playState=${currentTrack?.playState ?: -1} " +
             "sampleRate=${currentTrack?.sampleRate ?: format.sampleRate} " +
             "trackBufferFrames=${currentTrack?.let { trackBufferSizeFramesCompat(it) } ?: -1} " +
             "rx=${packetsReceived.getAndSet(0)} " +
-            "dropped=${packetsDropped.getAndSet(0)} underruns=+${underruns - statsLastUnderruns} queue=${queue.size} " +
+            "dropped=${packetsDropped.getAndSet(0)} skipped=$skippedPackets skippedMs=$skippedAudioMs " +
+            "underruns=+${underruns - statsLastUnderruns} queue=${queue.size} " +
             "playing=$playbackStarted maxGapMs=${maxArrivalGapMs.getAndSet(0)} " +
             "sinceRxMs=${if (lastRx == 0L) -1 else (now - lastRx) / 1_000_000L} maxWriteMs=$maxWriteMs " +
             "writtenFrames=$writtenFramesThisWindow totalWrittenFrames=$totalWrittenFrames " +
@@ -1674,7 +1750,8 @@ private class AudioRenderer(
         const val INPUT_TIMEOUT_US = 10_000L
         const val AUDIO_POLL_MILLIS = 10L
         const val BUFFER_TAIL_WAIT_NS = 500_000_000L
-        // Holds a burst after a Wi-Fi gap (~4 s of AAC) instead of dropping it.
+        // Hard ceiling for the jitter queue (~4 s of AAC). The queue is normally trimmed well below it
+        // by AudioJitterTarget, so this only bounds a pathological backlog.
         const val MAX_QUEUED_PACKETS = 192
         const val PREBUFFER_WRITE_CHUNK_BYTES = 2 * 1024
         const val STATS_TAG = "DiPlay-AudioStats"
