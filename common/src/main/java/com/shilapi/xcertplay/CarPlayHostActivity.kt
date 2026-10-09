@@ -1807,6 +1807,10 @@ class CarPlayHostActivity : ComponentActivity() {
 
     private fun restoreSettingsBaseline() {
         val baseline = settingsBaseline ?: return
+        // Compare the live bar preview with the persisted values before loadPersistedSettings overwrites
+        // them: only a menu that actually previewed the system bars has a window to restore.
+        val previewChangedSystemBars = hideTopBar != AirPlayPersistence.loadHideTopBar(this) ||
+            hideBottomBar != AirPlayPersistence.loadHideBottomBar(this)
         loadPersistedSettings()
         baseline.safeAreaRects.forEach { (size, savedRect) ->
             savedRect?.let { rect ->
@@ -1841,8 +1845,13 @@ class CarPlayHostActivity : ComponentActivity() {
         updateHotspotStatusBlock()
         updateResolutionMenu()
         updateDebugOverlays()
-        applyFullscreenMode()
-        refreshDisplaySizeAfterLayout()
+        // Closing an unchanged menu must not schedule a display renegotiation: the re-measure can look
+        // like a PiP/aspect change and tear the wireless session down for a stall the driver sees. A real
+        // bar preview still needs the window restored and re-measured after the cancellation.
+        if (previewChangedSystemBars) {
+            applyFullscreenMode()
+            refreshDisplaySizeAfterLayout()
+        }
     }
 
     private fun buildMfiTargetSection(): View {
@@ -3838,12 +3847,24 @@ class CarPlayHostActivity : ComponentActivity() {
     @Suppress("DEPRECATION")
     private fun displayRotation(): Int = videoView?.display?.rotation ?: windowManager.defaultDisplay.rotation
 
+    /**
+     * Whether the session must be torn down and rebuilt because the window no longer matches it.
+     *
+     * The aspect test compares the startup window, not the negotiated canvas: our rotation support asks
+     * for a square canvas so the screen can turn without a reconnect, and comparing that square against
+     * a landscape window would make every return to a full-width window look like a PiP resize and
+     * restart CarPlay. The canvas scale ([CarPlayDisplayScale]) has the same effect for scaled sessions,
+     * so only [CarPlaySessionDisplay.windowWidth]/[CarPlaySessionDisplay.windowHeight] are meaningful here.
+     */
     private fun displayLayoutChanged(newSize: DisplaySize? = activeDisplaySize): Boolean {
         val display = sessionDisplay ?: return false
         if (display.rotation != displayRotation()) return true
         if (display.hideTopBar != hideTopBar || display.hideBottomBar != hideBottomBar) return true
-        if (newSize != null && newSize.width > 0 && newSize.height > 0) {
-            val baseAspect = display.width.toDouble() / display.height
+        if (newSize != null && newSize.width > 0 && newSize.height > 0 &&
+            display.windowWidth > 0 && display.windowHeight > 0) {
+            // The negotiated canvas may be square to support screen rotation; compare the
+            // actual startup window instead, or every return to a landscape window looks like PiP.
+            val baseAspect = display.windowWidth.toDouble() / display.windowHeight
             val currentAspect = newSize.width.toDouble() / newSize.height
             val aspectDiff = kotlin.math.abs(currentAspect / baseAspect - 1.0)
             if (aspectDiff > 0.08 && AirPlayPersistence.loadAdaptPipResolution(this)) {

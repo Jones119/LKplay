@@ -102,6 +102,33 @@ class CarPlayHostDisplaySizeTest {
         assertNull(getField("sessionDisplay"))
     }
 
+    @Test fun resumingASquareCanvasInTheSameWindowDoesNotReconnect() {
+        AirPlayPersistence.saveAdaptPipResolution(activity, true)
+        val display = startSession(windowHeight = 1080, canvasHeight = 1920)
+        val video = object : TextureView(activity) {
+            override fun post(action: Runnable): Boolean = Handler(Looper.getMainLooper()).post(action)
+        }.apply { layout(0, 0, 1920, 1080) }
+        setField("videoView", video)
+
+        invoke("onResume")
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(600))
+
+        assertSame(display, getField("sessionDisplay"))
+        assertEquals(size(1920, 1080), getField("activeDisplaySize"))
+        assertEquals(0, getField("restartGeneration"))
+        assertNull(getField("pendingDisplaySize"))
+    }
+
+    @Test fun aRealPipAspectChangeStillReconnectsWithASquareCanvas() {
+        AirPlayPersistence.saveAdaptPipResolution(activity, true)
+        startSession(windowHeight = 1080, canvasHeight = 1920)
+
+        applySize(700, 1080)
+
+        assertEquals(1, getField("restartGeneration"))
+        assertNull(getField("sessionDisplay"))
+    }
+
     @Test fun connectingInANarrowWindowRebuildsWhenTheCameraCloses() {
         startSession(windowWidth = 700)
         applySize(1920, 990)
@@ -230,6 +257,37 @@ class CarPlayHostDisplaySizeTest {
         assertEquals(true, getField("hideBottomBar"))
         assertWindowBars(true, true)
         assertTrue(AirPlayPersistence.loadHideBottomBar(activity))
+    }
+
+    @Test fun cancellingAnUnchangedMenuDoesNotReMeasureTheWindow() {
+        invoke("loadPersistedSettings")
+        setField("settingsBaseline", invoke("captureSettingsBaseline"))
+        setField("menuOpen", true)
+        val video = CountingTextureView(activity).apply { layout(0, 0, 1920, 1080) }
+        setField("videoView", video)
+
+        invoke("cancelSettingsEdits")
+
+        // Nothing was previewed, so no display renegotiation may be scheduled on the way out.
+        assertEquals(0, video.posts)
+        assertEquals(false, getField("menuOpen"))
+    }
+
+    @Test fun cancellingARealBarPreviewStillRestoresTheWindowAndReMeasures() {
+        invoke("loadPersistedSettings")
+        setField("settingsBaseline", invoke("captureSettingsBaseline"))
+        setField("menuOpen", true)
+        val video = CountingTextureView(activity).apply { layout(0, 0, 1920, 1080) }
+        setField("videoView", video)
+        val controls = invoke("buildFullscreenSection") as ViewGroup
+
+        menuBarSwitch(controls, R.string.hide_the_status_bar).performClick()
+        val afterPreview = video.posts
+
+        invoke("cancelSettingsEdits")
+
+        assertTrue(AirPlayPersistence.loadHideTopBar(activity))
+        assertTrue("a real bar preview must still be re-measured on cancel", video.posts > afterPreview)
     }
 
     @Test fun savingMenuBarsPreservesAnIndependentCombination() {
@@ -410,6 +468,18 @@ class CarPlayHostDisplaySizeTest {
             controller.close()
             controller.awaitClosed(1000)
             sink.close()
+        }
+    }
+
+    /**
+     * A TextureView whose `post` only counts, so a test can tell whether the layout refresh actually
+     * scheduled a display re-measure without running the debounced resize on the looper.
+     */
+    private class CountingTextureView(activity: CarPlayHostActivity) : TextureView(activity) {
+        var posts = 0
+        override fun post(action: Runnable): Boolean {
+            posts += 1
+            return true
         }
     }
 
