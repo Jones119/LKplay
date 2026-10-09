@@ -439,6 +439,8 @@ class CarPlayController(
     /** Re-runs iPhone discovery/bring-up using the already-open MFi session. */
     fun reconnectIphone() = synchronized(lifecycleLock) {
         if (closed) return
+        // The user is explicitly asking for the prompt back after refusing it once.
+        iphoneHost.resetPermissionGate()
         if (mfiSession == null) {
             startMfi()
         } else if (config.transport == CarPlayTransport.WIRELESS) {

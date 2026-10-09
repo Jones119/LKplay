@@ -71,6 +71,16 @@ class IphoneUsbHost(
 ) {
     private val appContext = context.applicationContext
 
+    /**
+     * Remembers which attachment is already being prompted.
+     *
+     * Re-enumeration makes the controller ask again for a device the user is still looking at
+     * (CarPlayController.onIphoneAttached -> requestIphonePermission), and Android shows one
+     * system dialog per `requestPermission` call. EasyPlay v71 keeps the same per-attach state
+     * (`IphoneUsbPermissionCoordinator.observe`, `:222-283`).
+     */
+    private val permissionGate = UsbPermissionGate()
+
     sealed class PermissionRequest {
         data class AlreadyGranted(val device: UsbDevice) : PermissionRequest()
         data class Requested(val device: UsbDevice) : PermissionRequest()
@@ -99,22 +109,54 @@ class IphoneUsbHost(
     @Throws(IphoneUsbException::class)
     fun requestPermission(device: UsbDevice): PermissionRequest {
         requireConfiguredDevice(device)
-        if (usbManager.hasPermission(device)) return PermissionRequest.AlreadyGranted(device)
-
+        if (usbManager.hasPermission(device)) {
+            permissionGate.resolved(device)
+            return PermissionRequest.AlreadyGranted(device)
+        }
+        permissionGate.forgetDetached(usbManager.deviceList.keys)
+        if (!permissionGate.shouldRequest(device)) {
+            // The same attachment already has a prompt pending, or the user refused it. Asking
+            // again would stack a second system dialog on the one they are looking at.
+            Log.i(IphoneCarPlayConfiguration.TAG, "usb permission prompt suppressed for ${device.deviceName}")
+            return PermissionRequest.Requested(device)
+        }
+        permissionGate.requested(device)
         usbManager.requestPermission(device, permissionPendingIntent())
         return PermissionRequest.Requested(device)
     }
 
-    /** Returns null for unrelated broadcasts, malformed results, or non-configured devices. */
+    /**
+     * Returns null for unrelated broadcasts, malformed results, or devices that are not currently
+     * attached.
+     *
+     * The device handed back is the one from the current enumeration, never the object the system
+     * carried through the permission dialog: after the iPhone switches USB mode the old object no
+     * longer opens, and every caller here goes on to open or reconfigure the device
+     * (`IphoneCarPlayConfiguration.find`, `activeConfigCarPlayReady`, `beginReenumeration`).
+     */
     fun parsePermissionResult(intent: Intent): PermissionResult? {
         if (intent.action != permissionAction) return null
         val device = intent.usbDevice() ?: return null
         if (!matcher.matches(device.vendorId, device.productId)) return null
+        val attached = usbManager.deviceList[device.deviceName] ?: return null
         return if (intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)) {
-            PermissionResult.Granted(device)
+            permissionGate.resolved(attached)
+            PermissionResult.Granted(attached)
         } else {
-            PermissionResult.Denied(device)
+            permissionGate.denied(attached)
+            PermissionResult.Denied(attached)
         }
+    }
+
+    /**
+     * Forgets which attachment is mid-prompt or was refused.
+     *
+     * The user asking for a reconnect is the one case where a suppressed prompt must come back:
+     * without this, refusing the dialog once would leave that attachment silent until it is
+     * unplugged.
+     */
+    fun resetPermissionGate() {
+        permissionGate.forgetDetached(emptyList())
     }
 
     /** Returns the new matching device after the vendor request caused Android USB re-enumeration. */
