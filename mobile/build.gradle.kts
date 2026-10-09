@@ -16,8 +16,8 @@ android {
         applicationId = "com.shihab.diplay"
         minSdk = 19
         targetSdk = 37
-        versionCode = 32
-        versionName = "0.2.13-cs11.1"
+        versionCode = 34
+        versionName = "0.2.15-cs11.1"
         multiDexEnabled = true
         // The CS11 is 32-bit armv7 and the bundled libopus only ships armeabi-v7a. Keeping the APK
         // 32-bit matches the head unit and lets a 64-bit device (the tablet bench) load the same
