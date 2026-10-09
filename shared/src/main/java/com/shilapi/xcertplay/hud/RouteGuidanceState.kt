@@ -6,6 +6,17 @@ internal data class AppleManeuver(
     val type: Int,
     val drivingSide: Int,
     val road: String = "",
+    /**
+     * The road after the turn exactly as Apple sent it (0x5202 type 4), next to the merged [road].
+     *
+     * The cluster takes a road name from a fallback chain whose middle step is [road], so the raw value
+     * is kept: a chain cannot re-split a value that was already merged.
+     */
+    val afterRoad: String = "",
+    /** The road the route update named as current (0x5201 type 3), the fallback chain's last step. */
+    val currentRoad: String = "",
+    /** The route state byte (0x5201 type 1), which consumers may filter on (the cluster wants 1/5/6). */
+    val routeState: Int? = null,
     val remainingSeconds: Long? = null,
     val remainingMeters: Long? = null,
     val arrivalEpochSeconds: Long? = null,
@@ -63,8 +74,16 @@ internal class RouteGuidanceState(
     fun currentApple(): AppleManeuver? {
         val maneuver = activeManeuver() ?: return null
         return AppleManeuver(
-            distanceMeters, maneuver.type, maneuver.drivingSide,
-            roadFor(maneuver), remainingSeconds, remainingMeters, arrivalEpochSeconds,
+            distanceMeters = distanceMeters,
+            type = maneuver.type,
+            drivingSide = maneuver.drivingSide,
+            road = roadFor(maneuver),
+            afterRoad = maneuver.afterRoad,
+            currentRoad = currentRoad,
+            routeState = routeState,
+            remainingSeconds = remainingSeconds,
+            remainingMeters = remainingMeters,
+            arrivalEpochSeconds = arrivalEpochSeconds,
             // "Proceeding to route": route state 6 with Apple maneuver type 11 means the driver is
             // being sent to the route's start, not through a turn (docs/_digest/37).
             proceedToRoute = routeState == 6 && maneuver.type == 11,

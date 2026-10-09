@@ -19,10 +19,20 @@ private const val CLUSTER_SWITCH = "debug.diplay.cluster"
  *   DimInteraction.create(Context) -> getMediaInteraction() : IMediaInteraction
  *                                  -> getNaviInteraction()  : INaviInteraction
  *
- * The exact surface was read out of the pulled jar (docs/_digest/37):
- *   updatePlaybackInfo(IPlaybackInfo) / updateCurrentSourceType(int) / updateCurrentProgress(long)
- *   notifyTurnByTurnStarted/Stopped() / updateTurnByTurnArrow(int) / updateNextGuidancePointName(String)
- *   / updateDistanceToNextGuidancePoint(int) / updateETA(int)
+ * The exact surface was read out of the pulled jar (docs/_digest/37, corrected by docs/_digest/46,
+ * which read the car's own binaries): the navigation setters that work are
+ *   notifyTurnByTurnStopped() / updateTurnByTurnArrow(int) / updateNextGuidancePointName(String)
+ *   / updateDistanceToNextGuidancePoint(int) / updateDistanceToDestination(int) / updateETA(int)
+ * plus the media setters `updatePlaybackInfo(IPlaybackInfo)` / `updateCurrentSourceType(int)` /
+ * `updateCurrentProgress(long)`.
+ *
+ * Three of those signatures carry the semantics the cluster actually renders (docs/_digest/46 §1):
+ * the arrow is an `ARROW_ICON_NAVI_*` integer id, both distances are integer metres, and the ETA is the
+ * remaining time in integer seconds. The two image-shaped members of the surface are decoys:
+ * `updateTurnByTurnArrow(Bitmap)` is an empty method in the vendor's implementation, and the image
+ * route the head unit's own HiCar bridge uses ends in its own HUD, not in this API -- the head unit
+ * has no HUD at all. `notifyTurnByTurnStarted()` is worse than useless: it submits state 0, which the
+ * service rejects with `RuntimeException("Navigation state is not correct.")`.
  *
  * `IPlaybackInfo` has no concrete implementation in the jar, but it is a plain Java interface, so a
  * dynamic proxy supplies it. Everything is reflective and defensive: a failure logs and disables the
@@ -53,8 +63,15 @@ object VendorClusterBridge {
     @Volatile
     private var navi: Any? = null
 
+    /**
+     * True once a complete card of ours reached the cluster, so a later stop clears *our* card only.
+     *
+     * There is no "guidance started" call any more: it submitted `turnState=0`, which the service
+     * rejects, and the card appears with the first legal `turnState=1` submission anyway (docs/_digest/46
+     * G4). Ownership simply follows the same event.
+     */
     @Volatile
-    private var guidanceStarted = false
+    private var cardOnCluster = false
 
     /** The artwork the cluster should show, as a file the head unit's own process can read. */
     @Volatile
@@ -147,49 +164,67 @@ object VendorClusterBridge {
         if (enabled) lastMedia?.let { pushMedia(it) }
     }
 
-    /** Supplied by the app side: renders Apple's maneuver type into the cluster's arrow image. */
-    @Volatile
-    var arrowRenderer: ((type: Int, drivingSide: Int) -> android.graphics.Bitmap?)? = null
-
+    /**
+     * Submits this guidance frame to the cluster, or clears our card when the frame cannot fill one.
+     *
+     * Only a complete card is sent ([clusterGuidanceCard]): the vendor's template engine marks a missing
+     * text slot invisible and the cluster then paints its *own* placeholder for it -- the `0 m` and
+     * `<1min` seen on the car (docs/_digest/46 §1.3(c) and G5). Refusing the card makes the display
+     * honest: nothing, rather than numbers nobody measured. The bitmap route is gone with the arrow
+     * renderer that fed it; every value here is one the vendor documents.
+     */
     fun pushGuidance(snapshot: CarPlayGlance.Snapshot) {
         if (!enabled) return
         val context = appContext ?: return
-        val type = snapshot.maneuverType
-        if (type == null) {
+        val card = clusterGuidanceCard(snapshot)
+        if (card == null) {
             stopGuidance()
             return
         }
         val target = naviInteraction(context) ?: return
-        if (!guidanceStarted) {
-            guidanceStarted = true
-            call(target, "notifyTurnByTurnStarted")
-        }
-        // The cluster draws the arrow from an image, the way the head unit's own HiCar bridge does
-        // (`updateDriveDirectionImage`, docs/_digest/37). The vendor's integer arrow ids are its own
-        // unverified set, so the app-supplied bitmap is preferred and the integer stays as a fallback.
-        val arrow = runCatching { arrowRenderer?.invoke(type, snapshot.drivingSide) }.getOrNull()
-        if (arrow != null) {
-            call(target, "updateTurnByTurnArrow", arrow)
-        } else {
-            call(target, "updateTurnByTurnArrow", type)
-        }
-        if (snapshot.road.isNotEmpty()) call(target, "updateNextGuidancePointName", snapshot.road)
-        if (snapshot.distanceMeters > 0) {
-            call(target, "updateDistanceToNextGuidancePoint", snapshot.distanceMeters)
-        }
-        snapshot.remainingMeters?.let { call(target, "updateDistanceToDestination", it.toInt()) }
-        // The cluster's own ETA field reads as an arrival time, not a countdown: a remaining-seconds
-        // value rendered as "<1min" on the car, so the absolute arrival is preferred (docs/_digest/37).
-        val eta = snapshot.arrivalEpochSeconds ?: snapshot.remainingSeconds
-        eta?.let { call(target, "updateETA", it.toInt()) }
+        submitClusterCard(guidanceSink(target), card)
+        cardOnCluster = true
     }
 
+    /** Clears the card this bridge submitted; it never touches a card somebody else owns. */
     fun stopGuidance() {
-        if (!enabled || !guidanceStarted) return
-        guidanceStarted = false
+        if (!enabled || !cardOnCluster) return
+        cardOnCluster = false
         val context = appContext ?: return
         val target = naviInteraction(context) ?: return
-        call(target, "notifyTurnByTurnStopped")
+        clearClusterCard(guidanceSink(target))
+    }
+
+    /**
+     * The vendor object behind [ClusterGuidanceSink], one reflective setter per call.
+     *
+     * The indirection exists so the submission sequence -- which setters, in which order, and the
+     * absence of any start call -- is unit-testable against a recording fake instead of the car.
+     */
+    internal fun guidanceSink(target: Any): ClusterGuidanceSink = object : ClusterGuidanceSink {
+        override fun updateTurnByTurnArrow(arrowId: Int) {
+            call(target, "updateTurnByTurnArrow", arrowId)
+        }
+
+        override fun updateNextGuidancePointName(road: String) {
+            call(target, "updateNextGuidancePointName", road)
+        }
+
+        override fun updateDistanceToNextGuidancePoint(meters: Int) {
+            call(target, "updateDistanceToNextGuidancePoint", meters)
+        }
+
+        override fun updateDistanceToDestination(meters: Int) {
+            call(target, "updateDistanceToDestination", meters)
+        }
+
+        override fun updateETA(seconds: Int) {
+            call(target, "updateETA", seconds)
+        }
+
+        override fun notifyTurnByTurnStopped() {
+            call(target, "notifyTurnByTurnStopped")
+        }
     }
 
     /**
@@ -470,4 +505,230 @@ internal object VendorMethodMatcher {
         }
         return false
     }
+}
+
+// ---------------------------------------------------------------------------------------------
+// The navigation card: which vendor arrow id, which text, which units, and when to send nothing.
+// Extracted from [VendorClusterBridge] so the mapping and the completeness gate are unit-testable on
+// the JVM -- they are the two rules that decide what the driver actually sees (docs/_digest/46 §3, G5).
+// ---------------------------------------------------------------------------------------------
+
+/** `Turn.ARROW_ICON_NAVI_STRAIGHT`. */
+private const val ARROW_STRAIGHT = 1
+
+/** `Turn.ARROW_ICON_NAVI_TURN_BACK_L` / `..._R`, chosen by driving side. */
+private const val ARROW_TURN_BACK_LEFT = 2
+private const val ARROW_TURN_BACK_RIGHT = 3
+
+/** `Turn.ARROW_ICON_NAVI_TURN_R` / `..._L`. */
+private const val ARROW_TURN_RIGHT = 6
+private const val ARROW_TURN_LEFT = 7
+
+/** `Turn.ARROW_ICON_NAVI_KEEP_R` / `..._L`. */
+private const val ARROW_KEEP_RIGHT = 10
+private const val ARROW_KEEP_LEFT = 11
+
+/** `Turn.ARROW_ICON_NAVI_EXIT_R`. */
+private const val ARROW_EXIT_RIGHT = 12
+
+/** `Turn.ARROW_ICON_NAVI_ROUND`. */
+private const val ARROW_ROUND = 15
+
+/** `Turn.ARROW_ICON_NAVI_DEST`. */
+private const val ARROW_DESTINATION = 17
+
+/** `Turn.ARROW_ICON_NAVI_FERRY`. */
+private const val ARROW_FERRY = 18
+
+/** `Turn.ARROW_ICON_NAVI_EXIT_L`, which is also `..._DEST_1`: the vendor ships the duplicate value 19. */
+private const val ARROW_EXIT_LEFT = 19
+
+/** `Turn.ARROW_ICON_NAVI_THE_ROUND_EXIT`, used for both a roundabout and leaving one. */
+private const val ARROW_ROUND_EXIT = 29
+
+/**
+ * The value the vendor reads as "hide this icon slot" (`ItemsBuilder.commonIcon(-1)`, docs/_digest/46 §1.3(d)).
+ *
+ * `0` means the opposite -- a *visible* slot drawn with icon 0 -- so it must never stand in for "no arrow".
+ */
+private const val ARROW_HIDDEN = -1
+
+/** The text the reference implementation shows while the iPhone guides to the route's start. */
+private const val ROAD_TO_ROUTE_START = "前往路线"
+
+/** The route states the cluster may draw, copied from the working reference (docs/_digest/46 §3). */
+private val DISPLAYABLE_ROUTE_STATES = setOf(1, 5, 6)
+
+/**
+ * The largest remaining-time value the vendor's `secondToTime` renders sanely.
+ *
+ * It converts to minutes with `(second + 30) / 60` and then to hours and days, so a value at or above
+ * this bound is not a duration at all -- an absolute arrival epoch lands there, which is exactly the
+ * mistake that made the cluster show a nonsense time (docs/_digest/46 G3).
+ */
+private const val MAX_ETA_SECONDS = 2_147_483_618L
+
+/** The largest distance the vendor's `revertDistance` still divides into a sane kilometre figure. */
+private const val MAX_DISTANCE_METERS = Int.MAX_VALUE.toLong()
+
+/** `ItemsBuilder.commonString` sends UTF-8 bytes; the reference keeps a road name within 120 of them. */
+private const val MAX_ROAD_BYTES = 120
+
+/**
+ * One navigation card, complete enough that every slot the cluster draws carries a real measurement.
+ *
+ * The units are the vendor's, not ours: metres as the integers `revertDistance` parses, and remaining
+ * seconds as the integer `secondToTime` counts down from. Nothing here is derived from a clock.
+ */
+internal data class ClusterGuidanceCard(
+    val arrowId: Int,
+    val road: String,
+    val distanceToNextGuidancePointMeters: Int,
+    val distanceToDestinationMeters: Int,
+    val remainingSeconds: Int,
+)
+
+/**
+ * The legal navigation calls one card consists of, plus the clear.
+ *
+ * Deliberately not the vendor interface itself: the unit tests cannot hand a fake to a reflective
+ * object, and the *sequence* -- five setters and a stop, with no `notifyTurnByTurnStarted` -- is what
+ * has to be pinned down. The service throws `RuntimeException("Navigation state is not correct.")` for
+ * the state that method submits (docs/_digest/46 G4), and a card is not something that needs starting:
+ * the first `turnState=1` setter is what makes it appear.
+ */
+internal interface ClusterGuidanceSink {
+    fun updateTurnByTurnArrow(arrowId: Int)
+
+    fun updateNextGuidancePointName(road: String)
+
+    fun updateDistanceToNextGuidancePoint(meters: Int)
+
+    fun updateDistanceToDestination(meters: Int)
+
+    fun updateETA(seconds: Int)
+
+    fun notifyTurnByTurnStopped()
+}
+
+/** Submits [card], in the order the vendor's own wrapper submits the fields behind them. */
+internal fun submitClusterCard(sink: ClusterGuidanceSink, card: ClusterGuidanceCard) {
+    sink.updateTurnByTurnArrow(card.arrowId)
+    sink.updateNextGuidancePointName(card.road)
+    sink.updateDistanceToNextGuidancePoint(card.distanceToNextGuidancePointMeters)
+    sink.updateDistanceToDestination(card.distanceToDestinationMeters)
+    sink.updateETA(card.remainingSeconds)
+}
+
+/** Clears the card (`turnState=3`), the only legal way to take one off the cluster again. */
+internal fun clearClusterCard(sink: ClusterGuidanceSink) {
+    sink.notifyTurnByTurnStopped()
+}
+
+/**
+ * Apple's maneuver type as one of the vendor's 45 `ARROW_ICON_NAVI_*` ids, or null when there is none.
+ *
+ * The table is the working reference implementation's (`LegacyLynkNavigationBridge.arrowFor`,
+ * docs/_digest/46 §3), which is the only evidence that a given Apple type maps to a given icon.
+ * Null is a *decision*, not a gap: an unknown type clears the card, because the alternative -- a
+ * straight-ahead arrow -- tells the driver to keep going when the iPhone said something we do not
+ * understand. The three u-turn types are the only ones whose icon depends on [drivingSide], and any
+ * side other than left-hand (0) or right-hand (1) traffic is unmapped for the same reason.
+ *
+ * [proceedToRoute] short-circuits all of it with [ARROW_HIDDEN]: being sent to the route's start is
+ * not a turn, so the slot is hidden rather than filled with a guess.
+ */
+internal fun clusterArrowId(type: Int?, drivingSide: Int, proceedToRoute: Boolean): Int? {
+    if (proceedToRoute) return ARROW_HIDDEN
+    val maneuver = type ?: return null
+    return when (maneuver) {
+        1, 20, 47, 49 -> ARROW_TURN_LEFT
+        2, 21, 48, 50 -> ARROW_TURN_RIGHT
+        3, 5 -> ARROW_STRAIGHT
+        4, 18, 26 -> when (drivingSide) {
+            0 -> ARROW_TURN_BACK_LEFT
+            1 -> ARROW_TURN_BACK_RIGHT
+            else -> null
+        }
+        6, 19 -> ARROW_ROUND
+        7 -> ARROW_ROUND_EXIT
+        in 28..46 -> ARROW_ROUND_EXIT
+        10, 12, 24, 25, 27 -> ARROW_DESTINATION
+        13, 52 -> ARROW_KEEP_LEFT
+        14, 53 -> ARROW_KEEP_RIGHT
+        15, 16, 17 -> ARROW_FERRY
+        22 -> ARROW_EXIT_LEFT
+        23 -> ARROW_EXIT_RIGHT
+        // 8, 9, 11, everything above 53 and whatever Apple adds later: no icon, so no card.
+        else -> null
+    }
+}
+
+/**
+ * A road name the cluster can take: ISO control characters dropped, then cut to [MAX_ROAD_BYTES] UTF-8
+ * bytes, then trimmed.
+ *
+ * The byte budget is the reference's rule and the vendor sends `value.getBytes()`, so a name over it
+ * would be truncated by somebody further down -- possibly in the middle of a character. A character
+ * that does not fit whole is therefore dropped instead of split, and the trim happens after the cut
+ * because the cut can expose trailing whitespace.
+ */
+internal fun cleanClusterRoad(value: String): String {
+    val result = StringBuilder()
+    var bytes = 0
+    var offset = 0
+    while (offset < value.length) {
+        val codePoint = value.codePointAt(offset)
+        offset += Character.charCount(codePoint)
+        if (Character.isISOControl(codePoint)) continue
+        val text = String(Character.toChars(codePoint))
+        val size = text.toByteArray(Charsets.UTF_8).size
+        if (bytes + size > MAX_ROAD_BYTES) break
+        result.append(text)
+        bytes += size
+    }
+    return result.toString().trim()
+}
+
+/**
+ * The road text for a card: `afterRoad` → `road` → `currentRoad`, cleaned at every step.
+ *
+ * The iPhone sends the road after the turn (0x5202 type 4) and the road the driver is on now
+ * (0x5201 type 3) separately, and either can be empty or clean away to nothing; the reference walks
+ * the chain rather than showing a blank slot. When it runs out while the iPhone is still routing the
+ * driver to the start, the card names that instead, which is the only case where a road is invented.
+ */
+internal fun clusterRoad(snapshot: CarPlayGlance.Snapshot, proceedToRoute: Boolean): String {
+    for (candidate in listOf(snapshot.afterRoad, snapshot.road, snapshot.currentRoad)) {
+        val cleaned = cleanClusterRoad(candidate)
+        if (cleaned.isNotEmpty()) return cleaned
+    }
+    return if (proceedToRoute) ROAD_TO_ROUTE_START else ""
+}
+
+/**
+ * The card this frame justifies, or null when the honest answer is "no card".
+ *
+ * Every slot is checked, in the order the reference checks them (docs/_digest/46 §3, G5), and the first
+ * one that cannot be filled abandons the whole card: a route state outside [DISPLAYABLE_ROUTE_STATES],
+ * no maneuver, an unmapped maneuver type, a negative distance, a destination distance outside
+ * `[0, 2^31)`, or a remaining time outside `[0, 2147483618)`. The cluster draws its own placeholder
+ * (`0 m`, `<1min`) for a slot it was not given, so a half-filled card is worse than none: it looks like
+ * a measurement. Missing values are therefore never rounded down to zero -- they refuse the card.
+ */
+internal fun clusterGuidanceCard(snapshot: CarPlayGlance.Snapshot): ClusterGuidanceCard? {
+    val state = snapshot.routeState ?: return null
+    if (state !in DISPLAYABLE_ROUTE_STATES) return null
+    val arrow = clusterArrowId(snapshot.maneuverType, snapshot.drivingSide, snapshot.proceedToRoute) ?: return null
+    if (snapshot.distanceMeters < 0) return null
+    val remainingMeters = snapshot.remainingMeters?.takeIf { it in 0..MAX_DISTANCE_METERS } ?: return null
+    val remainingSeconds = snapshot.remainingSeconds?.takeIf { it in 0 until MAX_ETA_SECONDS } ?: return null
+    return ClusterGuidanceCard(
+        arrowId = arrow,
+        road = clusterRoad(snapshot, snapshot.proceedToRoute),
+        distanceToNextGuidancePointMeters = snapshot.distanceMeters,
+        distanceToDestinationMeters = remainingMeters.toInt(),
+        // Remaining seconds, never `arrivalEpochSeconds`: the vendor renders this through `secondToTime`.
+        remainingSeconds = remainingSeconds.toInt(),
+    )
 }

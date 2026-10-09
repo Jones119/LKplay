@@ -832,7 +832,7 @@ class CarPlayHostActivity : ComponentActivity() {
 
 
     /**
-     * Hands the cluster bridge its context, its arrow renderer and the persisted on/off setting.
+     * Hands the cluster bridge its context and the persisted on/off setting.
      *
      * Called from [onStart] and again when the settings menu closes, because the bridge reads its
      * enablement on every media and guidance update: without the second call a new switch position
@@ -841,9 +841,6 @@ class CarPlayHostActivity : ComponentActivity() {
     private fun attachClusterBridge() {
         runCatching {
             com.shilapi.xcertplay.media.VendorClusterBridge.attach(this, clusterBridgeEnabled)
-            com.shilapi.xcertplay.media.VendorClusterBridge.arrowRenderer = { type, side ->
-                ManeuverArrowRenderer.render(this, type, side)
-            }
         }
     }
 

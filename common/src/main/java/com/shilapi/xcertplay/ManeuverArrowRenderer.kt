@@ -6,12 +6,16 @@ import android.graphics.Canvas
 import androidx.core.content.ContextCompat
 
 /**
- * Renders a maneuver arrow as a Bitmap for the instrument cluster.
+ * Draws DiPlay's own maneuver icon as a Bitmap: desktop-widget-side rendering, not cluster code.
  *
- * The cluster takes the turn arrow as an image — the head unit's own HiCar bridge does the same
- * (`updateDriveDirectionImage`, docs/_digest/37) — and the vendor's integer arrow ids are an unverified
- * set, so an image built from DiPlay's own maneuver icons is the reliable route. The mapping itself
- * stays in one place: [NavigationWidgetUpdater.arrow].
+ * It is **no longer on the instrument-cluster path and must not be put back on it**. The cluster does
+ * not take an image of an arrow: the vendor's `updateTurnByTurnArrow(Bitmap)` is an empty method, and
+ * the image route the head unit's own HiCar bridge uses (`updateDriveDirectionImage`) ends in its own
+ * HUD, which this car does not have. The cluster is sent the vendor's integer `ARROW_ICON_NAVI_*` id
+ * instead, mapped in `com.shilapi.xcertplay.media.clusterArrowId` (docs/_digest/46 §2/§3).
+ *
+ * The shared mapping behind both sides stays in one place, [NavigationWidgetUpdater.arrow], which the
+ * home-screen widget draws as a drawable directly.
  */
 object ManeuverArrowRenderer {
     private const val SIZE_PX = 128
