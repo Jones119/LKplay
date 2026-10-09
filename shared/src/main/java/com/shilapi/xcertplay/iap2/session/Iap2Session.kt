@@ -91,6 +91,10 @@ class Iap2Session private constructor(
     }
 
     private fun emitFrameTrace(direction: Iap2TraceDirection, frame: Iap2Frame) {
+        // Formatting parses the whole TLV body and hex-dumps every parameter; on the CS11 this ran for
+        // every frame and was 37 of the app's ~55 log lines per second (docs/_digest/40), which filled
+        // the 256 KB buffer in 30 s. Skip the work entirely unless the trace switch is on.
+        if (!com.shilapi.xcertplay.diag.DiagLog.traceEnabled) return
         try {
             emitTrace(Iap2FrameFormatter.format(direction, traceContext, frame))
         } catch (failure: Exception) {

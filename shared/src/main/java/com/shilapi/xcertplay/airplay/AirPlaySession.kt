@@ -319,7 +319,7 @@ class AirPlaySession(
             "Content-Type: $PLIST_CONTENT_TYPE\r\n" +
             "Content-Length: ${body.size}\r\n" +
             "CSeq: $eventCseq\r\n\r\n"
-        trace("airplay event tx headers=$head bodyHex=${body.toHex()}")
+        trace { "airplay event tx headers=$head bodyHex=${body.toHex()}" }
         return try {
             val bytes = cipher.encrypt(head.toByteArray(Charsets.US_ASCII) + body)
             val output = socket.getOutputStream()
@@ -632,11 +632,20 @@ class AirPlaySession(
     }
 
     private fun trace(message: String) {
+        // Per-frame/hex traces are gated: they were a large share of the app's logcat volume and the
+        // formatting happens in the event and touch paths (docs/_digest/41 §4).
+        if (!com.shilapi.xcertplay.diag.DiagLog.traceEnabled) return
         try {
             listener.onDebugLog("TRACE $message")
         } catch (error: Exception) {
             Log.w(TAG, "trace log callback failed", error)
         }
+    }
+
+    /** Per-event traces build hex dumps, so the message is only produced while tracing is on. */
+    private inline fun trace(message: () -> String) {
+        if (!com.shilapi.xcertplay.diag.DiagLog.traceEnabled) return
+        trace(message())
     }
 
     private fun handleSetup(request: RtspMessage.Request): RtspMessage.Response {
@@ -937,15 +946,16 @@ class AirPlaySession(
                 plaintext = parsed.rest
                 for (message in parsed.messages) {
                     if (message.method.startsWith("RTSP/") || message.method.startsWith("HTTP/")) continue
-                    debugLog(
-                        "airplay event rx ${message.method} ${message.path} cseq=${message.headers["cseq"] ?: "-"} body=${message.body.size}",
-                    )
+                    com.shilapi.xcertplay.diag.DiagLog.trace(TAG) {
+                        "airplay event rx ${message.method} ${message.path} " +
+                            "cseq=${message.headers["cseq"] ?: "-"} body=${message.body.size}"
+                    }
                     val response = RtspMessage.buildResponse(message, RtspMessage.Response(status = 200))
-                    trace(
+                    trace {
                         "airplay event rx headers=${message.headers} " +
-                            "bodyHex=${message.body.toHex()}",
-                    )
-                    trace("airplay event tx wireHex=${response.toHex()}")
+                            "bodyHex=${message.body.toHex()}"
+                    }
+                    trace { "airplay event tx wireHex=${response.toHex()}" }
                     synchronized(eventWriteLock) {
                         output.write(cipher.encrypt(response))
                         output.flush()

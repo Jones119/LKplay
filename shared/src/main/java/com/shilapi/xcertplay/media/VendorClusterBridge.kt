@@ -250,6 +250,8 @@ object VendorClusterBridge {
             } ?: return@runCatching null
             found.invoke(target, *args)
         }.onFailure { Log.w(TAG, "cluster $method(${args.joinToString()}) failed", it) }
-        Log.i(TAG, "cluster $method(${args.joinToString()}) -> ${result.getOrNull()}")
+        com.shilapi.xcertplay.diag.DiagLog.trace(TAG) {
+            "cluster $method(${args.joinToString()}) -> ${result.getOrNull()}"
+        }
     }
 }

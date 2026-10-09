@@ -550,6 +550,8 @@ class CarPlayHostActivity : ComponentActivity() {
                 AirPlayPersistence.loadAdvancedAudioChannelMapping(this)
         navigationStreamType = AirPlayPersistence.loadNavigationStreamType(this)
         debugLogsEnabled = AirPlayPersistence.loadDebugLogsEnabled(this)
+        // The high-rate diagnostic traces follow this setting; they are off unless it is on.
+        com.shilapi.xcertplay.diag.DiagLog.update(debugLogsEnabled)
         autoStartOnBoot = AirPlayPersistence.loadAutoStartOnBoot(this)
         manufacturer = AirPlayPersistence.loadManufacturer(this)
         model = AirPlayPersistence.loadModel(this)
@@ -1778,6 +1780,8 @@ class CarPlayHostActivity : ComponentActivity() {
         AirPlayPersistence.saveModel(this, model)
         AirPlayPersistence.saveOemLabel(this, oemLabel)
         AirPlayPersistence.saveDebugLogsEnabled(this, debugLogsEnabled)
+        // Turn the high-rate diagnostic traces on or off with the setting.
+        com.shilapi.xcertplay.diag.DiagLog.update(debugLogsEnabled)
         AirPlayPersistence.saveRightHandDrive(this, rightHandDrive)
         CarPlayDock.save(this, carPlayDock)
         AirPlayPersistence.saveHideTopBar(this, hideTopBar)
