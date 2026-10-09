@@ -21,6 +21,9 @@ import java.util.concurrent.atomic.AtomicBoolean
  * Frames are length-prefixed RTP packets sealed with the stream's key (shk) like the other audio
  * streams. They are kept here and handed to the [MediaSink] about [LEAD_MILLIS] ahead of playback, so
  * the media renderer (focus, ducking, channel settings) treats them like any music stream.
+ *
+ * The fill is paced once [PACED_FILL_FLOOR_MILLIS] of music is queued, because taking the two-minute
+ * buffer as fast as TCP delivers it starves the realtime audio and the video on the same link.
  */
 internal class BufferedAudioStream(
     private val key: ByteArray,
@@ -28,6 +31,8 @@ internal class BufferedAudioStream(
     private val sink: MediaSink,
     private val log: (String) -> Unit = {},
     private val nanoTime: () -> Long = System::nanoTime,
+    /** Injectable so the paced fill can be driven deterministically in tests. */
+    private val pause: (Long) -> Unit = { Thread.sleep(it) },
     private val expectedPeer: InetAddress = InetAddress.getLoopbackAddress(),
 ) : Closeable {
     internal class Frame(val sequence: Int, val timestamp: Long, val rtp: ByteArray)
@@ -52,6 +57,12 @@ internal class BufferedAudioStream(
     // Includes queued and not-yet-audible fed frames, bounded by both bytes and frame count.
     private var queuedBytes = 0L
     private val maxBufferedFrames = (format.sampleRate * MAX_BUFFER_MILLIS / (SAMPLES_PER_FRAME * 1000)).toInt()
+    // Music that must be queued before the fill is paced, and the wall time one frame then costs.
+    // Both are derived from the stream's format, so a format change moves the floor with it.
+    private val pacedFillFloorFrames =
+        (format.sampleRate * PACED_FILL_FLOOR_MILLIS / (SAMPLES_PER_FRAME * 1000)).toInt()
+    private val pacedFrameMillis =
+        (SAMPLES_PER_FRAME * 1000L / (format.sampleRate.toLong() * FILL_RATE_MULTIPLE)).coerceAtLeast(1L)
 
     // Playback state, guarded by [lock].
     private var rate = 0
@@ -107,6 +118,7 @@ internal class BufferedAudioStream(
                     windowStart = now
                 }
                 if (frame.rtp.size <= RTP_HEADER) continue
+                var pacing = false
                 synchronized(lock) {
                     while (!closed.get() &&
                         flushUntil?.let { before(frame.timestamp, it) } != true &&
@@ -120,7 +132,16 @@ internal class BufferedAudioStream(
                     queue.addLast(frame)
                     queuedBytes += frame.rtp.size
                     lock.notifyAll()
+                    // Past the floor, hold the intake near FILL_RATE_MULTIPLE times real time.
+                    // Reading the remaining two minutes as fast as TCP allows is a multi-megabit
+                    // burst that starves the realtime audio and the video sharing the link.
+                    // Playback is anchored START_LATENCY_MILLIS after the first frame either way,
+                    // so pacing the fill never delays the music. The decision is read from the live
+                    // queue per frame rather than from a counter, so a queue drained by playback or
+                    // emptied by a flush falls back below the floor and refills at full speed.
+                    pacing = queue.size + fed.size >= pacedFillFloorFrames
                 }
+                if (pacing) pause(pacedFrameMillis)
             }
         } catch (error: Exception) {
             if (!closed.get()) log("Buffered audio: connection ended (${error.javaClass.simpleName})")
@@ -325,6 +346,17 @@ internal class BufferedAudioStream(
         /** Advertised and locally enforced; a full buffer applies TCP backpressure. */
         const val AUDIO_BUFFER_BYTES = 8 * 1024 * 1024
         private const val MAX_BUFFER_MILLIS = 120_000L
+        /**
+         * Music queued before the fill is paced: enough to ride out the gap right after a track
+         * starts, where a stall would be audible, without ever letting the intake race TCP.
+         */
+        private const val PACED_FILL_FLOOR_MILLIS = 15_000L
+        /**
+         * Ceiling on the intake past that floor, as a multiple of real time. Four times real time
+         * still fills the two-minute buffer in about twenty-six seconds, at roughly a quarter of the
+         * burst rate that starves the realtime audio and the video sharing the link.
+         */
+        private const val FILL_RATE_MULTIPLE = 4L
         internal const val LEAD_MILLIS = 1_000L
         /** About when the first fed sample is heard: the media renderer's start level and the decoder. */
         internal const val START_LATENCY_MILLIS = 400L

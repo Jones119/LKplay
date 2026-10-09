@@ -112,6 +112,28 @@ class TelephonyMicrophoneTest {
         assertFalse(microphone.joinToString("\n").contains("head="))
     }
 
+    @Test fun audioModeTransitionsReachTheAudioDiagnosticCallback() {
+        // Upstream `efcc7fcc`: the voice path only reached logcat, so a head unit left in
+        // MODE_IN_COMMUNICATION after a call could not be diagnosed from a car without adb.
+        sink.close()
+        val diagnostics = CopyOnWriteArrayList<String>()
+        sink = AndroidMediaSink(context = context, onAudioDiagnostic = diagnostics::add)
+        manager.mode = AudioManager.MODE_RINGTONE
+        sink.onMicrophoneStarted(telephony, config("telephony"))
+        awaitCapture()
+        sink.onMicrophoneStopped(telephony)
+        assertTrue(diagnostics.toString(),
+            diagnostics.any {
+                it == "Audio: mode entered communication from=${AudioManager.MODE_RINGTONE}" +
+                    " now=${AudioManager.MODE_IN_COMMUNICATION} stream=$telephony"
+            })
+        assertTrue(diagnostics.toString(),
+            diagnostics.any {
+                it == "Audio: mode restored requested=${AudioManager.MODE_RINGTONE}" +
+                    " now=${AudioManager.MODE_RINGTONE} stream=$telephony"
+            })
+    }
+
     @Test fun diagnosticCallbackFailureDoesNotStopSpeechRecognitionCapture() {
         sink.close()
         sink = AndroidMediaSink(context = context, onAudioDiagnostic = { throw IllegalStateException("diagnostic callback failed") })

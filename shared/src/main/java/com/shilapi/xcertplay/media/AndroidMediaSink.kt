@@ -51,7 +51,20 @@ internal class AudioFocusCoordinator(
     private var requestedChannel: AudioChannel? = null
     private val listener = AudioManager.OnAudioFocusChangeListener { change ->
         synchronized(this) {
-            runCatching { report("Audio: focus change=$change activeTracks=${active.size}") }
+            // A callback we do not act on is still worth a line. The window between a telephony
+            // track closing and media reopening is exactly where a head unit that keeps focus for
+            // itself produces its callback, and a report that shows nothing there cannot be told
+            // apart from a head unit that never called back at all, so a stale callback stays
+            // visible as one. "Stale" is read from our own state: no live request ([held]) or no
+            // eligible track left. On API 19 the legacy requestAudioFocus call keeps no request
+            // object, so [held] is the only honest signal for that half of the condition.
+            if (active.isEmpty() || !held) {
+                runCatching {
+                    report("Audio: focus change=$change dropped held=$held activeTracks=${active.size}")
+                }
+            } else {
+                runCatching { report("Audio: focus change=$change activeTracks=${active.size}") }
+            }
             when (change) {
                 AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> setVolume(DUCKED_VOLUME)
                 AudioManager.AUDIOFOCUS_GAIN -> setVolume(FULL_VOLUME)
@@ -377,6 +390,13 @@ class AndroidMediaSink(
             manager.mode = AudioManager.MODE_IN_COMMUNICATION
             communicationModeStream = id
             Log.i("xcertplay-usb", "audio mode $savedAudioMode -> ${manager.mode} for telephony stream=$id")
+            // The report, not just logcat: a head unit left in the voice path plays no media, and
+            // that cannot be diagnosed from a car without adb. A failing report must not disturb the
+            // mode, so it is the last thing done here and it cannot throw out of this block.
+            runCatching {
+                onAudioDiagnostic("Audio: mode entered communication from=$savedAudioMode" +
+                    " now=${manager.mode} stream=$id")
+            }
         }
     }
 
@@ -386,12 +406,18 @@ class AndroidMediaSink(
             val active = communicationModeStream ?: return
             if (id != null && id != active) return
             communicationModeStream = null
-            try {
+            // The line is built inside the try but sent outside it: reporting from in there would
+            // let a failing diagnostic callback be caught as a failed mode restore.
+            val line = try {
                 manager.mode = savedAudioMode
                 Log.i("xcertplay-usb", "audio mode restored to ${manager.mode}")
+                "Audio: mode restored requested=$savedAudioMode now=${manager.mode} stream=$active"
             } catch (error: RuntimeException) {
                 Log.w("xcertplay-usb", "could not restore audio mode $savedAudioMode", error)
+                "Audio: mode restore failed requested=$savedAudioMode now=${manager.mode}" +
+                    " error=${error.javaClass.simpleName}"
             }
+            runCatching { onAudioDiagnostic(line) }
         }
     }
 
