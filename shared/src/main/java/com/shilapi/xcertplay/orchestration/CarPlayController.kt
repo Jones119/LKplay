@@ -1608,22 +1608,22 @@ class CarPlayController(
                 is IphoneUsbHost.Iap2SessionResult.Connected -> {
                     try {
                         // CS11: the kernel cannot create TUN interfaces, so the raw-USB NCM bridge can
-                        // never carry media. On API 19 the kernel cdc_ncm netdev + system network
-                        // stack replace it end to end (see Cs11NetdevBootstrap).
-                        val ncm = if (Build.VERSION.SDK_INT < 21 && Cs11NetdevBootstrap.supported) {
-                            debugLog("CS11: kernel netdev transport selected; skipping raw NCM bridge")
+                        // never carry media; `openNcm` is raw-USB only. On API 19 the kernel cdc_ncm
+                        // netdev + system network stack replace it end to end (Cs11NetdevBootstrap,
+                        // whose `supported` is exactly "SDK_INT < 21"), so the bridge is not attempted
+                        // and `ncm` stays null for attachSystemNetdev() in runStack().
+                        //
+                        // This used to read `< 21 && Cs11NetdevBootstrap.supported`, which degenerates
+                        // into the same level test, and it left a second, unreachable `< 21` degradation
+                        // branch below that suppressed the diagnostic. The raw-USB NCM path was
+                        // superseded by the kernel netdev in 5b0f5774, so the API-19 half of `openNcm`
+                        // is gone and this is now the single explicit decision; see docs/_digest/49.
+                        val decision = rawNcmDecision(Build.VERSION.SDK_INT)
+                        val ncm = if (decision.usesKernelNetdevOnly) {
+                            debugLog(decision.reason)
                             null
                         } else {
-                            try {
-                                openNcm(device)
-                            } catch (error: Throwable) {
-                                if (Build.VERSION.SDK_INT < 21) {
-                                    debugLog("CS11 degraded: NCM unavailable (${error.message}); continuing without media bridge")
-                                    null
-                                } else {
-                                    throw error
-                                }
-                            }
+                            openNcm(device)
                         }
                         runStack(result.session, ncm)
                     } catch (error: Throwable) {
@@ -1636,29 +1636,31 @@ class CarPlayController(
         }
     }
 
-    private fun openNcm(device: UsbDevice): NcmUsbBridge {
-        // CS11: API19 无配置枚举——在活动配置上枚举全部 NCM 对，逐一尝试声明（被内核占用时自动跳下一对）
-        if (Build.VERSION.SDK_INT < 21) {
-            val functions = NcmFunctionDiscovery.findAllActive(device)
-            if (functions.isEmpty()) {
-                throw IphoneUsbException.Protocol("Active iPhone configuration exposes no NCM function")
-            }
-            var lastError: Throwable? = null
-            for ((index, function) in functions.withIndex()) {
-                val connection = requireUsbManager().openDevice(device)
-                    ?: throw IphoneUsbException.DeviceUnavailable("Could not open the iPhone NCM connection")
-                try {
-                    debugLog("ncm (api<21) trying function#$index class=${function.control.interfaceClass}/${function.control.interfaceSubclass}")
-                    return NcmUsbBridge.open(connection, function)
-                } catch (error: Throwable) {
-                    lastError = error
-                    debugLog("ncm (api<21) function#$index not claimable: ${error.message}")
-                }
-            }
-            throw IphoneUsbException.DeviceUnavailable(
-                "No claimable NCM function on the active iPhone configuration", lastError,
-            )
+    /** Whether the raw-USB NCM bridge may be attempted, plus the diagnostic to log when it is not. */
+    internal data class RawNcmDecision(val usesKernelNetdevOnly: Boolean, val reason: String)
+
+    /**
+     * CS11: split out of [openDataPaths] so a JVM test can prove the API-19 path is decided by the
+     * level alone — the old form (`SDK_INT < 21 && Cs11NetdevBootstrap.supported`, whose right-hand
+     * side is itself `SDK_INT < 21`) is what hid the dead branch that lint reported as
+     * `ObsoleteSdkInt`.
+     */
+    internal fun rawNcmDecision(sdkInt: Int): RawNcmDecision =
+        if (sdkInt < 21) {
+            RawNcmDecision(true, "CS11: kernel netdev transport selected; skipping raw NCM bridge")
+        } else {
+            RawNcmDecision(false, "wired opening raw-USB NCM bridge")
         }
+
+    /**
+     * The raw-USB NCM bridge over an enumerated `UsbConfiguration`. CS11: **API 21+ only** — the
+     * `UsbConfiguration` descriptor path needs `configurationCount`/`getConfiguration`, and the
+     * API-19 alternative has no consumer left: on the car the kernel cdc_ncm netdev carries the
+     * AirPlay traffic instead ([attachSystemNetdev]), so its entry point in [openDataPaths] never
+     * calls this on 4.4. The API-19 discovery variant that used to live here
+     * (`NcmFunctionDiscovery.findAllActive`) was removed with it.
+     */
+    private fun openNcm(device: UsbDevice): NcmUsbBridge {
         val configuration = IphoneCarPlayConfiguration.find(device)
             ?: throw IphoneUsbException.Protocol(
                 "iPhone exposes no CarPlay configuration for NCM",

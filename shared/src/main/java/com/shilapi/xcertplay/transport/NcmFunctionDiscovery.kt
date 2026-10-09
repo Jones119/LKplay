@@ -4,8 +4,6 @@ import android.hardware.usb.UsbConfiguration
 import android.hardware.usb.UsbConstants
 import android.hardware.usb.UsbEndpoint
 import android.hardware.usb.UsbInterface
-import android.os.Build
-import android.hardware.usb.UsbDevice
 
 /**
  * Finds the NCM control/data interface pair inside an active iPhone configuration.
@@ -34,40 +32,6 @@ object NcmFunctionDiscovery {
         return findCdcNcm(configuration)
     }
 
-    /**
-     * CS11: API19 变体——直接在活动配置的接口列表上枚举全部 NCM 控制/数据对。
-     * iPhone 的 CarPlay 配置里有两对（其一通常被内核 cdc_ncm 占用），调用方逐对尝试声明。
-     */
-    fun findAllActive(device: UsbDevice): List<NcmFunction> {
-        val interfaces = (0 until device.interfaceCount).map(device::getInterface)
-        val functions = ArrayList<NcmFunction>(2)
-        for (index in interfaces.indices) {
-            val control = interfaces[index]
-            if (control.interfaceClass != CONTROL_CLASS || control.interfaceSubclass != CONTROL_SUBCLASS) continue
-            // CS11: 向后搜索第一个"带 bulk 端点对"的数据接口（同号的 alt0 常无端点，alt1 才有）
-            var dataInterface: UsbInterface? = null
-            var dataEndpoints: Pair<UsbEndpoint, UsbEndpoint>? = null
-            for (probe in (index + 1)..minOf(index + 3, interfaces.size - 1)) {
-                val candidate = interfaces[probe]
-                if (candidate.interfaceClass != DATA_CLASS) continue
-                val candidateEndpoints = bulkEndpoints(candidate) ?: continue
-                dataInterface = candidate
-                dataEndpoints = candidateEndpoints
-                break
-            }
-            val data = dataInterface ?: continue
-            val endpoints = dataEndpoints ?: continue
-            val statusIn = (0 until control.endpointCount)
-                .map(control::getEndpoint)
-                .singleOrNull {
-                    it.direction == UsbConstants.USB_DIR_IN &&
-                        it.type == UsbConstants.USB_ENDPOINT_XFER_INT
-                }
-            functions.add(NcmFunction(control, data, statusIn, endpoints.first, endpoints.second))
-        }
-        return functions
-    }
-
     private fun findCdcNcm(configuration: UsbConfiguration): NcmFunction? {
         val control = interfaces(configuration).firstOrNull {
             it.interfaceClass == CONTROL_CLASS && it.interfaceSubclass == CONTROL_SUBCLASS
@@ -87,27 +51,21 @@ object NcmFunctionDiscovery {
     }
 
     private fun interfaces(configuration: UsbConfiguration): List<UsbInterface> =
-        // CS11: getInterfaceCount/getInterface 是 API21+；4.4 走反射探测，缺失则空列表（NCM 发现降级）
-        if (Build.VERSION.SDK_INT >= 21) {
-            (0 until configuration.interfaceCount).map(configuration::getInterface)
-        } else {
-            runCatching {
-                val count = UsbConfiguration::class.java.getMethod("getInterfaceCount").invoke(configuration) as Int
-                val getInterface = UsbConfiguration::class.java.getMethod("getInterface", Int::class.javaPrimitiveType)
-                (0 until count).map { getInterface.invoke(configuration, it) as UsbInterface }
-            }.getOrDefault(emptyList())
-        }
+        // CS11: `UsbConfiguration` 整类是 API 21+，所以这里没有 4.4 变体可写——旧版那段反射
+        // (`UsbConfiguration::class.java.getMethod(...)`) 在 4.4 上**永远不可能成功**（类不存在，
+        // runCatching 只会得到 emptyList），是死代码兼误导，已删除。4.4 的媒体传输走内核 cdc_ncm
+        // netdev（Cs11NetdevBootstrap），不再需要按配置发现 NCM（见 openNcm 的 KDoc）。
+        (0 until configuration.interfaceCount).map(configuration::getInterface)
 
     private fun alternateSettingOf(usbInterface: UsbInterface): Int =
-        // CS11: UsbInterface.getAlternateSetting 是 API21+；4.4 走反射探测，缺失按 0 处理
-        if (Build.VERSION.SDK_INT >= 21) usbInterface.alternateSetting
-        else runCatching {
-            UsbInterface::class.java.getMethod("getAlternateSetting").invoke(usbInterface) as Int
-        }.getOrDefault(0)
+        // CS11: UsbInterface#getAlternateSetting 是 API21+；本文件只有 API21+ 调用点（findCdcNcm
+        // 由 openNcm 在 SDK_INT >= 21 时调用），旧版的 4.4 反射兜底同样已删除。
+        usbInterface.alternateSetting
 
     private fun bulkEndpoints(usbInterface: UsbInterface): Pair<UsbEndpoint, UsbEndpoint>? {
         val endpoints = (0 until usbInterface.endpointCount).map(usbInterface::getEndpoint)
-        // CS11: 4.4 的接口列表含多个 alt（alt0 无端点、alt1 有），按"第一个"取而非"唯一一个"
+        // CS11: iPhone 的接口列表含多个 alt（alt0 无端点、alt1 才有），所以按"第一个带该方向 bulk
+        // 端点"取，而不是要求唯一一个。
         val input = endpoints.firstOrNull {
             it.direction == UsbConstants.USB_DIR_IN && it.type == UsbConstants.USB_ENDPOINT_XFER_BULK
         }

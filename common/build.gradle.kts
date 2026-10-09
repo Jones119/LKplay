@@ -36,6 +36,13 @@ android {
         // lint 自身 bug：ExperimentalDetector 在 CarPlayController 解析崩溃
         disable += listOf("UnsafeOptInUsageError", "UnsafeOptInUsageWarning")
     }
+
+    // CS11 / API 19 盲区：开启 core library desugaring 后，lint 的 NewApi 只覆盖 `android.*` 平台 API，
+    // **不报** `java.*` 库 API（Math.floorDiv(API 24)、Objects.requireNonNullElse、java.nio.file、
+    // CompletableFuture…）。API19 审计的三份 lint 报告里 `java.` 命中为 0，而 NtpClock.kt 当时在 4.4 上
+    // 无条件调用 Math.floorDiv。替代守卫是 JVM 单测
+    // `shared/src/test/java/com/shilapi/xcertplay/airplay/ForbiddenLibraryApiTest.kt`（每次跑单测都会
+    // 扫描 shared/common/mobile 的 main 源码）；说明见 docs/_digest/49-API19越界API审计.md。
 }
 
 dependencies {

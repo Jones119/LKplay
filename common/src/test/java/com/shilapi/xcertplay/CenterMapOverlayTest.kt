@@ -38,6 +38,31 @@ class CenterMapOverlayTest {
 
     @After fun hideCard() { CenterMapOverlay.hide() }
 
+    /**
+     * CS11: the window type must be picked by level, or the car (4.4) silently loses the card:
+     * `TYPE_APPLICATION_OVERLAY`(2038) does not exist there and `addView` throws into the
+     * `catch (RuntimeException)` at the end of `show()`. `docs/_digest/07d §7.2` lists exactly this
+     * fix.
+     *
+     * The level is passed in rather than taken from Robolectric because Robolectric 4.17 has no
+     * android-all jar for API 19 ("API level 19 is not available"), so the car's level cannot be
+     * instantiated in a JVM test at all; on-car evidence is still needed (docs/_digest/49).
+     */
+    @Test fun theOverlayWindowTypeFollowsTheApiLevel() {
+        // 4.4 has no TYPE_APPLICATION_OVERLAY at all; 2002 is the only usable overlay type there.
+        assertEquals(2002, WindowManager.LayoutParams.TYPE_PHONE)
+        assertEquals(2038, WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY)
+        assertEquals(WindowManager.LayoutParams.TYPE_PHONE, CenterMapOverlay.overlayTypeFor(19))
+        assertEquals(WindowManager.LayoutParams.TYPE_PHONE, CenterMapOverlay.overlayTypeFor(21))
+        assertEquals(WindowManager.LayoutParams.TYPE_PHONE, CenterMapOverlay.overlayTypeFor(25))
+        assertEquals(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY, CenterMapOverlay.overlayTypeFor(26))
+        assertEquals(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY, CenterMapOverlay.overlayTypeFor(33))
+    }
+
+    @Test fun theShownCardUsesTheTypeForThisPlatform() {
+        assertEquals(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY, params.type)
+    }
+
     @Test fun smallPinchResizesBelowTheHeadUnitMinimumSpanAndPersistsWithoutOpeningCarPlay() {
         assertTrue("Regression uses a span too small for the platform detector",
             ViewConfiguration.get(context).scaledMinimumScalingSpan > 60)

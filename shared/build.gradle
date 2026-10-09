@@ -30,6 +30,14 @@ android {
         disable += ['UnsafeOptInUsageError', 'UnsafeOptInUsageWarning']
     }
 
+    // CS11 / API 19 blind spot: with core library desugaring enabled, lint's NewApi check only
+    // covers the `android.*` platform APIs. It does NOT report `java.*` library APIs
+    // (Math.floorDiv(API 24), Objects.requireNonNullElse, java.nio.file, CompletableFuture …) — the
+    // API-19 audit produced zero `java.` findings while NtpClock.kt called Math.floorDiv
+    // unconditionally on 4.4. The replacement guard is the JVM test
+    // `shared/src/test/java/com/shilapi/xcertplay/airplay/ForbiddenLibraryApiTest.kt`, which scans
+    // this module's sources on every unit-test run; see docs/_digest/49-API19越界API审计.md.
+
     // Production code logs through android.util.Log, which the JVM unit tests otherwise reject with
     // "Method w in android.util.Log not mocked" — that alone was failing sixteen of them. Returning
     // defaults makes those calls no-ops so the tests exercise the behaviour they describe.

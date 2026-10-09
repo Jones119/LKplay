@@ -49,6 +49,25 @@ internal object CenterMapOverlay {
     fun permitted(context: Context): Boolean =
         if (Build.VERSION.SDK_INT < 23) true else Settings.canDrawOverlays(context)
 
+    /**
+     * CS11: `TYPE_APPLICATION_OVERLAY` 是 API 26 才有的窗口类型。它在 4.4 上只是被**内联的 int 常量**
+     * （所以编译通过、也不会抛 `NoClassDefFoundError`），但值 2038 在 4.4 的 WindowManager 里无效，
+     * `addView` 会抛 `BadTokenException`/`SecurityException`，被 [show] 末尾的
+     * `catch (RuntimeException)` 吞掉 → 中央屏地图卡在车机上**永远不出现**（静默功能丢失）。
+     * 4.4 的正确类型是 `TYPE_PHONE`(2002)，与 `docs/_digest/07d §7.2/§7.3` 的清单一致
+     * （那里记的是"`TYPE_APPLICATION_OVERLAY`(26) → 19 需 `TYPE_PHONE`"）。
+     *
+     * internal 是为了让 JVM 单测直接断言这个选择，而不必真的往 WindowManager 里加窗口。
+     */
+    internal fun overlayTypeFor(level: Int): Int =
+        if (level >= 26) {
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+        } else {
+            // The 4.4 window type for an overlay that is not tied to an Activity token.
+            @Suppress("DEPRECATION")
+            WindowManager.LayoutParams.TYPE_PHONE
+        }
+
     /** Shows the card shortly, unless a DiPlay screen is in front by then. */
     fun scheduleShow() {
         main.removeCallbacks(showIfBackground)
@@ -100,7 +119,7 @@ internal object CenterMapOverlay {
         val params = WindowManager.LayoutParams(
             width,
             height,
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            overlayTypeFor(Build.VERSION.SDK_INT),
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
                 WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED, // the TextureView needs it
             PixelFormat.TRANSLUCENT,

@@ -218,9 +218,42 @@ private fun ntp64Now(): BigInteger {
 }
 
 private fun ntpFromNanos(ns: Long): BigInteger {
-    val seconds = BigInteger.valueOf(Math.floorDiv(ns, 1_000_000_000L))
-    val nanos = BigInteger.valueOf(Math.floorMod(ns, 1_000_000_000L))
+    val seconds = BigInteger.valueOf(floorDivLong(ns, 1_000_000_000L))
+    val nanos = BigInteger.valueOf(floorModLong(ns, 1_000_000_000L))
     return seconds.shiftLeft(32).or(nanos.shiftLeft(32).divide(NANOS_PER_SECOND))
+}
+
+/**
+ * CS11: `Math.floorDiv(long, long)` is API 24 and `java.lang.Math` is *not* in the core library
+ * desugaring table (`desugar_jdk_libs` 2.1.4 leaves `java.lang.*` on the platform), so the plain
+ * call resolved to a Dalvik `NoSuchMethodError` on Android 4.4. That is an `Error`, not an
+ * `Exception`, so the `catch (_: Exception)` in [NtpClock.runSender] could not contain it either.
+ * These two local helpers are the only replacement that keeps the floor semantics; [floorDivLong]
+ * is `internal` only so a unit test can prove the negative-operand behaviour, and it must not be
+ * replaced by `Math.floorDiv` again — see the module's forbidden-library-API guard test.
+ *
+ * The floor semantics are the whole point: [ntpFromNanos] is fed
+ * `System.nanoTime() + clockOffsetNs`, which is routinely negative (the boot monotonic clock starts
+ * near zero while the offset is a full NTP epoch, of either sign). Truncating division and
+ * remainder (Kotlin `/` and `%`) round toward zero, which would turn `-1 ns` into `0 s / -1 ns` and
+ * build an NTP64 stamp one second in the future.
+ */
+internal fun floorDivLong(dividend: Long, divisor: Long): Long {
+    require(divisor != 0L) { "divisor must not be zero" }
+    val quotient = dividend / divisor
+    val remainder = dividend % divisor
+    // Kotlin's `/` truncates toward zero, so it differs from the floor exactly when the truncating
+    // remainder is non-zero and carries the opposite sign of the divisor (i.e. it rounded up).
+    // A zero remainder means the division was exact and the quotient already is the floor. This
+    // form avoids the `(dividend xor divisor) < 0` shortcut, which is wrong once the divisor is
+    // negative: `floorDiv(3, -5)` must be -1, not 0.
+    return if (remainder != 0L && (remainder < 0L) != (divisor < 0L)) quotient - 1 else quotient
+}
+
+/** The [floorDivLong] remainder; its sign always follows [divisor], exactly like `Math.floorMod`. */
+internal fun floorModLong(dividend: Long, divisor: Long): Long {
+    require(divisor != 0L) { "divisor must not be zero" }
+    return dividend - floorDivLong(dividend, divisor) * divisor
 }
 
 private fun ntpBytes(value: BigInteger): ByteArray {
