@@ -12,6 +12,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.Matrix
+import android.graphics.PointF
 import android.graphics.SurfaceTexture
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -384,6 +385,20 @@ class CarPlayHostActivity : ComponentActivity() {
     private var gestureTracking = false
     private var gestureStartX = 0f
     private var gestureStartY = 0f
+    // Platform pointer ids the tracked gesture was established with. The finger count alone is not
+    // enough: a device can report the configured pointerCount while repeating one pointer id, which
+    // is not a multi-finger gesture at all (EasyPlay v71 keys its swipe by id and rejects such a
+    // sequence as "invalid_pointer_sequence", docs/_digest/42).
+    private val gesturePointerIds = mutableSetOf<Int>()
+    // Where each tracked finger started, by pointer id. A gesture established mid-motion has no
+    // earlier sample to compare against, so the start of a finger that was already down is taken from
+    // the previous event; measuring the gesture from the establishing event itself would compare that
+    // event with itself and never see any travel.
+    private val gestureStartPositions = mutableMapOf<Int, PointF>()
+    // Coordinates of the previous event of the current sequence, captured by value. The framework
+    // recycles one MotionEvent through a whole gesture, so holding the event itself and reading it
+    // later would read this event's coordinates instead of the previous one's.
+    private var gesturePreviousSample: PreviousGestureSample? = null
     private var recoveryPendingAfterMenu = false
     private var failurePendingAfterMenu: CarPlayStatus.Failed? = null
     private val shuttingDown = AtomicBoolean(false)
@@ -4178,52 +4193,82 @@ class CarPlayHostActivity : ComponentActivity() {
 
     private fun onHostTouch(view: View, event: MotionEvent): Boolean {
         if (menuOpen) return true
+        // The previous event's coordinates, still holding the previous event while this one is
+        // handled: a gesture established mid-motion needs to know where its fingers were before the
+        // event that established it. Cleared on ACTION_DOWN, so it never outlives its sequence.
+        val previous = gesturePreviousSample
+        if (event.actionMasked != MotionEvent.ACTION_DOWN) {
+            gesturePreviousSample = PreviousGestureSample.of(event)
+        }
+        return handleHostTouch(view, event, previous)
+    }
 
+    private fun handleHostTouch(view: View, event: MotionEvent, previous: PreviousGestureSample?): Boolean {
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 gestureSequenceActive = false
                 gestureTracking = false
+                resetSettingsSwipeGesture()
+                gesturePreviousSample = PreviousGestureSample.of(event)
             }
-            MotionEvent.ACTION_POINTER_DOWN -> {
+            MotionEvent.ACTION_POINTER_DOWN, MotionEvent.ACTION_MOVE -> {
                 if (event.pointerCount == gestureFingerCount && !gestureSequenceActive) {
-                    gestureSequenceActive = true
-                    gestureTracking = true
-                    gestureStartX = pointerCentroid(event, horizontal = true)
-                    gestureStartY = pointerCentroid(event, horizontal = false)
-                    controller?.sendTouch(emptyList())
-                    appendLog("Settings swipe tracking started; fingers=$gestureFingerCount")
+                    startSettingsSwipeTracking(event, previous)
                     return true
                 }
             }
         }
 
         if (gestureSequenceActive) {
-            if (event.actionMasked == MotionEvent.ACTION_POINTER_UP || event.pointerCount != gestureFingerCount) {
-                gestureTracking = false
-            }
-            if (!gestureTracking || event.pointerCount != gestureFingerCount) {
+            val requiredFingersDown = event.actionMasked != MotionEvent.ACTION_POINTER_UP
+            if (!gestureTracking && requiredFingersDown) {
+                // A tracked finger went away without the gesture completing; keep swallowing the
+                // sequence until it ends.
                 if (event.actionMasked == MotionEvent.ACTION_UP ||
                     event.actionMasked == MotionEvent.ACTION_CANCEL
                 ) {
                     gestureSequenceActive = false
-                    gestureTracking = false
-                } else if (event.actionMasked == MotionEvent.ACTION_POINTER_UP) {
-                    gestureTracking = false
+                    resetSettingsSwipeGesture()
                 }
                 return true
             }
-            if (event.actionMasked == MotionEvent.ACTION_MOVE) {
-                val deltaX = Math.abs(pointerCentroid(event, horizontal = true) - gestureStartX)
-                val deltaY = pointerCentroid(event, horizontal = false) - gestureStartY
-                if (
-                    deltaY >= dp(SETTINGS_SWIPE_DISTANCE_DP) &&
-                    deltaY >= deltaX * SETTINGS_SWIPE_DIRECTION_RATIO
-                ) {
-                    gestureSequenceActive = false
+            if (gestureTracking) {
+                val lifting = event.actionMasked == MotionEvent.ACTION_POINTER_UP
+                val moved = event.actionMasked == MotionEvent.ACTION_MOVE
+                if ((moved || lifting) && pointerIdsStillDown(event)) {
+                    // Both ACTION_MOVE and ACTION_POINTER_UP are evaluated: a user who puts three
+                    // fingers down and swipes in one motion, or who lifts a finger as the swipe ends,
+                    // must still land the gesture (EasyPlay v71 evaluates action 2 and 6 alike). A
+                    // POINTER_UP is the gesture's last chance either way: the finger that lifted is
+                    // gone, so whether or not the threshold is reached here, tracking must not stay
+                    // armed with only the remaining fingers.
+                    if (swipeReachedSettingsThreshold(
+                            event,
+                            liftedId = if (lifting) event.getPointerId(event.actionIndex) else -1,
+                        )
+                    ) {
+                        gestureSequenceActive = false
+                        gestureTracking = false
+                        resetSettingsSwipeGesture()
+                        openSettingsMenu()
+                        return true
+                    }
+                    if (lifting) {
+                        gestureTracking = false
+                        resetSettingsSwipeGesture()
+                    }
+                } else {
                     gestureTracking = false
-                    openSettingsMenu()
-                    return true
+                    resetSettingsSwipeGesture()
                 }
+                return true
+            }
+            // Tracking was dropped earlier in this sequence: swallow the rest of it.
+            if (event.actionMasked == MotionEvent.ACTION_UP ||
+                event.actionMasked == MotionEvent.ACTION_CANCEL
+            ) {
+                gestureSequenceActive = false
+                resetSettingsSwipeGesture()
             }
             return true
         }
@@ -4255,12 +4300,118 @@ class CarPlayHostActivity : ComponentActivity() {
         return true
     }
 
-    private fun pointerCentroid(event: MotionEvent, horizontal: Boolean): Float {
-        var total = 0f
-        for (index in 0 until event.pointerCount) {
-            total += if (horizontal) event.getX(index) else event.getY(index)
+    /**
+     * Establishes a settings swipe from any event that already carries the configured number of
+     * distinct fingers, not only from a fresh ACTION_POINTER_DOWN: a user who lands three fingers and
+     * swipes in one motion may only ever deliver ACTION_MOVE with pointerCount == 3 (EasyPlay v71
+     * builds its Swipe candidate for action 5 *or* 2, docs/_digest/42).
+     *
+     * Every tracked finger takes its start position from where it was *before* the establishing event.
+     * Measuring every finger from the establishing event would compare that event with itself and
+     * never see any travel at all, which is why the previous event is needed.
+     */
+    private fun startSettingsSwipeTracking(event: MotionEvent, previous: PreviousGestureSample?) {
+        val ids = (0 until event.pointerCount).map { event.getPointerId(it) }.toMutableSet()
+        if (ids.size != gestureFingerCount) {
+            // The same pointer id repeated across indices is not a multi-finger gesture; the touch
+            // path must keep forwarding it instead of swallowing it as a swipe.
+            return
         }
-        return total / event.pointerCount
+        gestureSequenceActive = true
+        gestureTracking = true
+        gesturePointerIds.clear()
+        gesturePointerIds.addAll(ids)
+        gestureStartPositions.clear()
+        for (id in ids) {
+            val sample = previous?.coords(id)
+            if (sample != null) {
+                gestureStartPositions[id] = PointF(sample.x, sample.y)
+            }
+            // A finger that was not down before this event has no sample yet:
+            // swipeReachedSettingsThreshold records one for it on the first evaluation and leaves it
+            // out of that evaluation, so the travel that established the gesture is never credited to it.
+        }
+        controller?.sendTouch(emptyList())
+        appendLog("Settings swipe tracking started; fingers=$gestureFingerCount")
+    }
+
+    /** Drops every pointer id and start position of the current gesture. */
+    private fun resetSettingsSwipeGesture() {
+        gesturePointerIds.clear()
+        gestureStartPositions.clear()
+    }
+
+    /** True when every finger the gesture was established with is still present in [event]. */
+    private fun pointerIdsStillDown(event: MotionEvent): Boolean {
+        for (id in gesturePointerIds) {
+            if (event.findPointerIndex(id) < 0) return false
+        }
+        return true
+    }
+
+    /**
+     * True when every finger that is still touching has travelled far enough downward for the
+     * settings swipe. [liftedId] is the pointer the platform reports as leaving the screen in an
+     * ACTION_POINTER_UP: the platform still delivers its coordinates, so it has to be excluded
+     * explicitly, otherwise a finger that never moved would block the gesture. Requiring every finger
+     * to pass on its own keeps the gesture from completing off one stray pointer (EasyPlay v71 checks
+     * each Origin that way, docs/_digest/42).
+     *
+     * A finger with no recorded start position cannot be judged: the first evaluation records this
+     * event's position for it and leaves it out, so the travel that established the gesture is not
+     * credited to a finger that arrived with it. That finger is judged from the next event onwards,
+     * and the gesture is never rejected for it alone.
+     */
+    private fun swipeReachedSettingsThreshold(event: MotionEvent, liftedId: Int): Boolean {
+        val threshold = dp(SETTINGS_SWIPE_DISTANCE_DP).toFloat()
+        var counted = 0
+        var horizontal = 0f
+        var vertical = 0f
+        for (id in gesturePointerIds) {
+            if (id == liftedId) continue
+            val index = event.findPointerIndex(id)
+            if (index < 0) continue
+            val start = gestureStartPositions[id]
+            if (start == null) {
+                gestureStartPositions[id] = PointF(event.getX(index), event.getY(index))
+                continue
+            }
+            if (!fingerTravelledDownward(event, index, start, threshold)) return false
+            horizontal += event.getX(index) - start.x
+            vertical += event.getY(index) - start.y
+            counted += 1
+        }
+        if (counted == 0) return false
+        // The centroid check repeats the per-finger one at gesture scale: it rejects a set of fingers
+        // whose average drift is sideways even though each of them individually moved downward.
+        val deltaX = Math.abs(horizontal / counted)
+        val deltaY = vertical / counted
+        return deltaY >= threshold && deltaY >= deltaX * SETTINGS_SWIPE_DIRECTION_RATIO
+    }
+
+    private fun fingerTravelledDownward(event: MotionEvent, index: Int, start: PointF, threshold: Float): Boolean {
+        val deltaX = Math.abs(event.getX(index) - start.x)
+        val deltaY = event.getY(index) - start.y
+        return deltaY >= threshold && deltaY >= deltaX * SETTINGS_SWIPE_DIRECTION_RATIO
+    }
+
+    /**
+     * Pointer coordinates of one MotionEvent, copied out of it. MotionEvent objects are recycled by
+     * the framework for every event of a sequence, so "the previous event" has to be captured by
+     * value while it is still the current one.
+     */
+    private class PreviousGestureSample(private val byId: Map<Int, PointF>) {
+        fun coords(id: Int): PointF? = byId[id]
+
+        companion object {
+            fun of(event: MotionEvent): PreviousGestureSample {
+                val byId = mutableMapOf<Int, PointF>()
+                for (index in 0 until event.pointerCount) {
+                    byId[event.getPointerId(index)] = PointF(event.getX(index), event.getY(index))
+                }
+                return PreviousGestureSample(byId)
+            }
+        }
     }
 
     private fun onScreenStreamStateChanged(generation: Int, type: Int, active: Boolean) {

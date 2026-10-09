@@ -114,6 +114,63 @@ class CarPlayHostSettingsTest {
         assertTrue(field("menuOpen") as Boolean)
     }
 
+    @Test fun aSwipeIsEstablishedDuringActionMoveWithoutAFreshPointerDown() {
+        touch(MotionEvent.ACTION_DOWN, 1, 100f)
+        // The third finger never produces its own ACTION_POINTER_DOWN: it only ever shows up inside an
+        // ACTION_MOVE, so this is the event that has to establish the gesture.
+        touch(MotionEvent.ACTION_MOVE, 3, 100f)
+        assertFalse(field("menuOpen") as Boolean)
+        // A later move must then carry the travel of a gesture that was established mid-motion.
+        touch(MotionEvent.ACTION_MOVE, 3, 800f)
+        assertTrue(field("menuOpen") as Boolean)
+        assertEquals(View.VISIBLE, menu().visibility)
+        assertNull(shadowOf(activity).nextStartedActivity)
+        invoke("cancelSettingsEdits")
+    }
+
+    @Test fun theSwipeCompletesWhenAFingerLiftsAtActionPointerUp() {
+        touch(MotionEvent.ACTION_DOWN, 1, 100f)
+        touch(MotionEvent.ACTION_POINTER_DOWN, 2, 100f)
+        touch(MotionEvent.ACTION_POINTER_DOWN, 3, 100f)
+        // Still short of the threshold while the fingers are down: the gesture must not fire yet.
+        touch(MotionEvent.ACTION_MOVE, 3, 150f)
+        assertFalse(field("menuOpen") as Boolean)
+        // The hand finishes the swipe as the first finger leaves the screen, so the final travel is
+        // only visible in the ACTION_POINTER_UP (EasyPlay v71 evaluates action 6 for this reason).
+        touch(MotionEvent.ACTION_POINTER_UP, 3, 800f)
+        assertTrue(field("menuOpen") as Boolean)
+        assertEquals(View.VISIBLE, menu().visibility)
+    }
+
+    @Test fun repeatedPointerIdsAreNotASettingsSwipe() {
+        touch(MotionEvent.ACTION_DOWN, 1, 100f)
+        // pointerCount is three but every slot carries pointer id 7: one finger reported three times
+        // is not a multi-finger gesture, so the menu must stay shut however far the event travels.
+        touch(MotionEvent.ACTION_MOVE, 3, 100f, ids = intArrayOf(7, 7, 7))
+        touch(MotionEvent.ACTION_MOVE, 3, 800f, ids = intArrayOf(7, 7, 7))
+        assertFalse(field("menuOpen") as Boolean)
+        touch(MotionEvent.ACTION_UP, 1, 800f)
+        assertFalse(field("menuOpen") as Boolean)
+        assertNull(shadowOf(activity).nextStartedActivity)
+    }
+
+    @Test fun aDownwardSwipeWithTheConfiguredFingerCountStillOpensTheMenu() {
+        AirPlayPersistence.saveSettingsGestureFingers(activity, 3)
+        invoke("loadPersistedSettings")
+        touch(MotionEvent.ACTION_DOWN, 1, 100f)
+        touch(MotionEvent.ACTION_POINTER_DOWN, 2, 100f)
+        touch(MotionEvent.ACTION_POINTER_DOWN, 3, 100f)
+        touch(MotionEvent.ACTION_MOVE, 3, 700f)
+        assertTrue(field("menuOpen") as Boolean)
+        assertEquals(View.VISIBLE, menu().visibility)
+        invoke("cancelSettingsEdits")
+
+        // The sequence reset must still allow the very next gesture to be recognised.
+        gesture(3)
+        assertTrue(field("menuOpen") as Boolean)
+        assertEquals(View.VISIBLE, menu().visibility)
+    }
+
     @Test fun fullSettingsShortcutDiscardsPreviewWithoutRestartingTheSession() {
         val controller = attachController()
         invoke("openSettingsMenu")
@@ -452,8 +509,14 @@ class CarPlayHostSettingsTest {
         touch(MotionEvent.ACTION_UP, 1, y, x)
     }
 
-    private fun touch(action: Int, count: Int, y: Float, x: Float = 400f) {
-        val pointers = Array(count) { i -> MotionEvent.PointerProperties().apply { id = i; toolType = MotionEvent.TOOL_TYPE_FINGER } }
+    private fun touch(
+        action: Int,
+        count: Int,
+        y: Float,
+        x: Float = 400f,
+        ids: IntArray = IntArray(count) { it },
+    ) {
+        val pointers = Array(count) { i -> MotionEvent.PointerProperties().apply { id = ids[i]; toolType = MotionEvent.TOOL_TYPE_FINGER } }
         val positions = Array(count) { i -> MotionEvent.PointerCoords().apply { this.x = x + i * 50f; this.y = y; pressure = 1f; size = 1f } }
         val indexedAction = if (action == MotionEvent.ACTION_POINTER_DOWN || action == MotionEvent.ACTION_POINTER_UP)
             action or ((count - 1) shl MotionEvent.ACTION_POINTER_INDEX_SHIFT) else action
