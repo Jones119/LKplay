@@ -11,9 +11,27 @@ data class Iap2ArtworkTransfer(val id: Int, val bytes: ByteArray)
  * Datagram byte 0 is the transfer id. Byte 1 contains First/Last flags and a low-nibble opcode:
  * Data(0), Start(1), Cancel(2), Setup(4), or Success(5). Version-2 Setup carries an eight-byte
  * big-endian size followed by a two-byte file type. Only NowPlayingArtworkData is accepted.
+ *
+ * File transfers carry their own quota so a burst of large transfers can never crowd out the
+ * session-10 control traffic: [maximumPendingTransfers] and [maximumPendingTransferBytes] are
+ * upstream's own file-transfer limits (32 queued payloads and 256 KiB of queued payload bytes,
+ * versus 64 / 1 MiB for control), and an over-quota setup is *dropped*, as upstream does, rather
+ * than answered or turned into a link failure.  This receiver has no payload queue - the link
+ * worker hands every session-12 datagram straight to [accept] - so the bounded resource here is
+ * the reassembly state of transfers that are still incomplete.
+ *
+ * One deviation is deliberate: upstream only ever held whole datagrams, while this receiver holds
+ * a whole file, so a lone pending transfer is exempt from the byte budget and is bounded by
+ * [maximumArtworkBytes] alone.  Applying 256 KiB to a single artwork would drop every cover larger
+ * than 256 KiB, which this pipeline can carry today (the downstream artwork queue budgets 8 MiB of
+ * compressed covers).  A second concurrent transfer, however, must fit the 256 KiB budget, so at
+ * most one oversized transfer can exist at a time and the remaining backlog stays at upstream's
+ * limit.
  */
 class Iap2FileTransferReceiver(
     private val maximumArtworkBytes: Int = DEFAULT_MAXIMUM_ARTWORK_BYTES,
+    private val maximumPendingTransfers: Int = DEFAULT_MAXIMUM_PENDING_TRANSFERS,
+    private val maximumPendingTransferBytes: Int = DEFAULT_MAXIMUM_PENDING_TRANSFER_BYTES,
 ) {
     data class Outcome(
         val replies: List<ByteArray> = emptyList(),
@@ -29,6 +47,8 @@ class Iap2FileTransferReceiver(
 
     init {
         require(maximumArtworkBytes > 0)
+        require(maximumPendingTransfers > 0)
+        require(maximumPendingTransferBytes > 0)
     }
 
     @Synchronized
@@ -63,9 +83,29 @@ class Iap2FileTransferReceiver(
                 completed = Iap2ArtworkTransfer(id, ByteArray(0)),
             )
         }
+        if (!admitsTransfer(size.toInt())) {
+            // Upstream flushed its whole file-transfer queue when the new payload did not fit and
+            // dropped that payload too, without replying and without failing the link; abandoning
+            // every incomplete transfer reproduces that. Sender cancels, aborts and clear() release
+            // the same state, so the quota is recovered as soon as a transfer stops being pending.
+            pending.clear()
+            return Outcome()
+        }
         pending[id] = Pending(size.toInt())
-        while (pending.size > MAXIMUM_PENDING_TRANSFERS) pending.remove(pending.keys.first())
         return Outcome(replies = listOf(start(id)))
+    }
+
+    /**
+     * Upstream admitted a file payload only while fewer than 32 payloads and at most 256 KiB of
+     * them were queued. A lone transfer is exempt from the byte budget because a whole file is
+     * reassembled here where upstream queued single datagrams; see the class documentation.
+     */
+    private fun admitsTransfer(size: Int): Boolean {
+        if (pending.size >= maximumPendingTransfers) return false
+        if (pending.isEmpty()) return true
+        var queuedBytes = 0
+        for (transfer in pending.values) queuedBytes += transfer.expectedBytes
+        return size <= maximumPendingTransferBytes - queuedBytes
     }
 
     private fun data(id: Int, flags: Int, datagram: ByteArray): Outcome {
@@ -122,7 +162,12 @@ class Iap2FileTransferReceiver(
         private const val OPCODE_SETUP = 4
         private const val OPCODE_SUCCESS = 5
         private const val NOW_PLAYING_ARTWORK_TYPE = 2
-        private const val MAXIMUM_PENDING_TRANSFERS = 4
+
+        /** Upstream's file-transfer quota: 32 queued files, against 64 queued control payloads. */
+        const val DEFAULT_MAXIMUM_PENDING_TRANSFERS = 32
+
+        /** Upstream's file-transfer quota: 256 KiB of queued file bytes, against 1 MiB of control. */
+        const val DEFAULT_MAXIMUM_PENDING_TRANSFER_BYTES = 256 * 1024
         const val DEFAULT_MAXIMUM_ARTWORK_BYTES = 2 * 1024 * 1024
     }
 }
