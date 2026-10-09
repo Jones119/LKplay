@@ -342,6 +342,7 @@ class Iap2UsbSession internal constructor(
     private val connection: UsbDeviceConnection,
     private val outEndpoint: UsbEndpoint,
     private val inEndpoint: UsbEndpoint,
+    private val onDiagnostic: (String) -> Unit = {},
 ) : Closeable {
     private val stateLock = Any()
     private val readLock = Any()
@@ -349,6 +350,7 @@ class Iap2UsbSession internal constructor(
     private var closed = false
     private var failure: IphoneUsbException? = null
     private var pendingRead: UsbRequest? = null
+    private val readQueuePolicy = UsbReadQueuePolicy.forCurrentPlatform()
 
     fun write(data: ByteArray, timeoutMillis: Int) = synchronized(writeLock) {
         checkOpen()
@@ -375,22 +377,38 @@ class Iap2UsbSession internal constructor(
                 )
             }
             initialized = true
-            synchronized(stateLock) {
+            val buffer = ByteBuffer.allocateDirect(USBMUX_READ_CHUNK_BYTES)
+            // Publish and queue under one lock hold: close() cancels whatever is published here, and
+            // the policy must not retry a rejected submission after the session was closed.
+            val queueResult = synchronized(stateLock) {
                 checkOpenLocked()
                 pendingRead = request
+                readQueuePolicy.queue(buffer, ::checkOpenLocked) { queuedBuffer ->
+                    // CS11: UsbRequest.queue(ByteBuffer) 是 API26+；4.4 走 queue(buffer, length)
+                    if (Build.VERSION.SDK_INT >= 26) {
+                        request.queue(queuedBuffer)
+                    } else {
+                        @Suppress("DEPRECATION")
+                        request.queue(queuedBuffer, queuedBuffer.remaining())
+                    }
+                }
             }
-            val buffer = ByteBuffer.allocateDirect(USBMUX_READ_CHUNK_BYTES)
-            // CS11: UsbRequest.queue(ByteBuffer) 是 API26+；4.4 走 queue(buffer, length)
-            val queued = if (Build.VERSION.SDK_INT >= 26) {
-                request.queue(buffer)
-            } else {
-                @Suppress("DEPRECATION")
-                request.queue(buffer, buffer.remaining())
-            }
-            if (!queued) {
+            if (!queueResult.queued) {
                 throw IphoneUsbException.DeviceUnavailable(
-                    "Android could not queue USBMUX read request (${requestDiagnostics(timeoutMillis, buffer.capacity())})",
+                    "Android could not queue USBMUX read request (${requestDiagnostics(timeoutMillis, buffer.capacity())} " +
+                        "firstBytes=${queueResult.firstBytes} fallbackBytes=${queueResult.fallbackBytes ?: "not_attempted"})",
                 )
+            }
+            // The policy caches the accepted size, so the controller refuses the requested read size
+            // once per pipe. Log it as well as reporting it: the session has no diagnostic listener
+            // wired in production, and logcat is how this head unit is diagnosed.
+            val acceptedFallbackBytes = queueResult.fallbackBytes
+            if (acceptedFallbackBytes != null) {
+                val fallback = "USBMUX read queue compatibility fallback api=${Build.VERSION.SDK_INT} " +
+                    "endpoint=${describeUsbEndpoint(inEndpoint)} firstBytes=${queueResult.firstBytes} " +
+                    "fallbackBytes=$acceptedFallbackBytes"
+                Log.i(IphoneCarPlayConfiguration.TAG, fallback)
+                runCatching { onDiagnostic(fallback) }
             }
             val completed = try {
                 // CS11: requestWait(long) 是 API26+；4.4 走无参阻塞版（由 cancel 路径负责退出）
@@ -487,7 +505,7 @@ class Iap2UsbSession internal constructor(
     }
 }
 
-private fun describeUsbEndpoint(endpoint: UsbEndpoint): String =
+internal fun describeUsbEndpoint(endpoint: UsbEndpoint): String =
     "0x${endpoint.address.toString(16)}(direction=${endpoint.direction}," +
         "type=${endpoint.type},maxPacket=${endpoint.maxPacketSize})"
 
