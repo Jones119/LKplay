@@ -47,6 +47,29 @@ the license text is in `docs/Opus-LICENSE.txt`. The binary was taken from the ow
 EasyPlay (a DiPlay fork for this same head unit that shares this package name), not from a redistributed
 store build.
 
+## Software Opus microphone encoder (CS11 build)
+
+DiPlay vendors [Concentus](https://github.com/lostromb/concentus), Logan Stromberg's pure-Java port of
+the Opus reference library from Xiph.Org Foundation, Skype Limited, Microsoft Corporation and other
+contributors, at commit `3885c4e46513ef0fc81fca100189e54f1714c6ca`. Every file of
+`Java/Concentus/src/main/java/org/concentus` is copied unmodified; upstream publishes no release
+artifact of the Java port. The files live under `shared/src/main/java/org/concentus/`.
+
+It is the last encoder in `com.shilapi.xcertplay.media.MicrophoneOpusEncoders`: MediaCodec first (Opus
+encoding is only guaranteed from API 29, and this head unit runs Android 4.4), then the bundled
+`libdiplay_opus.so`, then this pure-Java encoder. It is what keeps the CarPlay microphone uplink
+working if the native library cannot be loaded.
+
+Concentus uses the Opus BSD-style license. The full copyright notices, redistribution conditions and
+disclaimer are retained in [the vendored LICENSE file](../shared/src/main/java/org/concentus/LICENSE);
+it names Skype Limited, Xiph.Org Foundation, CSIRO, Microsoft Corporation, Jean-Marc Valin, Gregory
+Maxwell, Mark Borgerding, Timothy B. Terriberry and Logan Stromberg as rights holders, and requires
+the notices to be kept in source and binary redistribution. The
+[vendoring notes](../shared/src/main/java/org/concentus/README.md) identify the source commit.
+Concentus is a port of libopus, whose text is already in `docs/Opus-LICENSE.txt`; nothing in the
+BSD-style terms conflicts with this project's GPL-3.0 licensing, because BSD-3-Clause is
+GPL-compatible and the vendored copy keeps its own notices.
+
 ## Historic: HUD maneuver icons (removed in the CS11 build)
 
 The maneuver PNGs previously shipped under `shared/src/main/assets/byd-hud-icons`, imported from BYDMate

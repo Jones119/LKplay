@@ -5,13 +5,18 @@ import android.media.MediaFormat
 import android.util.Log
 import com.shilapi.xcertplay.compat.inputBufferCompat
 import com.shilapi.xcertplay.compat.outputBufferCompat
-import java.io.Closeable
 
 /**
- * Encodes 20 ms chunks of 48 kHz mono PCM into raw Opus access units for the CarPlay
- * microphone uplink.
+ * Encodes 20 ms chunks of 48 kHz mono PCM into raw Opus access units for the CarPlay microphone
+ * uplink, using Android's MediaCodec encoder (Android 10 and later) when the platform has one and
+ * the bundled libopus otherwise.
+ *
+ * This class is the "platform" implementation [MicrophoneOpusEncoders] tries first; the vendored
+ * pure-Java Concentus encoder behind [SoftwareOpusEncoder] covers a head unit that has neither. It
+ * is named after the wire format it produces rather than one backend, so both backends stay in this
+ * one place instead of a second copy of the MediaCodec buffer handling.
  */
-internal class OpusEncoder(bitrate: Int) : Closeable {
+internal class OpusEncoder(bitrate: Int) : MicrophoneOpusEncoder {
     private val codec: MediaCodec? = try {
         val format = MediaFormat.createAudioFormat(
             MediaFormat.MIMETYPE_AUDIO_OPUS,
@@ -50,12 +55,23 @@ internal class OpusEncoder(bitrate: Int) : Closeable {
         if (native != null) Log.i(TAG, "Opus microphone encoder started on libopus bitrate=$bitrate")
     }
 
-    val available: Boolean get() = !closed && (codec != null || native?.isAvailable == true)
+    /**
+     * Which backend actually produced the packets, for the diagnostic report. "mediacodec" and
+     * "libopus" are both this class; the pure-Java fallback reports "software" from
+     * [SoftwareOpusEncoder].
+     */
+    override val implementation: String = when {
+        native != null -> "libopus"
+        codec != null -> "mediacodec"
+        else -> "none"
+    }
+
+    override val available: Boolean get() = !closed && (codec != null || native?.isAvailable == true)
 
     /**
      * Queues one 20 ms PCM frame and returns all Opus access units made available by the codec.
      */
-    fun encode(pcm: ByteArray): List<ByteArray> {
+    override fun encode(pcm: ByteArray): List<ByteArray> {
         if (closed) return emptyList()
         native?.let { encoder ->
             val packet = encoder.encode(pcm)

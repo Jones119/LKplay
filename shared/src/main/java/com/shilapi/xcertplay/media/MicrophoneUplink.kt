@@ -29,6 +29,18 @@ import java.util.concurrent.atomic.AtomicBoolean
 internal class MicrophoneUplink(
     private val config: MicrophoneConfig,
     private val onDiagnostic: (String) -> Unit = {},
+    /**
+     * Injected so a test can describe a head unit whose only encoder is the bundled one, or whose
+     * encoders all fail. Defaults to the real chain: MediaCodec, then libopus, then Concentus.
+     */
+    private val opusEncoderFactory: (Int) -> MicrophoneOpusEncoder? = { bitrate ->
+        MicrophoneOpusEncoders.create(
+            bitrate = bitrate,
+            software = { value ->
+                SoftwareOpusEncoder(value, onError = { message, error -> Log.w(TAG, message, error) })
+            },
+        )
+    },
 ) : Closeable {
     private val running = AtomicBoolean(false)
     private val stats = MicrophoneCaptureStats(config, report = { message ->
@@ -37,7 +49,7 @@ internal class MicrophoneUplink(
     })
     @Volatile private var recorder: AudioRecord? = null
     @Volatile private var socket: DatagramSocket? = null
-    @Volatile private var opusEncoder: OpusEncoder? = null
+    @Volatile private var opusEncoder: MicrophoneOpusEncoder? = null
     @Volatile private var effects: List<AudioEffect> = emptyList()
     private var thread: Thread? = null
 
@@ -67,7 +79,7 @@ internal class MicrophoneUplink(
             else -> MediaRecorder.AudioSource.MIC
         }
         val nextEncoder = if (config.codec == AudioCodecKind.OPUS) {
-            OpusEncoder(config.bitrate ?: 48_000).takeIf { it.available }
+            opusEncoderFactory(config.bitrate ?: 48_000)
         } else {
             null
         }
@@ -76,6 +88,16 @@ internal class MicrophoneUplink(
             stats.failure(MicrophoneFailureStage.ENCODER)
             running.set(false)
             return false
+        }
+        if (nextEncoder != null) {
+            // Named in the report because the CS11 has no MediaCodec Opus encoder: whether the
+            // uplink runs on libopus or on the vendored Java encoder decides how much CPU the
+            // 50 packets per second cost, and that cannot be seen from the car without this line.
+            val message = "Microphone: encoder type=${config.audioType} codec=OPUS " +
+                "implementation=${nextEncoder.implementation}"
+            Log.i(TAG, message)
+            // A failing report callback must not cost the car its microphone.
+            runCatching { onDiagnostic(message) }
         }
         val bufferSize = maxOf(minBuffer * 2, config.frameBytes * 4)
         // The car keeps its own always-on voice assistant on the microphone, and this 4.4 audio HAL

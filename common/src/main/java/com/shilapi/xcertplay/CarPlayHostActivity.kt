@@ -3169,6 +3169,11 @@ class CarPlayHostActivity : ComponentActivity() {
             rightHandDrive = rightHandDrive,
             hevc = hevcEnabled,
             microphone = microphoneAvailable,
+            // Probed before the first info plist: wireless CarPlay sends calls and Siri as Opus, and
+            // the CS11 has no MediaCodec Opus encoder, so the microphone input is advertised only
+            // when the car can really encode it (libopus or the vendored Java encoder). Output
+            // formats are deliberately not gated — removing Opus there stops audio entirely.
+            microphoneOpus = com.shilapi.xcertplay.media.OpusEncoderSupport.isAvailable(),
             manufacturer = normalizedManufacturer(),
             model = normalizedModel(),
             oemLabel = oemLabel,
