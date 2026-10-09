@@ -986,6 +986,13 @@ private class AudioRenderer(
     private data class AudioPacket(val rtp: ByteArray, val sample: Int)
 
     private var trackAttributes: Any? = null
+    /**
+     * Routing attributes configured for the track that is playing.
+     *
+     * A field rather than a local in [createTrack] because a fallback route swaps it while the
+     * track is being built, and focus/volume follow whichever route won.
+     */
+    private var attributes: Any? = null
     /** Stream this renderer's track actually plays on; guidance focus follows it on API 19. */
     private var effectiveStreamType = AudioManager.STREAM_MUSIC
     private var mappedChannel: AudioChannel? = null
@@ -1205,8 +1212,7 @@ private class AudioRenderer(
     private fun createTrack() {
         diagnosticStage = "track-buffer-size"
         val encoding = AndroidAudioFormat.ENCODING_PCM_16BIT
-        val channelMask = if (format.channels >= 2) AndroidAudioFormat.CHANNEL_OUT_STEREO
-        else AndroidAudioFormat.CHANNEL_OUT_MONO
+        val channelMask = channelMask()
         val minBuffer = AudioTrack.getMinBufferSize(format.sampleRate, channelMask, encoding)
         if (minBuffer <= 0) {
             Log.e(TAG, "AudioTrack buffer size unavailable rate=${format.sampleRate} channels=${format.channels}")
@@ -1218,7 +1224,7 @@ private class AudioRenderer(
         val selection = mappedSelection()
         mappedChannel = selection.channel
         val streamOverride = channelOverride(selection.channel)
-        var attributes: Any? = if (Build.VERSION.SDK_INT >= 21) AudioApiBridge.attributesFor(selection, streamOverride) else null // CS11: AudioAttributes 是 API21+
+        attributes = if (Build.VERSION.SDK_INT >= 21) AudioApiBridge.attributesFor(selection, streamOverride) else null // CS11: AudioAttributes 是 API21+
         trackAttributes = attributes
         val plan = MediaAudioBuffer.plan(selection.channel == AudioChannel.MEDIA,
             format.sampleRate, format.channels, minBuffer, mediaBufferMillis)
@@ -1236,31 +1242,36 @@ private class AudioRenderer(
         } else {
             // CS11: AudioTrack.Builder 是 API23+；4.4 一律走 legacy 构造（usage 路由退为 mapper 的 streamType）
             val streamType = if (streamOverride != 0) streamOverride else streamType()
-        effectiveStreamType = streamType
+            effectiveStreamType = streamType
             routeLabel = if (streamOverride != 0) "streamType=$streamType" else "streamType=$streamType(api<23)"
+            val attempts = LegacyAudioFallback.Attempts(
+                AudioStreamFallback.fallbackCandidates(streamType, Build.VERSION.SDK_INT),
+            )
             built = LegacyAudioFallback.build(
-                createLegacy = {
-                    AudioTrack(streamType, format.sampleRate, channelMask, encoding,
-                        plan.trackBufferBytes, AudioTrack.MODE_STREAM)
-                },
+                createLegacy = { buildLegacyTrack(streamType, plan) },
                 isInitialized = { it.state == AudioTrack.STATE_INITIALIZED },
                 release = { it.release() },
                 createFallback = {
                     diagnosticStage = "track-fallback-build"
-                    if (Build.VERSION.SDK_INT >= 23) {
-                        routeLabel = "streamType=$streamType(fallback=usage)"
-                        Log.w(TAG, "streamType=$streamType rejected by this ROM; falling back to usage-based track")
-                        val fallbackAttributes = AudioApiBridge.attributesFor(selection)
-                        attributes = fallbackAttributes
-                        AudioApiBridge.builderTrack(
-                            fallbackAttributes, format.sampleRate, encoding, channelMask, plan.trackBufferBytes,
-                        )
-                    } else {
-                        routeLabel = "streamType=$streamType(fallback=music)"
-                        Log.w(TAG, "streamType=$streamType rejected by this ROM; falling back to STREAM_MUSIC")
-                        AudioTrack(AudioManager.STREAM_MUSIC, format.sampleRate, channelMask, encoding,
-                            plan.trackBufferBytes, AudioTrack.MODE_STREAM)
+                    val choice = attempts.next(
+                        build = { route ->
+                            routeLabel = "${route.label}(fallback)"
+                            buildRouteTrack(route, selection, plan)
+                        },
+                        isInitialized = { it.state == AudioTrack.STATE_INITIALIZED },
+                        release = { it.release() },
+                    )
+                    // Guidance lands on the music stream here, so focus and the volume stream
+                    // follow the stream that actually carries the sound, not the preferred one
+                    // the ROM refused.
+                    (choice.route as? AudioTrackRoute.Stream)?.let { effectiveStreamType = it.streamType }
+                    // The report names every stream this channel tried once the sound is up;
+                    // before that there is nothing useful to say beyond the per-attempt logs.
+                    AudioStreamFallback.rejectionReport(streamType, choice.attempted)?.let { line ->
+                        Log.w(TAG, line)
+                        runCatching { report(line) }
                     }
+                    choice.track
                 },
             )
         }
@@ -1342,6 +1353,30 @@ private class AudioRenderer(
     private fun abandonAudioFocus() {
         track?.let(audioFocusCoordinator::release)
     }
+
+    private fun buildLegacyTrack(streamType: Int, plan: MediaAudioBuffer.Plan): AudioTrack = AudioTrack(
+        streamType, format.sampleRate, channelMask(), AndroidAudioFormat.ENCODING_PCM_16BIT,
+        plan.trackBufferBytes, AudioTrack.MODE_STREAM,
+    )
+
+    private fun buildRouteTrack(
+        route: AudioTrackRoute,
+        selection: AudioChannelSelection,
+        plan: MediaAudioBuffer.Plan,
+    ): AudioTrack = when (route) {
+        is AudioTrackRoute.Stream -> buildLegacyTrack(route.streamType, plan)
+        AudioTrackRoute.UsageAttributes -> {
+            val routeAttributes = AudioApiBridge.attributesFor(selection)
+            attributes = routeAttributes
+            AudioApiBridge.builderTrack(
+                routeAttributes, format.sampleRate, AndroidAudioFormat.ENCODING_PCM_16BIT, channelMask(),
+                plan.trackBufferBytes,
+            )
+        }
+    }
+
+    private fun channelMask(): Int =
+        if (format.channels >= 2) AndroidAudioFormat.CHANNEL_OUT_STEREO else AndroidAudioFormat.CHANNEL_OUT_MONO
 
     private fun streamType(): Int {
         val mode = if (advancedAudioChannelMapping) {
