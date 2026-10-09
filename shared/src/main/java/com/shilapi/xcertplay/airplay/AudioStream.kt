@@ -130,10 +130,31 @@ class AudioStream(
                 // AAD, the sealed body, the short nonce and the payload for every packet
                 // (docs/_digest/41 §9 - EasyPlay's openInto takes the same shape on the audio path).
                 val sealedEnd = wire.size - NONCE_LEN
-                val plaintextLength = sealedEnd - RTP_HEADER_LEN
+                // The sealed body is ciphertext plus the 16-byte Poly1305 tag, and the AEAD consumes
+                // the tag without emitting anything for it, so the plaintext is 16 bytes shorter than
+                // the sealed body. Sizing the buffer from the sealed length instead left 16 untouched
+                // zero bytes at the end of every access unit (docs/_digest/43); the decoder read those
+                // as a second, truncated frame, produced twice the PCM and logged "substituting
+                // silence" - which sounded like slow motion, and like artefacts once the surplus was
+                // trimmed.
+                val plaintextLength = AudioStreamWire.sealedPlaintextLength(wire.size)
+                val sample = readU32Be(wire, 4)
+                if (plaintextLength < 0) {
+                    val failureNumber = authenticationFailures.incrementAndGet()
+                    if (failureNumber == 1) {
+                        android.util.Log.w(
+                            TAG,
+                            "audio stream type=$streamType packet too short for an AEAD tag " +
+                                "wire=${wire.size}",
+                        )
+                    }
+                    listener.onPacket(wire, null, sample, null)
+                    stats.processed()
+                    continue
+                }
+                val sealedLength = AudioStreamWire.sealedPayloadLength(wire.size)
                 nonce.fill(0, 0, 4)
                 wire.copyInto(nonce, 4, sealedEnd, wire.size)
-                val sample = readU32Be(wire, 4)
                 val rtp = ByteArray(RTP_HEADER_LEN + plaintextLength)
                 wire.copyInto(rtp, 0, 0, RTP_HEADER_LEN)
 
@@ -143,7 +164,7 @@ class AudioStream(
                         nonce = nonce,
                         ciphertextAndTag = wire,
                         ciphertextOffset = RTP_HEADER_LEN,
-                        ciphertextLength = sealedEnd - RTP_HEADER_LEN,
+                        ciphertextLength = sealedLength,
                         aad = wire,
                         aadOffset = 4,
                         aadLength = RTP_HEADER_LEN - 4,
@@ -161,6 +182,21 @@ class AudioStream(
                         )
                     }
                     listener.onPacket(wire, null, sample, error)
+                    stats.processed()
+                    continue
+                }
+                // The buffer is sized for exactly this much plaintext. A different length would mean
+                // stale bytes could reach the decoder, which is the bug this check exists to prevent.
+                if (payloadBytes != plaintextLength) {
+                    val failureNumber = authenticationFailures.incrementAndGet()
+                    if (failureNumber == 1) {
+                        android.util.Log.w(
+                            TAG,
+                            "audio stream type=$streamType unexpected plaintext length " +
+                                "expected=$plaintextLength actual=$payloadBytes",
+                        )
+                    }
+                    listener.onPacket(wire, null, sample, null)
                     stats.processed()
                     continue
                 }
@@ -232,6 +268,31 @@ class AudioStream(
         const val FIRST_PACKET_LOG_COUNT = 3
         const val PACKET_LOG_INTERVAL = 100
     }
+}
+
+/**
+ * Wire arithmetic for one encrypted audio datagram: RTP header, sealed body (ciphertext plus
+ * Poly1305 tag), eight-byte nonce.
+ *
+ * Kept out of [AudioStream]'s companion so the lengths stay directly testable, because getting the
+ * tag length wrong is silent: the decrypt buffer is simply left with trailing untouched bytes that
+ * the decoder then reads as a second, truncated access unit (docs/_digest/43).
+ */
+internal object AudioStreamWire {
+    const val RTP_HEADER_LEN = 12
+    const val TAG_LEN = 16
+    const val NONCE_LEN = 8
+
+    /** Length of the sealed body (ciphertext plus tag) inside a wire packet. */
+    fun sealedPayloadLength(wireBytes: Int): Int = wireBytes - NONCE_LEN - RTP_HEADER_LEN
+
+    /**
+     * Plaintext a [wireBytes]-long datagram decrypts to.
+     *
+     * The AEAD consumes the tag without emitting anything for it, so this is [TAG_LEN] bytes shorter
+     * than the sealed body. Negative means the datagram is too short to hold a tag at all.
+     */
+    fun sealedPlaintextLength(wireBytes: Int): Int = sealedPayloadLength(wireBytes) - TAG_LEN
 }
 
 /** Maps the phone's negotiated audioFormat bits to a decode/render format. */
