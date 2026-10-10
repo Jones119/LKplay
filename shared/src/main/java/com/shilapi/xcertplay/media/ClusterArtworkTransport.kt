@@ -226,8 +226,23 @@ internal const val CLUSTER_ARTWORK_MAX_ENCODED_BYTES = 1_048_576L
 internal const val CLUSTER_ARTWORK_MAX_SOURCE_EDGE = 8_192
 internal const val CLUSTER_ARTWORK_MAX_SOURCE_PIXELS = 16_777_216L
 
-/** How many handed-over covers stay readable; the oldest is revoked and deleted past this. */
-internal const val CLUSTER_ARTWORK_MAX_RETAINED = 4
+/**
+ * The cap on the covers that were written but never handed over on a URL.
+ *
+ * This is the *cache* bound, not the session's: a cover whose URL was already handed to the cluster is
+ * never deleted while the session runs ([ClusterArtworkRetention]), because the reader fetches it
+ * lazily and a URL the cluster still holds must not start answering `404`. What this constant caps is
+ * the other kind -- the `content://` tier's cache copy, and a copy whose own tier lost the handover --
+ * so the tree cannot grow with the number of tracks however a session goes. 32 covers of at most
+ * [CLUSTER_ARTWORK_MAX_ENCODED_BYTES] each is the ceiling it states; a real 256 px cover is about
+ * 25 KiB, so the cache side stays well under a megabyte in [CLUSTER_ARTWORK_DIRECTORY].
+ *
+ * The reference retains 4 and deletes the file of every evicted entry, live URL or not, which is the
+ * behaviour that turned a painted cover into a `404` four tracks later. The number here is raised as
+ * well, because a listening session changes track dozens of times and the *undelivered* entries are the
+ * ones this bounds.
+ */
+internal const val CLUSTER_ARTWORK_MAX_RETAINED = 32
 
 /**
  * The two processes that read the cover, taken from the reference's `OEM_READERS`.
@@ -696,28 +711,84 @@ fun clusterArtworkCoverFile(
 }
 
 /**
- * The covers handed over so far, oldest first, capped at [CLUSTER_ARTWORK_MAX_RETAINED].
+ * The covers handed over so far, oldest first.
  *
- * The cap is the reference's. A cover that falls out of it must stop being readable: the caller
- * revokes the grant and deletes the file for every entry [add] returns, otherwise a long drive would
- * leave every cover of the session readable (and the grant table growing) in one of the trees.
+ * **The retention rule.** A cover the cluster was *given a URL for* (`delivered = true`: the loopback
+ * HTTP tier and the `file://` tier both hand over a string that names the file itself) is never handed
+ * back for deletion while the session runs. The reader fetches it lazily -- it may ask for the cover of
+ * the track that played ten minutes ago -- so deleting the file behind a live URL is what turned a
+ * painted cover into a `404` and a blank cluster; that is the fault this class exists to prevent. Only
+ * the *cache* copies (`delivered = false`: the `content://` tier's file and every cover whose tier was
+ * superseded) count against [limit], which is the number of them that stays held, and the oldest of
+ * them is what [add] answers when a new one arrives. A handover that never reached a URL therefore
+ * cannot evict the URL that is on screen, however many tracks go by.
+ *
+ * The cost of that rule is stated rather than hidden: with every handover on the HTTP tier, nothing is
+ * returned for deletion until [clear], so the session's tree holds one cover per distinct track. It is
+ * bounded by the session (the store's `clear`/`close` deletes all of it, the next process sweeps the
+ * directories of the last), and a 256 px JPEG is about 25 KiB, so an hour of listening is a fraction of
+ * a megabyte. [limit] is what keeps the other direction bounded: a car that never gets a URL -- no
+ * external base, no port, no provider -- still cannot accumulate cache copies without limit.
+ *
+ * The reference's own cap is 4 and it deletes the file of every evicted entry; that is exactly the
+ * behaviour that made the fourth cover evict the third while the cluster might still ask for it.
  */
 internal class ClusterArtworkRetention(private val limit: Int = CLUSTER_ARTWORK_MAX_RETAINED) {
-    /** One handed-over cover: the file on disk and the Uri granted for it, if the fallback tier ran. */
-    data class Entry(val file: File, val uri: Uri?)
+    /**
+     * One handed-over cover: the file on disk and the Uri granted for it, if the fallback tier ran.
+     *
+     * [delivered] is the whole retention rule: true when the string the vendor was handed names this
+     * file (the HTTP URL and the `file://` path both do), false when the file is only a copy another
+     * tier might still need -- the provider's cache copy, or a copy whose own tier lost the handover.
+     */
+    data class Entry(val file: File, val uri: Uri?, val delivered: Boolean = false)
 
     private val held = ArrayList<Entry>()
 
-    /** Records [entry] and returns every entry pushed past the cap, oldest first. */
+    /**
+     * Records [entry] and returns the entries to delete, oldest first.
+     *
+     * Only undelivered entries are ever returned: the check is on the entry's own flag and not on its
+     * position, so a delivered cover survives any number of sweeps. The count that decides is the number
+     * of *undelivered* entries held, and [limit] is the cap on that count, exactly as it was on the
+     * reference's four: `limit` covers are held, and the handover after them hands the oldest one back
+     * for deletion -- so a drive never keeps more cache copies than the constant states. A session whose
+     * covers all reached a URL therefore never returns anything here at all, which is the point: the
+     * delivered ones are the bytes a lazily fetching cluster can still ask for, and they go only at
+     * [clear].
+     */
     fun add(entry: Entry): List<Entry> {
         held.add(entry)
-        if (held.size <= limit) return emptyList()
-        val evicted = ArrayList<Entry>(held.size - limit)
-        while (held.size > limit) evicted.add(held.removeAt(0))
+        // Walk the oldest first and take cache copies until the undelivered count fits the cap. Counted
+        // rather than sliced, because the delivered entries between them must not be touched and must
+        // also not be deleted: `held.size - limit` would take a delivered entry with it.
+        var undelivered = held.count { !it.delivered }
+        if (undelivered <= limit) return emptyList()
+        val evicted = ArrayList<Entry>(held.size)
+        val survivors = ArrayList<Entry>(held.size)
+        for (candidate in held) {
+            if (undelivered > limit && !candidate.delivered) {
+                evicted.add(candidate)
+                undelivered--
+            } else {
+                survivors.add(candidate)
+            }
+        }
+        held.clear()
+        held.addAll(survivors)
         return evicted
     }
 
-    /** Forgets what is held; the caller is responsible for revoking and deleting it. */
+    /** How many covers are held, delivered and cache copies together; the tests assert the cap here. */
+    internal fun heldCount(): Int = held.size
+
+    /**
+     * Forgets what is held; the caller is responsible for revoking and deleting it.
+     *
+     * This is the one path that hands delivered covers back, because it is also the end of the session
+     * that made them fetchable: nothing will ask for that URL again after the caller has run, which is
+     * the same statement [ClusterArtworkHttpServer.shutdown] makes for the port.
+     */
     fun clear(): List<Entry> {
         val all = ArrayList(held)
         held.clear()
@@ -1019,11 +1090,22 @@ internal class ClusterArtworkStore(
      * The loopback HTTP tier, created on the first cover and bound only once a base validated.
      *
      * Injected so a JVM test can hand over a server whose bind is already known to fail and still
-     * assert the `file://` fallback; the car leaves the default, which binds `127.0.0.1` on a port the
-     * kernel picks. It is constructed lazily here and *bound* lazily in [publish], so a process that
-     * never publishes a cover never opens a port (see [ClusterArtworkHttpServer]).
+     * assert the `file://` fallback; the car leaves the default, which is the *process-wide* server
+     * ([clusterArtworkProcessServer]): one bind for the whole session, so a URL the cluster was handed
+     * keeps answering after the host activity that produced it is gone. It is bound lazily in [publish]
+     * ([ClusterArtworkHttpServer.start] on every handover, which answers an already-running server as it
+     * is), so a process that never publishes a cover never opens a port, and the port is released by
+     * `VendorClusterBridge.release` rather than by this store's own [close].
      */
-    private val server: ClusterArtworkHttpServer = ClusterArtworkHttpServer(),
+    private val server: ClusterArtworkHttpServer = clusterArtworkProcessServer(),
+    /**
+     * How many *undelivered* covers this store keeps; the car leaves it at the documented cap.
+     *
+     * A parameter rather than a constant read inside [publish], so a test can drive the sweep with two
+     * covers instead of [CLUSTER_ARTWORK_MAX_RETAINED] and still assert the real rule: a cover that was
+     * handed over on a URL is never the one the sweep deletes.
+     */
+    private val retentionLimit: Int = CLUSTER_ARTWORK_MAX_RETAINED,
 ) {
     private val session = newClusterArtworkSession()
     private val cacheDirectory = File(cacheRoot, session)
@@ -1082,7 +1164,7 @@ internal class ClusterArtworkStore(
         },
     )
 
-    private val retention = ClusterArtworkRetention()
+    private val retention = ClusterArtworkRetention(retentionLimit)
 
     init {
         cleanStaleClusterArtworkSessions(cacheRoot, session)
@@ -1101,6 +1183,13 @@ internal class ClusterArtworkStore(
      * server both read the external copy, so nothing serves the cache one any more), and the external
      * copy is deleted when the file tier gave up, so no tier leaves a file behind for another. The
      * quality ladder means a noisy cover is retried smaller rather than dropped.
+     *
+     * A delivered cover is *retained*, not swept: `retention.add` is told which entries the vendor was
+     * handed a URL for ([ClusterArtworkRetention.Entry.delivered]) and only ever answers cache copies
+     * for deletion, so a cover the cluster may still ask for cannot be deleted by a later track -- which
+     * is what the reference's four-cover cap did, and what turned a painted cover into a `404`. The
+     * bound the session does have is the covers that were never handed over on a URL, plus the fact that
+     * the whole tree goes at [clear].
      *
      * [ClusterArtworkBaseSelector.select] answers the *delivered* spelling -- `/sdcard/…` whenever that
      * alias read the cover back -- so the file target built from it and the string logged as `uri=` are
@@ -1123,7 +1212,7 @@ internal class ClusterArtworkStore(
                     // that names it was returned, so the URL cannot 404 on a handover that just worked.
                     runCatching { encoded.delete() }
                     val url = serving.uriFor(target)
-                    evict(retention.add(ClusterArtworkRetention.Entry(target, null)))
+                    evict(retention.add(ClusterArtworkRetention.Entry(target, null, delivered = true)))
                     Log.i(
                         TAG,
                         "cluster artwork tier=http port=${serving.port} bytes=${target.length()} " +
@@ -1131,10 +1220,11 @@ internal class ClusterArtworkStore(
                     )
                     return Uri.parse(url)
                 }
-                // No port this time: the very same file is delivered on its `file://` string.
+                // No port this time: the very same file is delivered on its `file://` string, which is
+                // also a string that names this file -- so it is retained exactly like the URL above.
                 val delivered = target.absolutePath
                 runCatching { encoded.delete() }
-                evict(retention.add(ClusterArtworkRetention.Entry(target, uriFor(delivered))))
+                evict(retention.add(ClusterArtworkRetention.Entry(target, uriFor(delivered), delivered = true)))
                 return uriFor(delivered)
             }
             // The volume went away between the probe and the write: re-probe on the next track.
@@ -1151,6 +1241,9 @@ internal class ClusterArtworkStore(
         if (clusterArtworkTier(fileUsable = false, providerRegistered = registered, granted = granted) ==
             ClusterArtworkTier.CONTENT
         ) {
+            // A provider Uri is a name, not this file's own path, and the file is the *cache* copy the
+            // sweep may reclaim: this is the one handover whose bytes may be deleted while it is live,
+            // which is why it stays undelivered here.
             evict(retention.add(ClusterArtworkRetention.Entry(encoded, uri)))
             return uri
         }
@@ -1162,11 +1255,14 @@ internal class ClusterArtworkStore(
     /**
      * The started loopback server, or null when it cannot serve this handover.
      *
-     * The server is bound at most once per store and the directory it serves is (re-)registered on
-     * every handover, because a base that was refused earlier can come back and the cover can move with
-     * it. A failed bind is cached in the negative sense -- [ClusterArtworkHttpServer.start] answers null
-     * without retrying a port it cannot have, and this returns null so the caller delivers `file://` --
-     * which is what keeps a broken port from costing a cover or a log line per track.
+     * The server is bound once per *process* and the directory it serves is (re-)registered on every
+     * handover, because a base that was refused earlier can come back, the cover can move with it, and a
+     * store created after an activity recreate has a session directory the shared server has not seen
+     * yet. [ClusterArtworkHttpServer.start] answers the running server itself, so the port never moves
+     * under a URL the cluster already holds. A failed bind is cached in the negative sense -- `start`
+     * answers null without retrying a port it cannot have, and this returns null so the caller delivers
+     * `file://` -- which is what keeps a broken port from costing a cover or a CPU loop per track; the
+     * cost is one `Log.e` per handover, which is the point of it.
      */
     private fun serverOrNull(directory: File): ClusterArtworkHttpServer? {
         val started = server.start() ?: return null
@@ -1174,23 +1270,33 @@ internal class ClusterArtworkStore(
         return started
     }
 
-    /** Revokes and deletes everything this store handed over; called when a session ends. */
+    /**
+     * Revokes and deletes every cover this store handed over, delivered ones included.
+     *
+     * This is the session-end path: the caller is stating that no URL of this store will be fetched
+     * again, which is why it is the one operation [ClusterArtworkRetention] does not protect a delivered
+     * cover from. For the same reason it does **not** stop the loopback server -- a shared, process-wide
+     * port is not this store's to close, and closing it here is exactly the defect that made a lazy
+     * fetch return `connection refused` after the host activity went away. `VendorClusterBridge.release`
+     * is what ends both, together.
+     */
     fun clear() {
         evict(retention.clear())
     }
 
     /**
-     * Ends this store for good: the covers go and the loopback port is released.
+     * Ends this store: every cover it handed over is revoked and deleted.
      *
-     * Called by `VendorClusterBridge.detach()` when the bridge is torn down. [clear] alone is not
-     * enough once the HTTP tier exists, because a retained cover is also a *live URL*: shutting the
-     * server down is what makes that URL stop resolving, and it is why the store is not reused after a
-     * teardown (the bridge drops it). Idempotent -- [ClusterArtworkHttpServer.shutdown] is -- so a
-     * second teardown on a process that is going away cannot fail.
+     * Called when the CarPlay session ends, not when an Activity is destroyed -- an Activity that is
+     * merely recreated must leave the cluster's URL answering, and the store (with the covers it
+     * retains) is reused by the next `setArtwork`. The empty session directory is left in place: the
+     * next process' sweep removes it ([cleanStaleClusterArtworkSessions]), and deleting it here would be
+     * the same disk work twice for a directory this session may publish into again. The loopback *port*
+     * is deliberately not touched here: it belongs to the process-wide server and is released by
+     * [releaseClusterArtworkServer] at the same moment. Idempotent, because [clear] is.
      */
     fun close() {
         clear()
-        server.shutdown()
     }
 
     private fun encodeCover(bitmap: Bitmap): File? {

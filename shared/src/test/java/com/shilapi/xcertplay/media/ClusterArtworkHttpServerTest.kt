@@ -14,6 +14,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+import org.robolectric.shadows.ShadowLog
 
 /**
  * The loopback HTTP tier against a **real socket** (`docs/_digest/45 §2.4`).
@@ -21,15 +25,20 @@ import org.junit.rules.TemporaryFolder
  * Everything asserted here is protocol, not policy: the server binds a loopback port, answers a `GET`
  * for a registered cover with `200`, `image/jpeg`, the file's exact length and the file's exact bytes,
  * answers `404` for a traversal path and for a cover that is not there, survives a second concurrent
- * request, refuses a non-`GET`, and stops answering once it is shut down. These run on the JVM with no
- * Robolectric, because the tier's whole risk is at the socket layer and a mocked socket would prove
- * nothing about it.
+ * request, refuses a non-`GET`, stops answering once it is shut down, keeps one port across every
+ * handover of a session, and leaves exactly one request line per answer. These run without a mocked
+ * socket, because the tier's whole risk is at the socket layer; Robolectric is present only for
+ * `ShadowLog`, which is how the request lines are read back (`android.util.Log` is a no-op without it).
  *
  * **Only the car can confirm** the half that matters most: that the vendor's reading process actually
- * connects to `127.0.0.1:<port>` when it is handed the URL. What this file proves is that the URL we
- * deliver is the one our own server answers, byte for byte, and that nothing a client can send makes
- * the server read or serve outside the cover session it published.
+ * connects to `127.0.0.1:<port>` when it is handed the URL, minutes after the handover. What this file
+ * proves is that the URL we deliver is the one our own server answers -- byte for byte, on the same port
+ * for as long as the session runs -- that nothing a client can send makes the server read or serve
+ * outside the cover session it published, and that every request leaves the line the on-car check
+ * greps for.
  */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [29], manifest = Config.NONE)
 class ClusterArtworkHttpServerTest {
     @get:Rule
     val folder = TemporaryFolder()
@@ -220,6 +229,85 @@ class ClusterArtworkHttpServerTest {
         server.shutdown()
     }
 
+    /**
+     * D1's regression test, without a Context.
+     *
+     * The session owns the server, the Activity does not: every cover of a session must be fetchable
+     * from the *same* socket for as long as the session runs, however many "activities" (here: the
+     * store-side teardowns a recreated host performs) come and go in between. Retaining the URL is not
+     * enough on its own -- `ClusterArtworkStoreHttpTierTest` covers a handed-over cover surviving the
+     * retention sweep -- so what this proves is the socket half: the port never moves and never closes.
+     */
+    @Test
+    fun theSameServerKeepsAnsweringEveryRetainedCoverAcrossStoreTeardowns() {
+        val root = folder.newFolder("cluster-artwork")
+        val server = ClusterArtworkHttpServer().start()!!
+        val served = LinkedHashMap<String, ByteArray>()
+        try {
+            repeat(3) { index ->
+                val session = "%08d-1111-2222-3333-444444444444".format(index)
+                val file = "11111111-2222-3333-4444-555555555555.jpg"
+                val directory = File(root, session).apply { assertTrue(mkdirs()) }
+                // A different length per cover, so "the newest bytes" cannot pass for every URL.
+                val bytes = cover.copyOf(cover.size + index)
+                File(directory, file).writeBytes(bytes)
+                server.register(directory)
+                val url = server.uriFor(File(directory, file))
+                served[url] = bytes
+
+                // A host activity is recreated between handovers: the server is *not* shut down, and the
+                // next cover registers its session on the same socket rather than binding a new port.
+                val boundPort = server.port
+                assertTrue("the port a handed-over URL names stays bound", server.started)
+                assertEquals("no port churn across an activity recreate", boundPort, server.port)
+            }
+
+            for ((url, bytes) in served) {
+                val response = get(server.port, url.substringAfter(":${server.port}"))
+                assertEquals("$url must still be served", 200, response.status)
+                assertArrayEquals("$url must serve its own bytes", bytes, response.body)
+            }
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
+    fun aServedCoverAndARefusedRequestEachLeaveOneRequestLogLine() {
+        val session = "0f0e0d0c-0b0a-0908-0706-050403020100"
+        val file = "11111111-2222-3333-4444-555555555555.jpg"
+        val directory = coverDirectory(session, file)
+        val server = ClusterArtworkHttpServer().start()!!
+        try {
+            server.register(directory)
+            val path = "/covers/$session/$file"
+            assertEquals(200, get(server.port, path).status)
+            // The one fact this tier could not report before: a request arrived and what we answered.
+            assertTrue(
+                "the served request is logged with its path, status and byte count: ${serverLog()}",
+                ShadowLog.getLogsForTag(SERVER_LOG_TAG).any {
+                    it.msg.contains("request method=GET path=$path status=200 bytes=${cover.size}")
+                },
+            )
+            // A refused request gets its own line rather than the silence that made "the cluster never
+            // asked" and "we never recorded it" the same absence of evidence.
+            val refused = "/covers/$session/22222222-3333-4444-5555-666666666666.jpg"
+            assertEquals(404, get(server.port, refused).status)
+            assertTrue(
+                "the refused request is logged with its path and reason: ${serverLog()}",
+                ShadowLog.getLogsForTag(SERVER_LOG_TAG).any {
+                    it.msg.contains("request refused path=$refused reason=not-served")
+                },
+            )
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    /** The `DiPlay-Cluster` lines the server wrote, so a failure shows what it logged instead. */
+    private fun serverLog(): String =
+        ShadowLog.getLogsForTag(SERVER_LOG_TAG).joinToString("\n") { "${it.type} ${it.msg}" }
+
     @Test
     fun aPathIsResolvedOnlyForARegisteredSessionAndTheExactCoverShape() {
         val session = "0f0e0d0c-0b0a-0908-0706-050403020100"
@@ -331,5 +419,8 @@ class ClusterArtworkHttpServerTest {
 
         /** The per-read timeout on the client socket, in the unit `Socket.setSoTimeout` takes. */
         const val CLIENT_READ_TIMEOUT_MILLIS = 5_000
+
+        /** The tag the server logs under, which is also the one the on-car `logcat` grep uses. */
+        const val SERVER_LOG_TAG = "DiPlay-Cluster"
     }
 }

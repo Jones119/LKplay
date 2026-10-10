@@ -90,6 +90,48 @@ internal fun clusterArtworkServerWithoutPort(): ClusterArtworkHttpServer =
     ClusterArtworkHttpServer(binder = { error("no port for the artwork server in this test") })
 
 /**
+ * The one server this process binds, so the port a handed-over URL names outlives the host Activity.
+ *
+ * The cover's reader fetches *lazily*: the cluster may ask for the URL minutes after the handover, so
+ * the socket has to stay bound for as long as the CarPlay session runs, which is longer than any one
+ * `CarPlayHostActivity`. Before this, every store owned its own server and the host's `onDestroy`
+ * released it, so a backgrounded or recreated host left the URL the vendor still held pointing at a
+ * closed port -- a `connection refused` the tier log could not show, because that log line is written
+ * when the URL is produced. The object is process-wide instead: every store gets *this* server, its
+ * [ClusterArtworkHttpServer.start] is idempotent, and an activity recreate therefore reuses the port
+ * rather than moving the cover to a new one (no port churn).
+ *
+ * Releasing it is an explicit act, [releaseClusterArtworkServer], taken by the CarPlay session's own
+ * teardown -- never by an Activity going away. A server that was released is inert; the next cover
+ * creates a new store, that store binds a fresh port through this accessor and registers its own
+ * session directory, so a release followed by a later session cannot hand out a URL of a dead server.
+ */
+private val processClusterArtworkServer: ClusterArtworkHttpServer by lazy { ClusterArtworkHttpServer() }
+
+/**
+ * The server every [ClusterArtworkStore] shares, so a URL outlives the object that produced it.
+ *
+ * A function rather than the property itself, because the "one server per process" rule is the
+ * *accessor's* rule: a test that wants its own server still passes one to the store, and only the car's
+ * default goes through here.
+ */
+internal fun clusterArtworkProcessServer(): ClusterArtworkHttpServer = processClusterArtworkServer
+
+/**
+ * Ends the loopback HTTP tier for this process: the port goes, and every session it registered is
+ * forgotten.
+ *
+ * Called from the CarPlay session's teardown (`VendorClusterBridge.release`, which the host runs when
+ * the session really ends), *not* from `onDestroy`: an Activity that goes away while the session
+ * continues must leave the covers fetchable, which is the whole point of the process-wide server. After
+ * this, the accessor still answers the same inert object; only a later [ClusterArtworkHttpServer.start]
+ * -- the next session's first cover -- binds a new port.
+ */
+internal fun releaseClusterArtworkServer() {
+    processClusterArtworkServer.shutdown()
+}
+
+/**
  * The third artwork tier: a loopback HTTP server that answers one cover per request.
  *
  * The 2026-10-09/10-10 on-car runs delivered three different `content://` Uris with explicit grants
@@ -115,9 +157,8 @@ internal fun clusterArtworkServerWithoutPort(): ClusterArtworkHttpServer =
  * ## Why it cannot leak or wedge
  *
  * - **Loopback only.** The socket binds `127.0.0.1` and a port the kernel picks (`port = 0`), so the
- *   server is reachable from this device and nowhere else, and it cannot collide with a port another
- *   process already holds: a collision is simply the next ephemeral port, and a refusal to bind at all
- *   is reported as "no HTTP tier" rather than retried in a loop.
+ *   server is reachable from this device and nowhere else, and it is not a fixed port a neighbour could
+ *   already hold: the worst a collision can do is move the server to the next free port.
  * - **Nothing unbounded.** The accept backlog is [CLUSTER_ARTWORK_HTTP_BACKLOG] and the workers are a
  *   *bounded* queue in front of [CLUSTER_ARTWORK_HTTP_THREADS] threads: a client that connects and
  *   never sends anything costs one queue slot, and once the queue is full the connection is closed
@@ -136,25 +177,36 @@ internal fun clusterArtworkServerWithoutPort(): ClusterArtworkHttpServer =
  *   `GET` are refused with [HTTP_STATUS_NOT_FOUND] before a [File] is built.
  * - **Nothing keeps the process alive.** The accept thread and every worker are daemon threads, and
  *   [shutdown] closes the listening socket (which makes the blocked `accept` throw), stops the pool and
- *   drops the session map. A stopped server answers no request: [uriFor] is only called after a
- *   successful [start], and [ClusterArtworkStore] drops a server that failed to start, so a torn-down
- *   server can never be handed to the vendor as a still-working URL.
+ *   drops the session map. A drained server answers no request: the default server's lifetime is the
+ *   *session's* (see [clusterArtworkProcessServer]), and a store that was torn down in the same step
+ *   registers nothing again, so a released socket is never named by a URL handed over afterwards.
+ * - **Every request leaves one line.** [handle] logs exactly one `Log.i` per request -- the method, the
+ *   path, the status and the bytes promised -- and [start] logs whether the socket bound. Without it
+ *   "the cluster never fetched" and "we never recorded the fetch" are the same silence, which is the
+ *   one fact the next ignition has to decide; with it, `adb logcat -s DiPlay-Cluster` answers it.
+ *   One line per request, never one per byte, and this tier serves about one request per track change.
  *
  * ## Lifecycle
  *
- * **Start lazily, stop with the bridge.** The object is constructed by [ClusterArtworkStore] on the
- * first cover of a process but binds nothing until [start] is called, and the store calls that only
- * once a base has been probed and written -- a car that never publishes a cover never opens a port.
- * [shutdown] is called from `VendorClusterBridge.detach()`, i.e. when the bridge is torn down (the
- * host activity's `onDestroy`): the listening socket is closed, in-flight requests are given
- * [CLUSTER_ARTWORK_HTTP_SHUTDOWN_GRACE_MILLIS] to finish and then interrupted, and the session map is
- * cleared. After `shutdown` the object is inert; a later cover creates a new instance through the
- * store rather than resurrecting this one, which is why the bind lives in [start] and never in `init`.
+ * **Start lazily, stop with the session.** The object is constructed on the first cover of a process
+ * but binds nothing until [start] is called, and the store calls that only once a base has been probed
+ * and written -- a car that never publishes a cover never opens a port. The car's instance is the
+ * process-wide one ([clusterArtworkProcessServer]) and its lifetime is the CarPlay *session's*:
+ * [shutdown] runs from `VendorClusterBridge.release`, which the host calls when the session really ends,
+ * not from the host activity's `onDestroy`, because the cluster fetches the cover lazily and a URL that
+ * was handed over must keep answering while the session runs.
+ *
+ * An activity recreate therefore does not touch the socket: a replacement store resolves to the same
+ * server, [start] answers it as already running, and the port the cluster was given stays the port that
+ * answers -- one bind per process, no port churn. A store whose server was released gets a fresh bind
+ * from the next cover, and every store registers its own session directory before handing out a URL for
+ * it, so a stopped server can never be named by a URL produced after the stop.
  *
  * **Only the car can confirm** that a reader in another process really fetches this URL: a JVM test can
  * open the socket and prove the status, the headers and the bytes (see `ClusterArtworkHttpServerTest`),
  * but whether the reading process ever connects is a device fact, and the
- * `cluster artwork tier=http port=… uri=…` line is what the on-car check greps for.
+ * `cluster artwork http request …` line plus `cluster artwork tier=http port=… uri=…` are what the
+ * on-car check greps for.
  */
 internal class ClusterArtworkHttpServer(
     /**
@@ -215,9 +267,15 @@ internal class ClusterArtworkHttpServer(
      * Binds the loopback socket and starts accepting, or answers null when the port cannot be taken.
      *
      * Null is a supported outcome, not an error: the store treats it as "this tier is unavailable" and
-     * delivers the same cover as a `file://` copy instead, which is what a car whose reader does not
-     * fetch URLs needs anyway. Synchronised with [shutdown], so a stop that races a start either wins
-     * before the bind or is undone by this method noticing [running] was cleared.
+     * delivers the same cover as a `file://` copy instead. It is not a *quiet* outcome, though: the
+     * `file://` tier is the one this ROM has never drawn (/storage/emulated/0 does not exist for a
+     * reader, the sandbox is unreadable by another process, and a proved `/sdcard/DiPlay/…` path with
+     * `root:sdcard_r` was still never painted), so the refusal is logged as an error that names the
+     * degradation -- otherwise the only symptom on the car would be a blank cluster and a healthy
+     * looking `cluster artwork tier=file …` line. The successful bind logs its port and the path shape
+     * once, so `logcat` can be read against the URL the vendor was handed. Synchronised with
+     * [shutdown], so a stop that races a start either wins before the bind or is undone by this method
+     * noticing [running] was cleared.
      */
     fun start(): ClusterArtworkHttpServer? = synchronized(this) {
         if (running) return@synchronized this
@@ -229,7 +287,12 @@ internal class ClusterArtworkHttpServer(
                 soTimeout = CLUSTER_ARTWORK_HTTP_ACCEPT_TIMEOUT_MILLIS
             }
         } catch (refused: Exception) {
-            Log.w(TAG, "cluster artwork http server unavailable", refused)
+            Log.e(
+                TAG,
+                "cluster artwork http server unavailable, degrading to a tier this ROM has never drawn " +
+                    "(" + CLUSTER_ARTWORK_FALLBACK_TIER + ")",
+                refused,
+            )
             return@synchronized null
         }
         val pool = ThreadPoolExecutor(
@@ -251,6 +314,13 @@ internal class ClusterArtworkHttpServer(
             isDaemon = true
             start()
         }
+        // The one line that proves the tier exists at all: the port a URL will name and the path shape
+        // such a URL has, so a delivered `uri=` can be read against a bound socket.
+        Log.i(
+            TAG,
+            "cluster artwork http server bound port=$port path=/$CLUSTER_ARTWORK_HTTP_ROOT/" +
+                "<session>/<uuid>.jpg",
+        )
         this
     }
 
@@ -259,10 +329,14 @@ internal class ClusterArtworkHttpServer(
      *
      * Closing the listening socket is what unblocks `accept`, so this needs no wakeup connection and
      * cannot be delayed by a client that is not connecting. The pool is shut down without draining the
-     * queue -- a cover nobody asked for must not keep an activity's teardown waiting -- and a request
-     * already being written gets [CLUSTER_ARTWORK_HTTP_SHUTDOWN_GRACE_MILLIS] to finish before the
-     * workers are interrupted; a half-written response is detected by the client through the
+     * queue -- a cover nobody asked for must not keep the CarPlay session's teardown waiting -- and a
+     * request already being written gets [CLUSTER_ARTWORK_HTTP_SHUTDOWN_GRACE_MILLIS] to finish before
+     * the workers are interrupted; a half-written response is detected by the client through the
      * `Content-Length` it was promised, so a truncated cover is never mistaken for a whole one.
+     *
+     * Forgetting the sessions is deliberate and irreversible: a URL of this server can only resolve
+     * against a directory this process registered *after* the last start, so a released server can never
+     * be named by a URL that is handed over later (the next store registers its own directory).
      */
     fun shutdown() {
         val socket: ServerSocket?
@@ -343,13 +417,20 @@ internal class ClusterArtworkHttpServer(
     }
 
     /**
-     * Reads one request, answers it and closes the connection.
+     * Reads one request, answers it, logs the answer and closes the connection.
      *
      * Every request gets exactly one complete response, including the ones that are not requests at
-     * all. A client that connects and sends nothing is closed *with* a `404` rather than silently:
-     * a reader that waits for end-of-stream would otherwise be left guessing whether we answered, and
-     * a bare close is indistinguishable from a truncated `200` at the far end. The socket's read
-     * timeout bounds how long that takes, so a silent client cannot hold a worker either.
+     * all, and exactly one `Log.i` describing it. A client that connects and sends nothing is closed
+     * *with* a `404` rather than silently: a reader that waits for end-of-stream would otherwise be
+     * left guessing whether we answered, and a bare close is indistinguishable from a truncated `200`
+     * at the far end. The socket's read timeout bounds how long that takes, so a silent client cannot
+     * hold a worker either.
+     *
+     * The log line is the missing instrument of this tier: without it "the cluster never fetched" and
+     * "we never recorded the fetch" are the same silence. It is written once per request, after the
+     * response is on the wire, and carries the status and the byte count that were promised, so a
+     * served cover, a cover the retention sweep took away and an illegal path are told apart by one
+     * `logcat` grep. Nothing per byte is computed for it: the two writers already know their length.
      */
     private fun handle(client: Socket) {
         client.use { socket ->
@@ -360,24 +441,41 @@ internal class ClusterArtworkHttpServer(
             val requestLine = try {
                 readRequestLine(socket.getInputStream())
             } catch (timeout: SocketTimeoutException) {
+                Log.i(TAG, "cluster artwork http request refused reason=timeout")
                 writeNotFound(out)
                 return
             } catch (failure: IOException) {
+                // The peer went away before it said anything, so there is no request to answer or to
+                // log; `readRequestLine` reports that as null rather than as an exception in practice.
                 return
             }
             // `GET <path> <version>`, exactly: `GETX /covers/…` is not a GET, and a line with a query
             // string or a second path segment cannot match this shape, so neither reaches `resolve`.
             val parts = requestLine?.split(' ')
-            if (parts == null || parts.size != 3 || parts[0] != GET) {
+            // Every refusal answers the same way, and the log line says which one it was: a line that is
+            // not a request names the method that arrived, a cover that is not servable names its path.
+            if (parts == null || parts.size != 3) {
+                Log.i(TAG, "cluster artwork http request refused path=null reason=malformed")
                 writeNotFound(out)
                 return
             }
-            val cover = resolve(parts[1])
+            val path = parts[1]
+            if (parts[0] != GET) {
+                Log.i(TAG, "cluster artwork http request refused path=$path reason=method=${parts[0]}")
+                writeNotFound(out)
+                return
+            }
+            val cover = resolve(path)
             if (cover == null) {
+                // The same 404 as an illegal path, because this is also "this server serves no such
+                // cover": a session it never registered, a name that is not a cover, or a cover the
+                // retention sweep deleted.
+                Log.i(TAG, "cluster artwork http request refused path=$path reason=not-served")
                 writeNotFound(out)
                 return
             }
-            writeCover(out, cover)
+            val served = writeCover(out, cover)
+            Log.i(TAG, "cluster artwork http request method=$GET path=$path status=$HTTP_STATUS_OK bytes=$served")
         }
     }
 
@@ -397,16 +495,20 @@ internal class ClusterArtworkHttpServer(
     }
 
     /**
-     * Writes one `200` with the cover's real byte count and the bytes themselves, streamed from disk.
+     * Writes one `200` with the cover's real byte count and the bytes themselves, streamed from disk,
+     * and answers the number of body bytes promised.
      *
-     * `Content-Length` is the file's length as measured now, so the reader always knows whether it got
-     * everything; `Connection: close` says this socket serves exactly one response, which also lets the
-     * client read to end-of-stream. A copy that fails halfway (the cover was deleted by the retention
-     * sweep while it was being read) closes the socket without the promised tail, and the reader sees a
-     * short response instead of a wrong-length cover. The bytes are never buffered whole: one
-     * [CLUSTER_ARTWORK_HTTP_COPY_BUFFER]-sized block is copied at a time.
+     * The answer is the length the head announced -- the file's length as measured before the copy --
+     * and not a count of what the loop actually wrote: the number a reader compares its body against is
+     * the promised one, so that is the number the request log has to carry. `Content-Length` is measured
+     * now, so the reader always knows whether it got everything; `Connection: close` says this socket
+     * serves exactly one response, which also lets the client read to end-of-stream. A copy that fails
+     * halfway (the cover was deleted by the retention sweep while it was being read) closes the socket
+     * without the promised tail, and the reader sees a short response instead of a wrong-length cover.
+     * The bytes are never buffered whole: one [CLUSTER_ARTWORK_HTTP_COPY_BUFFER]-sized block is copied
+     * at a time.
      */
-    private fun writeCover(out: BufferedOutputStream, cover: File) {
+    private fun writeCover(out: BufferedOutputStream, cover: File): Long {
         val length = cover.length()
         val head = "HTTP/1.1 $HTTP_STATUS_OK $HTTP_REASON_OK\r\n" +
             "Content-Type: $HTTP_CONTENT_TYPE_JPEG\r\n" +
@@ -416,6 +518,7 @@ internal class ClusterArtworkHttpServer(
         out.write(head.toByteArray(Charsets.ISO_8859_1))
         cover.inputStream().use { input -> input.copyTo(out, CLUSTER_ARTWORK_HTTP_COPY_BUFFER) }
         out.flush()
+        return length
     }
 
     /** Writes the one refusal this server has: a bodyless `404`; [handle] closes the socket after it. */
@@ -460,6 +563,15 @@ internal class ClusterArtworkHttpServer(
 
         /** The one method this tier speaks; anything else is a 404. */
         const val GET = "GET"
+
+        /**
+         * What a car gets when the port cannot be bound, named in the refusal line.
+         *
+         * A constant rather than an inline string so the log a bench greps for and the tier the store
+         * falls back to cannot drift apart: `file://` is the tier the 2026-10-09/10-10 runs delivered
+         * with a proved readable path (`root:sdcard_r`) and the cluster still never painted.
+         */
+        const val CLUSTER_ARTWORK_FALLBACK_TIER = "file://"
 
         /** One 8 KiB block per read: a cover is at most 1 MiB, so this is a handful of blocks. */
         const val CLUSTER_ARTWORK_HTTP_COPY_BUFFER = 8192

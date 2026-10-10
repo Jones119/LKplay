@@ -995,8 +995,10 @@ class CarPlayHostActivity : ComponentActivity() {
 
     override fun onDestroy() {
         resetSidePanel()
-        // The cluster push's own teardown: the artwork tier owns a loopback port and the covers held
-        // for the cluster, so both go with the activity rather than waiting for the process to die.
+        // The cluster push's artwork tier is *not* released here: the CarPlay session outlives this
+        // Activity, and the cluster fetches the cover lazily, so the process-wide loopback server and
+        // the covers it serves must stay up until the session really ends. That teardown lives in the
+        // host's own `shutdown`, which calls `VendorClusterBridge.release`; see `detach`.
         runCatching { com.shilapi.xcertplay.media.VendorClusterBridge.detach() }
         nightModeController.pause()
         pictureBinding?.close()
@@ -4363,6 +4365,13 @@ class CarPlayHostActivity : ComponentActivity() {
             oldController?.close()
             val clean = oldController?.awaitClosed(CONTROLLER_CLOSE_TIMEOUT_MILLIS) ?: true
             oldSink?.close()
+            // The CarPlay session is over, so the artwork tier's process-wide state goes with it: the
+            // covers the cluster may still have fetched and the loopback port their URL names. This is
+            // deliberately *not* in `onDestroy` -- an Activity that is merely recreated (or backgrounded)
+            // must leave that URL answering, which is the whole reason the store and the server are
+            // process-scoped. See `VendorClusterBridge.release`.
+            runCatching { com.shilapi.xcertplay.media.VendorClusterBridge.release() }
+                .onFailure { Log.w(TAG, "cluster artwork session release failed", it) }
             airPlayCommandExecutor.shutdown()
             if (terminateProcess) {
                 applicationContext.stopService(Intent(applicationContext, CarPlayVpnService::class.java))

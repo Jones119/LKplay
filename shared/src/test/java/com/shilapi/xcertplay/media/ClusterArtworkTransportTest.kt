@@ -282,15 +282,63 @@ class ClusterArtworkTransportTest {
         assertEquals(UUID.fromString(name.removeSuffix(".jpg")).toString(), name.removeSuffix(".jpg"))
     }
 
+    /**
+     * The cap, with the retention pinned low so the sweep is visible after three handovers.
+     *
+     * What matters is the invariant: after every `add`, the number of covers held is at most the cap, and
+     * the entry handed back for deletion is always the oldest cache copy -- which is what the store then
+     * revokes and deletes. The car runs the same rule with [CLUSTER_ARTWORK_MAX_RETAINED].
+     */
     @Test
     fun onlyTheLastFourCoversStayReadableAndTheEvictedOnesAreHandedBack() {
         val retention = ClusterArtworkRetention(limit = 2)
         assertTrue(retention.add(entry("a")).isEmpty())
-        assertTrue(retention.add(entry("b")).isEmpty())
+        assertTrue("two covers still fit the cap of two", retention.add(entry("b")).isEmpty())
+        assertEquals("and the cap is where holding stops", 2, retention.heldCount())
         // The caller revokes and deletes exactly these.
         assertEquals(listOf("a"), retention.add(entry("c")).map { it.file.name })
-        assertEquals(listOf("b", "c"), retention.clear().map { it.file.name })
+        assertEquals("holding three never means keeping three", 2, retention.heldCount())
+        assertEquals("and the next handover evicts the next oldest", listOf("b"),
+            retention.add(entry("d")).map { it.file.name })
+        assertEquals(listOf("c", "d"), retention.clear().map { it.file.name })
         assertTrue("clearing twice must not hand the same file out again", retention.clear().isEmpty())
+    }
+
+    /**
+     * D2 as a rule: the sweep reclaims cache copies and never a cover that was handed over.
+     *
+     * The distinction the entries carry is what the store sets when the vendor was given a string that
+     * names the file -- the loopback URL and the `file://` path -- because those are the bytes a lazily
+     * fetching cluster can still ask for. With the cap at two, `c` and `d` are handed over and then cache
+     * copies arrive: two of them fit beside the live URLs, and the third reclaims the oldest cache copy
+     * rather than one of the URLs. Only `clear` -- the session end -- hands a delivered cover back.
+     */
+    @Test
+    fun aDeliveredCoverIsNeverReclaimedByTheRetentionSweep() {
+        val retention = ClusterArtworkRetention(limit = 2)
+        assertTrue(retention.add(deliveredEntry("c")).isEmpty())
+        assertTrue(retention.add(deliveredEntry("d")).isEmpty())
+
+        // Three cache copies against a cap of two, and not one of them is a delivered cover: the two
+        // live URLs never count towards the cap, so the cap is only reached by the cache copies -- and it
+        // is the oldest *cache copy*, never a live URL, that comes back when it is exceeded.
+        assertTrue("the first cache copy fits beside the two live URLs",
+            retention.add(entry("x")).isEmpty())
+        assertTrue("and so does the second: two cache copies is the cap",
+            retention.add(entry("y")).isEmpty())
+        assertEquals("the two live URLs are never what the sweep reclaims", 4, retention.heldCount())
+        assertEquals("the oldest cache copy goes, not a URL that is still live", listOf("x"),
+            retention.add(entry("z")).map { it.file.name })
+        assertEquals(
+            "the two live URLs and both remaining cache copies are held",
+            4,
+            retention.heldCount(),
+        )
+        assertEquals(
+            "only the session end releases the delivered covers",
+            listOf("c", "d", "y", "z"),
+            retention.clear().map { it.file.name },
+        )
     }
 
     @Test
@@ -310,6 +358,10 @@ class ClusterArtworkTransportTest {
 
     private fun entry(name: String): ClusterArtworkRetention.Entry =
         ClusterArtworkRetention.Entry(File(folder.root, name), null)
+
+    /** The same entry, as the store records one whose bytes were named by a handed-over URL. */
+    private fun deliveredEntry(name: String): ClusterArtworkRetention.Entry =
+        ClusterArtworkRetention.Entry(File(folder.root, name), null, delivered = true)
 
     private fun navUuidFileName(): String = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.jpg"
 }

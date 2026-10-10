@@ -84,7 +84,13 @@ object VendorClusterBridge {
     @Volatile
     private var repush: ScheduledExecutorService? = null
 
-    /** The cover files this process handed over, in the tiers [ClusterArtworkStore] documents (G5). */
+    /**
+     * The cover files this process handed over, in the tiers [ClusterArtworkStore] documents (G5).
+     *
+     * Process-scoped, not Activity-scoped: [detach] leaves it in place, because the cluster may still
+     * fetch a cover this store handed over after the Activity that produced it is gone. Only [release]
+     * drops it.
+     */
     @Volatile
     private var artworkStore: ClusterArtworkStore? = null
 
@@ -284,6 +290,8 @@ object VendorClusterBridge {
             // Nothing is shown any more, so the covers held for the cluster are revoked and deleted
             // rather than left readable in the cache for the rest of the drive. The override is not
             // kept either: it describes the *next* handover, not a cover the vendor may still fetch.
+            // This is the one place other than [release] where the delivered bytes may go: a null cover
+            // means the vendor is being told there is no artwork, so no URL of ours is in use.
             artworkUri = null
             artworkStore?.clear()
         } else {
@@ -325,23 +333,55 @@ object VendorClusterBridge {
         }
     }
 
+    /**
+     * The one store this process publishes through, created on the first cover.
+     *
+     * Created once and reused across Activity lifetimes (see [detach]): the store's session directory
+     * and the covers the cluster may still fetch belong to the CarPlay session, not to the Activity that
+     * happened to be on screen when the first cover arrived.
+     */
     private fun artworkStore(context: Context): ClusterArtworkStore =
         artworkStore ?: synchronized(pushLock) {
             artworkStore ?: ClusterArtworkStore(context).also { artworkStore = it }
         }
 
     /**
-     * Tears the bridge down with the host activity: the covers go and the loopback port is released.
+     * Detaches the bridge from the host Activity, and deliberately leaves the artwork session running.
      *
-     * The HTTP tier is the reason this exists. Until it did, a session's covers were files nothing
-     * could reach without the Uri, so leaving them in place cost storage and nothing else; now each
-     * handover is also a URL on a port this process owns, and `onDestroy` is the moment nothing will
-     * fetch it any more. [ClusterArtworkStore.close] revokes and deletes the retained covers *and*
-     * closes the listening socket, and the store is dropped so a later `setArtwork` builds a fresh one
-     * on a fresh port instead of reusing a closed server. The vendor is told nothing here: the cluster
-     * keeps whatever it last painted, which is the same behaviour a teardown had before.
+     * The cover's reader fetches **lazily**: the cluster may ask for the URL minutes after the track it
+     * belongs to, and the CarPlay session outlives any one `CarPlayHostActivity` (the user backgrounds
+     * the app, or the activity is recreated by a rotation or a memory trim). Releasing the loopback port
+     * here is therefore what turned a perfectly healthy `cluster artwork tier=http …` line into a URL
+     * answering `connection refused` -- the URL is written when it is produced, and nothing about that
+     * line says the server is still up. So this method drops only what is *Activity*-scoped: the change
+     * gate, and the Uri of the activity that is going away. The store, its retained covers and the
+     * process-wide server stay, so the next `setArtwork` -- and the re-push of the payload the vendor
+     * already holds -- keeps naming a socket that is still bound.
+     *
+     * [release] is the other half: it ends the artwork session, and the host calls it when the session
+     * really ends. Both are idempotent, and neither throws: a teardown that fails must never take the
+     * caller's `onDestroy` with it.
      */
     fun detach() {
+        artworkUri = null
+        artworkUriChanges = null
+    }
+
+    /**
+     * Ends the artwork session for good: the retained covers go and the loopback port is released.
+     *
+     * The counterpart of [attach], called from the host's own shutdown path -- the user exiting, the
+     * controller closing, a wired/wireless restart -- and *not* from `onDestroy`, which only means one
+     * Activity instance is gone while the session continues. Everything the artwork tiers own is
+     * process-wide and must outlive those instances: the store (its session directory and the covers
+     * the cluster may still fetch) and the loopback server (the port its URL names). Only here is it
+     * known that no URL of this process will be fetched again, so only here is it right to delete the
+     * bytes and close the socket. Idempotent, and the store is dropped so a later session builds a
+     * fresh one on a fresh port instead of reusing a released server; the vendor is told nothing, so the
+     * cluster keeps whatever it last painted -- the same behaviour a teardown had before the HTTP tier
+     * existed.
+     */
+    fun release() {
         val store = synchronized(pushLock) {
             artworkStore.also { artworkStore = null }
         }
@@ -349,6 +389,11 @@ object VendorClusterBridge {
         artworkUriChanges = null
         runCatching { store?.close() }
             .onFailure { Log.w(TAG, "cluster artwork store close failed", it) }
+        // The port is the process's, not the store's, which is why it is released here and not in
+        // `ClusterArtworkStore.close`: that method also runs for paths that only mean "this store is
+        // done", and closing the shared socket there is the D1 defect itself.
+        runCatching { releaseClusterArtworkServer() }
+            .onFailure { Log.w(TAG, "cluster artwork server release failed", it) }
     }
 
     /**
