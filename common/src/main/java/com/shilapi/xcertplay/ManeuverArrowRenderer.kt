@@ -11,8 +11,8 @@ import androidx.core.content.ContextCompat
  * It is **no longer on the instrument-cluster path and must not be put back on it**. The cluster does
  * not take an image of an arrow: the vendor's `updateTurnByTurnArrow(Bitmap)` is an empty method, and
  * the image route the head unit's own HiCar bridge uses (`updateDriveDirectionImage`) ends in its own
- * HUD, which this car does not have. The cluster is sent the vendor's integer `ARROW_ICON_NAVI_*` id
- * instead, mapped in `com.shilapi.xcertplay.media.clusterArrowId` (docs/_digest/46 §2/§3).
+ * HUD, which this car does not have. The cluster is sent the factory navigation's integer arrow id
+ * instead, mapped in `com.shilapi.xcertplay.media.clusterArrowId` (docs/_digest/46 §3/§10).
  *
  * The shared mapping behind both sides stays in one place, [NavigationWidgetUpdater.arrow], which the
  * home-screen widget draws as a drawable directly.

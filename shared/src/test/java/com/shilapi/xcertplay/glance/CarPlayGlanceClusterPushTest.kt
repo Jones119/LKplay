@@ -71,11 +71,11 @@ class CarPlayGlanceClusterPushTest {
         assertTrue("the push thread must not keep the process alive", push.thread.isDaemon)
         assertFalse("the push ran while CarPlayGlance's monitor was held", push.heldMonitor)
         // The snapshot itself still arrives, whole: the hand-off moved the call, not the payload.
-        // Maneuver index 7 carries Apple type 2 (a right turn), which is vendor arrow id 6.
+        // Maneuver index 7 carries Apple type 2 (a right turn), which is factory arrow id 103.
         assertEquals(2, push.snapshot.maneuverType)
         assertEquals(350, push.snapshot.distanceMeters)
         assertEquals("Main Street", push.snapshot.road)
-        assertEquals(6, clusterGuidanceCard(push.snapshot)!!.arrowId)
+        assertEquals(103, clusterGuidanceCard(push.snapshot)!!.arrowId)
         assertEquals(600, clusterGuidanceCard(push.snapshot)!!.remainingSeconds)
 
         // A second frame goes to the same thread: the pushes are serialised in order, not fanned out.

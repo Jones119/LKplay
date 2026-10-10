@@ -14,6 +14,9 @@ import java.util.concurrent.TimeUnit
 /** The adb override for the cluster push; [VendorClusterBridge.enabled] documents its precedence. */
 private const val CLUSTER_SWITCH = "debug.diplay.cluster"
 
+/** The adb override for the arrow id itself; [parseArrowOverride] documents its precedence. */
+private const val CLUSTER_ARROW = "debug.diplay.arrow"
+
 /**
  * Pushes what CarPlay is playing, and where it is guiding, into the head unit's instrument cluster.
  *
@@ -31,12 +34,16 @@ private const val CLUSTER_SWITCH = "debug.diplay.cluster"
  * `updateCurrentProgress(long)`.
  *
  * Three of those signatures carry the semantics the cluster actually renders (docs/_digest/46 §1):
- * the arrow is an `ARROW_ICON_NAVI_*` integer id, both distances are integer metres, and the ETA is the
+ * the arrow is an integer icon id, both distances are integer metres, and the ETA is the
  * remaining time in integer seconds. The two image-shaped members of the surface are decoys:
  * `updateTurnByTurnArrow(Bitmap)` is an empty method in the vendor's implementation, and the image
  * route the head unit's own HiCar bridge uses ends in its own HUD, not in this API -- the head unit
  * has no HUD at all. `notifyTurnByTurnStarted()` is worse than useless: it submits state 0, which the
  * service rejects with `RuntimeException("Navigation state is not correct.")`.
+ *
+ * The arrow id itself is the factory navigation's family (101-143), not the `ARROW_ICON_NAVI_*` family
+ * the reference implementation used: the cluster renders the two differently, and only the factory's
+ * comes out white and centred (docs/_digest/46 §10, [clusterArrowId]).
  *
  * `IPlaybackInfo` has no concrete implementation in the jar, but it is a plain Java interface, so a
  * dynamic proxy supplies it. Everything is reflective and defensive: a failure logs and disables the
@@ -109,6 +116,9 @@ object VendorClusterBridge {
 
     /** Method names already reported as unmatched, so a per-frame call cannot flood logcat. */
     private val missingOverloads = MissingOverloadReport()
+
+    /** The last arrow announced, so the bench log gets one line per change and not one per frame. */
+    private val arrowChanges = ClusterArrowChangeGate()
 
     /** Called once from the app side, with the persisted "push to the cluster" setting. */
     fun attach(context: Context, enabledFromSettings: Boolean) {
@@ -264,12 +274,22 @@ object VendorClusterBridge {
     fun pushGuidance(snapshot: CarPlayGlance.Snapshot) {
         if (!enabled) return
         val context = appContext ?: return
-        val card = clusterGuidanceCard(snapshot)
+        // Read per frame rather than cached, so `adb shell setprop debug.diplay.arrow 102` reaches the
+        // very next card of a running session -- the same rule the cluster switch follows. An unset,
+        // empty or unparseable value leaves the mapping in charge.
+        val forced = parseArrowOverride(clusterArrowProperty())
+        val card = clusterGuidanceCard(snapshot, forced)
         if (card == null) {
             stopGuidance()
             return
         }
         val target = naviInteraction(context) ?: return
+        // One line per *change*: this runs per guidance frame, and a per-frame line would bury every
+        // other cluster line during an on-car sweep.
+        if (arrowChanges.shouldLog(card.arrowId, forced != null)) {
+            val source = if (forced != null) CLUSTER_ARROW else "mapping"
+            Log.i(TAG, "cluster arrow id=${card.arrowId} source=$source")
+        }
         submitClusterCard(guidanceSink(target), card)
         cardOnCluster = true
     }
@@ -628,10 +648,28 @@ internal fun resolveClusterBridgeEnabled(settingEnabled: Boolean, propertyValue:
  * per lookup rather than caching it so `setprop` applies to a running session; the JVM unit tests have
  * no such class, and get null, which leaves the persisted setting in charge.
  */
-internal fun clusterSwitchProperty(): String? = runCatching {
+internal fun clusterSwitchProperty(): String? = debugProperty(CLUSTER_SWITCH)
+
+/**
+ * Reads `debug.diplay.arrow`, the bench override for the arrow id.
+ *
+ * This is what makes the on-car sweep cheap: the cluster's own rendering of an id can be looked at by
+ * driving with `adb shell setprop debug.diplay.arrow <id>`, without rebuilding the app, and without
+ * waiting for a maneuver of the matching Apple type to come up on the route. Unset -- the state after
+ * every ignition, because `setprop` does not persist -- leaves the mapping in charge (see
+ * [parseArrowOverride] and [clusterArrowId]).
+ */
+internal fun clusterArrowProperty(): String? = debugProperty(CLUSTER_ARROW)
+
+/**
+ * One `debug.diplay.*` property, read reflectively because `android.os.SystemProperties` is not part of
+ * the public SDK. A missing class (the JVM unit tests) or a hidden-API refusal reads as "unset", which
+ * every caller treats as "no override".
+ */
+private fun debugProperty(name: String): String? = runCatching {
     val get = Class.forName("android.os.SystemProperties")
         .getMethod("get", String::class.java, String::class.java)
-    get.invoke(null, CLUSTER_SWITCH, "") as? String
+    get.invoke(null, name, "") as? String
 }.getOrNull()
 
 /**
@@ -647,6 +685,37 @@ internal class MissingOverloadReport {
 
     /** True the first time a method name is seen, false for every repeat. */
     fun shouldReport(method: String): Boolean = reported.add(method)
+}
+
+/**
+ * Remembers the last arrow announcement, so a guidance frame logs one line per *change*.
+ *
+ * The push runs per frame -- about twice a second while the iPhone is updating -- so an unconditional
+ * `cluster arrow id=...` line would drown the on-car check, which greps for exactly that line. The key
+ * includes where the id came from, because "the override stopped applying" is worth seeing even when the
+ * id it was forcing happens to equal the mapped one.
+ */
+internal class ClusterArrowChangeGate {
+    private var last: String? = null
+
+    /**
+     * True the first time [arrowId] is announced from [fromOverride], false for every repeat.
+     *
+     * Synchronised because the push can be observed from a test thread, while the real pushes all run
+     * on the single cluster worker thread.
+     */
+    @Synchronized
+    fun shouldLog(arrowId: Int, fromOverride: Boolean): Boolean {
+        val key = "$arrowId/${if (fromOverride) OVERRIDE else MAPPING}"
+        if (key == last) return false
+        last = key
+        return true
+    }
+
+    private companion object {
+        const val OVERRIDE = "override"
+        const val MAPPING = "mapping"
+    }
 }
 
 /**
@@ -771,45 +840,60 @@ internal object VendorMethodMatcher {
 // the JVM -- they are the two rules that decide what the driver actually sees (docs/_digest/46 §3, G5).
 // ---------------------------------------------------------------------------------------------
 
-/** `Turn.ARROW_ICON_NAVI_STRAIGHT`. */
-private const val ARROW_STRAIGHT = 1
-
-/** `Turn.ARROW_ICON_NAVI_TURN_BACK_L` / `..._R`, chosen by driving side. */
-private const val ARROW_TURN_BACK_LEFT = 2
-private const val ARROW_TURN_BACK_RIGHT = 3
-
-/** `Turn.ARROW_ICON_NAVI_TURN_R` / `..._L`. */
-private const val ARROW_TURN_RIGHT = 6
-private const val ARROW_TURN_LEFT = 7
-
-/** `Turn.ARROW_ICON_NAVI_KEEP_R` / `..._L`. */
-private const val ARROW_KEEP_RIGHT = 10
-private const val ARROW_KEEP_LEFT = 11
-
-/** `Turn.ARROW_ICON_NAVI_EXIT_R`. */
-private const val ARROW_EXIT_RIGHT = 12
-
-/** `Turn.ARROW_ICON_NAVI_ROUND`. */
-private const val ARROW_ROUND = 15
-
-/** `Turn.ARROW_ICON_NAVI_DEST`. */
-private const val ARROW_DESTINATION = 17
-
-/** `Turn.ARROW_ICON_NAVI_FERRY`. */
-private const val ARROW_FERRY = 18
-
-/** `Turn.ARROW_ICON_NAVI_EXIT_L`, which is also `..._DEST_1`: the vendor ships the duplicate value 19. */
-private const val ARROW_EXIT_LEFT = 19
-
-/** `Turn.ARROW_ICON_NAVI_THE_ROUND_EXIT`, used for both a roundabout and leaving one. */
-private const val ARROW_ROUND_EXIT = 29
-
 /**
- * The value the vendor reads as "hide this icon slot" (`ItemsBuilder.commonIcon(-1)`, docs/_digest/46 §1.3(d)).
+ * The arrow-id family the cluster paints white and centred: the car's own factory navigation's.
  *
- * `0` means the opposite -- a *visible* slot drawn with icon 0 -- so it must never stand in for "no arrow".
+ * These are *not* the `ARROW_ICON_NAVI_*` ids (1-45) the working reference implementation used. The
+ * factory navigation app (`com.baidu.naviauto`, pulled from the car and decompiled) drives the very same
+ * API object we do -- `DimInteraction.create(context).getNaviInteraction()`, then
+ * `updateTurnByTurnArrow(arrowId)` -- and the only difference is the family it passes: its
+ * `NaviDashboardManager` (`com.baidu.a.a`, static map at lines 30-87) uses 101-143. The cluster renders
+ * the two families differently: EasyPlay's family came out **yellow and offset to the left**, the
+ * factory's is **white and centred** (driver report, then confirmed in that bytecode; docs/_digest/46 §10).
+ *
+ * The names below are the factory's own icon names, translated one to one; the number is the wire id.
+ * Only the ids this bridge can produce are declared -- [clusterArrowId] names the factory ids that no
+ * Apple maneuver reaches, and the bench override is how those get tried.
  */
-private const val ARROW_HIDDEN = -1
+
+/** `turn_start`: the icon the factory sends when a route has just started. */
+private const val ARROW_TURN_START = 101
+
+/** `turn_left` (the factory also uses it for the two- and three-branch left turns). */
+private const val ARROW_TURN_LEFT = 102
+
+/** `turn_right` (likewise for the two- and three-branch right turns). */
+private const val ARROW_TURN_RIGHT = 103
+
+/** `turn_left_front` / `turn_left_side` / `turn_branch_left`: keeping or bearing left. */
+private const val ARROW_BRANCH_LEFT = 104
+
+/** `turn_right_front` / `turn_right_side` / `turn_branch_right`: keeping or bearing right. */
+private const val ARROW_BRANCH_RIGHT = 105
+
+/** `turn_left_back` / `turn_right_back`, chosen by driving side; `turn_back` is the generic u-turn. */
+private const val ARROW_TURN_BACK_LEFT = 106
+private const val ARROW_TURN_BACK_RIGHT = 107
+private const val ARROW_TURN_BACK = 108
+
+/** `turn_front` / `turn_left_side_main` / `turn_branch_center`: straight on. */
+private const val ARROW_STRAIGHT = 109
+
+/** `turn_ring`: entering or following the roundabout. */
+private const val ARROW_ROUND = 111
+
+/** `turn_ring_out` / `turn_ring_front`: leaving the roundabout. */
+private const val ARROW_ROUND_EXIT = 112
+
+/** `turn_dest`: arrival at the destination. */
+private const val ARROW_DESTINATION = 115
+
+/** `turn_ring_left*` / `turn_ring_right*`: the ring taken from the left / from the right. */
+private const val ARROW_ROUND_LEFT = 141
+private const val ARROW_ROUND_RIGHT = 142
+
+/** `turn_ring_back`: the ring taken back the way the driver came. */
+private const val ARROW_ROUND_BACK = 143
 
 /** The text the reference implementation shows while the iPhone guides to the route's start. */
 private const val ROAD_TO_ROUTE_START = "前往路线"
@@ -884,43 +968,79 @@ internal fun clearClusterCard(sink: ClusterGuidanceSink) {
 }
 
 /**
- * Apple's maneuver type as one of the vendor's 45 `ARROW_ICON_NAVI_*` ids, or null when there is none.
+ * Apple's maneuver type as one of the factory family's icon ids, or null when the family has none.
  *
- * The table is the working reference implementation's (`LegacyLynkNavigationBridge.arrowFor`,
- * docs/_digest/46 §3), which is the only evidence that a given Apple type maps to a given icon.
+ * Only the id family changed here; the semantics are the ones we already implemented, which are the
+ * working reference's (docs/_digest/46 §3) and read value for value as Apple's own
+ * `RouteGuidanceManeuverType` (`CPManeuverType`): 1/20/47 are the left turns, 13/22/49/52 the
+ * keep/slight/branch left group, 6 the roundabout, 7 and 28..46 leaving it, 10/12/24/25/27 arrival,
+ * 15/16/17 the ferries, 4/18/26 the u-turns.
+ *
+ * Four decisions are worth spelling out, because the factory's vocabulary is richer than Apple's:
+ *  - the u-turn types branch on [drivingSide] -- 106 in left-hand traffic, 107 in right-hand -- and fall
+ *    back to the family's generic u-turn 108 for any other side. 108 asks for no direction, so it is the
+ *    one value that cannot send the driver the wrong way round, which is why an unknown side no longer
+ *    clears the card;
+ *  - Apple's "u-turn at the roundabout" (19) is the ring taken back the way the driver came, i.e. the
+ *    factory's `turn_ring_*back` group, and follows the same side branches: 141 / 142 / 143. The old
+ *    table sent it to the plain roundabout glyph, which loses the fact that the driver comes back;
+ *  - the family has **no ferry glyph**, so the ferry maneuvers (15/16/17) take the straight-on 109: a
+ *    crossing continues ahead, and refusing the card would hide the road, distance and ETA that stay
+ *    true for the whole crossing (a straight arrow can only be wrong about which way to turn, which is
+ *    not what a ferry leg asks);
+ *  - `turn_via_*` (110, a waypoint) and `turn_tollgate` (114) exist in the factory's vocabulary but have
+ *    no Apple maneuver type at all, so nothing maps to them; `turn_along` (120, "continue along the
+ *    road") is the closer glyph for Apple's follow-road (5) but was left out to keep the translation of
+ *    the old table row for row. All three are reachable through the bench override below, which is
+ *    exactly how they should be tried on the car.
+ *
  * Null is a *decision*, not a gap: an unknown type clears the card, because the alternative -- a
  * straight-ahead arrow -- tells the driver to keep going when the iPhone said something we do not
- * understand. The three u-turn types are the only ones whose icon depends on [drivingSide], and any
- * side other than left-hand (0) or right-hand (1) traffic is unmapped for the same reason.
+ * understand.
  *
- * [proceedToRoute] short-circuits all of it with [ARROW_HIDDEN]: being sent to the route's start is
- * not a turn, so the slot is hidden rather than filled with a guess.
+ * [proceedToRoute] is the factory's `turn_start` (101), no longer a hidden slot: 101 is exactly what the
+ * factory navigation sends when a route starts, and the slot then carries the same start icon as the
+ * car's own navigation. (`-1` still means "hide this icon slot" -- `commonIcon(-1)`, docs/_digest/46
+ * §1.3(d) -- and the bench override can still send it.)
  */
 internal fun clusterArrowId(type: Int?, drivingSide: Int, proceedToRoute: Boolean): Int? {
-    if (proceedToRoute) return ARROW_HIDDEN
+    if (proceedToRoute) return ARROW_TURN_START
     val maneuver = type ?: return null
     return when (maneuver) {
-        1, 20, 47, 49 -> ARROW_TURN_LEFT
-        2, 21, 48, 50 -> ARROW_TURN_RIGHT
+        1, 20, 47 -> ARROW_TURN_LEFT
+        2, 21, 48 -> ARROW_TURN_RIGHT
         3, 5 -> ARROW_STRAIGHT
         4, 18, 26 -> when (drivingSide) {
             0 -> ARROW_TURN_BACK_LEFT
             1 -> ARROW_TURN_BACK_RIGHT
-            else -> null
+            else -> ARROW_TURN_BACK
         }
-        6, 19 -> ARROW_ROUND
-        7 -> ARROW_ROUND_EXIT
-        in 28..46 -> ARROW_ROUND_EXIT
+        6 -> ARROW_ROUND
+        7, in 28..46 -> ARROW_ROUND_EXIT
         10, 12, 24, 25, 27 -> ARROW_DESTINATION
-        13, 52 -> ARROW_KEEP_LEFT
-        14, 53 -> ARROW_KEEP_RIGHT
-        15, 16, 17 -> ARROW_FERRY
-        22 -> ARROW_EXIT_LEFT
-        23 -> ARROW_EXIT_RIGHT
-        // 8, 9, 11, everything above 53 and whatever Apple adds later: no icon, so no card.
+        13, 22, 49, 52 -> ARROW_BRANCH_LEFT
+        14, 23, 50, 53 -> ARROW_BRANCH_RIGHT
+        15, 16, 17 -> ARROW_STRAIGHT
+        19 -> when (drivingSide) {
+            0 -> ARROW_ROUND_LEFT
+            1 -> ARROW_ROUND_RIGHT
+            else -> ARROW_ROUND_BACK
+        }
+        // 8, 9, 11, 51, everything above 53 and whatever Apple adds later: no icon, so no card.
         else -> null
     }
 }
+
+/**
+ * The arrow id `debug.diplay.arrow` forces, or null when it should not force anything.
+ *
+ * An unset, empty, whitespace-only or unparseable value is "use the mapping", so a typo during a bench
+ * session changes nothing on the road. Any integer is accepted, deliberately out of range included:
+ * the point of the override is to reach ids the mapping never produces (110, 114, 120) and `-1`, which
+ * hides the icon slot. Read through [clusterArrowProperty], i.e. reflectively, never through
+ * `android.os.SystemProperties`, which is hidden API.
+ */
+internal fun parseArrowOverride(propertyValue: String?): Int? = propertyValue?.trim()?.toIntOrNull()
 
 /**
  * A road name the cluster can take: ISO control characters dropped, then cut to [MAX_ROAD_BYTES] UTF-8
@@ -973,11 +1093,20 @@ internal fun clusterRoad(snapshot: CarPlayGlance.Snapshot, proceedToRoute: Boole
  * `[0, 2^31)`, or a remaining time outside `[0, 2147483618)`. The cluster draws its own placeholder
  * (`0 m`, `<1min`) for a slot it was not given, so a half-filled card is worse than none: it looks like
  * a measurement. Missing values are therefore never rounded down to zero -- they refuse the card.
+ *
+ * [forcedArrowId] is the bench override of [parseArrowOverride] and wins over the mapping *including*
+ * when the mapping has no answer: sweeping the cluster's vocabulary means driving ids that no Apple
+ * maneuver produces, and that is precisely the case the mapping refuses. Nothing else about the gate
+ * changes, so an override still needs a displayable route state, a distance and an ETA.
  */
-internal fun clusterGuidanceCard(snapshot: CarPlayGlance.Snapshot): ClusterGuidanceCard? {
+internal fun clusterGuidanceCard(
+    snapshot: CarPlayGlance.Snapshot,
+    forcedArrowId: Int? = null,
+): ClusterGuidanceCard? {
     val state = snapshot.routeState ?: return null
     if (state !in DISPLAYABLE_ROUTE_STATES) return null
-    val arrow = clusterArrowId(snapshot.maneuverType, snapshot.drivingSide, snapshot.proceedToRoute) ?: return null
+    val mapped = clusterArrowId(snapshot.maneuverType, snapshot.drivingSide, snapshot.proceedToRoute)
+    val arrow = forcedArrowId ?: mapped ?: return null
     if (snapshot.distanceMeters < 0) return null
     val remainingMeters = snapshot.remainingMeters?.takeIf { it in 0..MAX_DISTANCE_METERS } ?: return null
     val remainingSeconds = snapshot.remainingSeconds?.takeIf { it in 0 until MAX_ETA_SECONDS } ?: return null
