@@ -9,6 +9,52 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AirPlayInfoPlistTest {
+    /**
+     * The media entry is what iOS uses for music, and the two links get different formats from it: a
+     * wired session ran 134.9 pkt/s / 1565 kbps of LPCM while a wireless one ran 47.8 pkt/s / 252 kbps
+     * of AAC-LC (docs/_digest/51). The override swaps exactly that entry plus the buffered stream, so
+     * one ignition window can prove or reject the attribution without touching the microphone,
+     * telephony or speech-recognition formats (removing those made iOS build no audio stream at all).
+     */
+    @Test
+    fun theAudioFormatOverrideMovesOnlyTheMediaEntry() {
+        val config = AirPlayConfig(
+            deviceName = "test", deviceId = "02:00:00:00:00:02", btMac = "02:00:00:00:00:02",
+            sourceVersion = "366.0", main = AirPlayDisplayConfig(widthPixels = 1280, heightPixels = 720),
+            microphone = true, mainBufferedAudio = true,
+        )
+        fun entries(info: Map<String, Any?>): List<Map<*, *>> =
+            (info["audioFormats"] as List<*>).map { it as Map<*, *> }
+
+        fun media(override: AudioFormatOverride): Map<*, *> =
+            entries(AirPlayInfoPlist.build(config, override)).single {
+                it["type"] == 100 && it["audioType"] == "media"
+            }
+
+        // Shipped: the media entry offers PCM, and AAC rides on type 102 (plus 103 when buffered).
+        val shipped = entries(AirPlayInfoPlist.build(config, AudioFormatOverride.AUTO))
+        assertEquals(0x8000 or 0xc000 or 0x3fc, media(AudioFormatOverride.AUTO)["audioOutputFormats"])
+        assertTrue(shipped.any { it["type"] == 102 && it["audioType"] == "media" })
+        assertTrue(shipped.any { it["type"] == 103 && it["audioType"] == "media" })
+
+        // Forcing AAC: the media entry becomes AAC-LC, and the other music streams stay.
+        val forcedAac = entries(AirPlayInfoPlist.build(config, AudioFormatOverride.NO_PCM))
+        assertEquals(0x800000, media(AudioFormatOverride.NO_PCM)["audioOutputFormats"])
+        assertTrue(forcedAac.any { it["type"] == 102 && it["audioType"] == "media" })
+
+        // Forcing PCM: no AAC music stream is advertised at all, so a wireless session must use PCM.
+        val forcedPcm = entries(AirPlayInfoPlist.build(config, AudioFormatOverride.NO_AAC))
+        assertEquals(0x8000 or 0xc000 or 0x3fc, media(AudioFormatOverride.NO_AAC)["audioOutputFormats"])
+        assertFalse(forcedPcm.any { it["type"] == 102 })
+        assertFalse(forcedPcm.any { it["type"] == 103 })
+
+        // Everything the microphone depends on is identical in all three modes.
+        for (override in AudioFormatOverride.values()) {
+            val telephony = entries(AirPlayInfoPlist.build(config, override)).single { it["audioType"] == "telephony" }
+            assertEquals(0x70004154, telephony["audioInputFormats"])
+        }
+    }
+
     @Test
     fun defaultDisplayIncludesFullViewAndSafeAreas() {
         val info = AirPlayInfoPlist.build(

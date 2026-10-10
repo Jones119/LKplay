@@ -28,7 +28,7 @@ object AirPlayInfoPlist {
     fun features(config: AirPlayConfig): Long =
         if (config.disableAudioOutput) CARPLAY_FEATURES_NO_AUDIO else CARPLAY_FEATURES
 
-    fun build(config: AirPlayConfig): Map<String, Any?> {
+    fun build(config: AirPlayConfig, audioFormatOverride: AudioFormatOverride = AudioFormatOverride.AUTO): Map<String, Any?> {
         val displays = arrayListOf<Any?>(
             displayEntry(config.main, STREAM_TYPE_MAIN_SCREEN, MAIN_UUID),
         )
@@ -55,6 +55,7 @@ object AirPlayInfoPlist {
                 config.microphone,
                 config.mainBufferedAudio,
                 config.microphoneOpus,
+                audioFormatOverride,
             )
         }
         info["extendedFeatures"] = listOf("vocoderInfo", "enhancedRequestCarUI")
@@ -128,6 +129,7 @@ object AirPlayInfoPlist {
         microphone: Boolean,
         mainBuffered: Boolean = false,
         microphoneOpus: Boolean = true,
+        override: AudioFormatOverride = AudioFormatOverride.AUTO,
     ): List<Map<String, Any?>> {
         fun format(type: Int, audioType: String, outputFormats: Int, inputFormats: Int? = null): Map<String, Any?> {
             val entry = linkedMapOf<String, Any?>(
@@ -155,17 +157,26 @@ object AirPlayInfoPlist {
         // is insufficient while libopus or the vendored Java encoder can still produce packets.
         val wirelessInput = if (microphone) (if (microphoneOpus) pcmMono or opus else pcmMono) else null
 
+        // The media entry is the one iOS uses for music (measured: type 100/LPCM wired, type 102/AAC
+        // wireless), so the override moves only that entry plus the buffered stream. Everything else -
+        // microphone input formats, telephony, speech recognition - stays as shipped, because removing
+        // formats there made iOS build no audio stream at all (docs 27/39).
+        val mediaOutput = if (override == AudioFormatOverride.NO_PCM) aacLc else pcm
+
         return listOf(
             format(100, "compatibility", pcm, pcmInput),
             format(101, "compatibility", pcm),
             format(100, "default", pcm or opus, wirelessInput),
             format(100, "alert", pcm or opus),
-            format(100, "media", pcm),
+            format(100, "media", mediaOutput),
             format(100, "telephony", pcmMono or opus, wirelessInput),
             format(100, "speechRecognition", pcmMono or opus, wirelessInput),
             format(101, "default", pcm or opus),
-            format(102, "media", aacLc),
-        ) + if (mainBuffered) {
+        ) + if (override == AudioFormatOverride.NO_AAC) {
+            emptyList()
+        } else {
+            listOf(format(102, "media", aacLc))
+        } + if (mainBuffered && override != AudioFormatOverride.NO_AAC) {
             // The buffered music stream; the iPhone (iOS 27) opened it only with AAC-LC, not PCM or ALAC.
             listOf(format(BufferedAudioStream.STREAM_TYPE, "media", aacLc))
         } else emptyList()
