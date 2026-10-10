@@ -1,11 +1,15 @@
 package com.shilapi.xcertplay.media
 
 import android.content.Context
+import android.os.SystemClock
 import android.util.Log
 import com.shilapi.xcertplay.glance.CarPlayGlance
 import java.lang.reflect.InvocationHandler
 import java.lang.reflect.Method
 import java.lang.reflect.Proxy
+import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.TimeUnit
 
 /** The adb override for the cluster push; [VendorClusterBridge.enabled] documents its precedence. */
 private const val CLUSTER_SWITCH = "debug.diplay.cluster"
@@ -54,14 +58,28 @@ object VendorClusterBridge {
     @Volatile
     private var appContext: Context? = null
 
-    @Volatile
-    private var dim: Any? = null
-
-    @Volatile
-    private var media: Any? = null
+    /** The vendor objects resolved so far; [ClusterInteractionCache] documents the invalidation rule. */
+    private val interactions = ClusterInteractionCache()
 
     @Volatile
     private var navi: Any? = null
+
+    /** Serialises the media push: it now runs from the iAP2 thread, the main thread and the timer. */
+    private val pushLock = Any()
+
+    /** The last payload the vendor was handed, so an unchanged one is not dispatched again (G9). */
+    private val mediaPushGate = ClusterMediaPushGate()
+
+    /** When the next while-playing re-push or post-failure retry is due (G7). */
+    private val pushSchedule = ClusterPushSchedule()
+
+    /** The while-playing re-push timer, created with the first push (G7). */
+    @Volatile
+    private var repush: ScheduledExecutorService? = null
+
+    /** The cover files this process handed over, in the tiers [ClusterArtworkStore] documents (G5). */
+    @Volatile
+    private var artworkStore: ClusterArtworkStore? = null
 
     /**
      * True once a complete card of ours reached the cluster, so a later stop clears *our* card only.
@@ -118,51 +136,121 @@ object VendorClusterBridge {
     val enabled: Boolean
         get() = appContext != null && resolveClusterBridgeEnabled(settingEnabled, clusterSwitchProperty())
 
+    /**
+     * Submits what the iPhone is playing.
+     *
+     * Two things keep the cost of this down and the cluster correct (docs/_digest/45 G7/G9): an
+     * unchanged payload never reaches the vendor's binder again, and a running timer repeats the last
+     * payload every few seconds so a service that restarted -- or a cluster screen that was switched
+     * away and back -- fills in again without waiting for the next track. The payload's identity is
+     * exactly what the vendor can see, so an update that only moved `artworkTransferId` or `sourceApp`
+     * costs nothing.
+     */
     fun pushMedia(now: CarPlayNowPlaying) {
         lastMedia = now
         if (!enabled) return
+        startRepushLoop()
+        synchronized(pushLock) { dispatchMedia(now, force = false) }
+    }
+
+    /**
+     * Hands [now] to the vendor, or skips it as a duplicate unless [force].
+     *
+     * A failed call is a *state* problem, not a per-call one: the vendor can return an interaction
+     * object whose internal DI is null (`getMediaInteraction() mMediaDI is null` exists in its own
+     * jar, docs/_digest/45 §1.8), and a restarted service leaves a dead binder behind. Both look
+     * identical from here -- silence -- so the cached objects are dropped and the same payload is
+     * retried on the next update and by the shorter post-failure timer, instead of being remembered
+     * as "sent" forever.
+     */
+    private fun dispatchMedia(now: CarPlayNowPlaying, force: Boolean) {
         val context = appContext ?: return
+        val update = clusterMediaUpdate(now, artworkUri)
+        if (!force && !mediaPushGate.shouldPush(update)) return
         val target = mediaInteraction(context) ?: return
         val status = if (now.playing) PLAYBACK_STATUS_PLAYING else PLAYBACK_STATUS_PAUSED
         val info = playbackInfo(context, now, status) ?: return
-        call(target, "updatePlaybackInfo", info)
-        call(target, "updateCurrentSourceType", SOURCE_TYPE_ONLINE)
-        now.elapsedMillis?.let { call(target, "updateCurrentProgress", it) }
+        var sent = call(target, "updatePlaybackInfo", info)
+        sent = call(target, "updateCurrentSourceType", SOURCE_TYPE_ONLINE) && sent
+        now.elapsedMillis?.let { sent = call(target, "updateCurrentProgress", it) && sent }
+        if (sent) {
+            mediaPushGate.notePushed(update)
+            pushSchedule.notePushed(elapsedNow())
+        } else {
+            mediaPushGate.forget()
+            interactions.invalidateMedia()
+            pushSchedule.noteFailed(elapsedNow())
+            Log.w(TAG, "cluster media push failed; cached vendor interaction dropped for re-resolution")
+        }
+    }
+
+    /**
+     * One tick of the while-playing re-push (G7).
+     *
+     * The reference refreshes its presentation every 10 s (`PRESENTATION_REFRESH_TIMEOUT_MS`); a
+     * short-lived `NowPlayingUpdate` stream and a cluster that was switched away both end in the same
+     * blank or stale cover, so the same snapshot is repeated on that cadence while the iPhone plays.
+     * The tick runs at [CLUSTER_REPUSH_TICK_MILLIS] and [pushSchedule] decides whether anything is due
+     * -- a failure shortens the wait to [CLUSTER_REPUSH_RETRY_MILLIS] -- which keeps the timing rule
+     * unit-testable and the timer itself trivial.
+     */
+    internal fun repushTick() {
+        if (!enabled) return
+        val now = lastMedia ?: return
+        if (!pushSchedule.isDue(elapsedNow(), now.playing)) return
+        // Logged before the dispatch, and worded as "due": whether anything actually reached the vendor
+        // is what `dispatchMedia` reports, and the two must not be conflated in a log that the on-car
+        // check greps.
+        Log.i(TAG, "cluster repush due title=${now.title} playing=${now.playing} artwork=$artworkUri")
+        synchronized(pushLock) { dispatchMedia(now, force = true) }
+    }
+
+    private fun startRepushLoop() {
+        if (repush != null) return
+        synchronized(pushLock) {
+            if (repush != null) return
+            val service = Executors.newSingleThreadScheduledExecutor { runnable ->
+                Thread(runnable, CLUSTER_REPUSH_THREAD).apply { isDaemon = true }
+            }
+            service.scheduleWithFixedDelay(
+                { runCatching { repushTick() } },
+                CLUSTER_REPUSH_TICK_MILLIS,
+                CLUSTER_REPUSH_TICK_MILLIS,
+                TimeUnit.MILLISECONDS,
+            )
+            repush = service
+        }
     }
 
     /**
      * The album art arrives from the iPhone as a Bitmap, and the cluster takes it as a Uri
-     * (`IPlaybackInfo.getArtwork`). The head unit's own process has to be able to read it, so it is
-     * written into this app's external files directory — world readable on this Android version, and
-     * already how DiagnosticExportStore hands files to other apps. Each update gets a fresh file name
-     * so a consumer caching by Uri cannot keep showing the previous cover.
+     * (`IPlaybackInfo.getArtwork`). [ClusterArtworkStore] owns *how* it is handed over -- JPEG at
+     * quality 88, longest edge 256 px, encoded under 1 MiB, served as a `content://` Uri with an
+     * explicit read grant to the vendor's reader processes, with the previous `file://` path as the
+     * fallback -- and its KDoc says why each tier exists (docs/_digest/45 G5).
+     *
+     * A null cover is a real answer, not a failure: it clears the slot, so the head unit paints its
+     * own default instead of our placeholder being submitted as if it were the album's art (G6).
      */
     fun setArtwork(bitmap: android.graphics.Bitmap?) {
         val context = appContext ?: return
         if (bitmap == null) {
+            // Nothing is shown any more, so the covers held for the cluster are revoked and deleted
+            // rather than left readable in the cache for the rest of the drive.
             artworkUri = null
+            artworkStore?.clear()
         } else {
-            val written = runCatching {
-                val directory = context.getExternalFilesDir(null) ?: return
-                val file = java.io.File(directory, "cluster-artwork-${System.currentTimeMillis()}.png")
-                java.io.FileOutputStream(file).use { out -> bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out) }
-                // The reader is another process: the default 0660 leaves it unreadable for anyone not
-                // in this app's group, which is what the car's own service is.
-                runCatching { file.setReadable(true, false) }
-                directory.listFiles()?.forEach { candidate ->
-                    if (candidate.name.startsWith("cluster-artwork-") && candidate != file) runCatching { candidate.delete() }
-                }
-                android.net.Uri.fromFile(file)
-            }.getOrElse {
-                Log.w(TAG, "cluster artwork write failed", it)
-                null
-            }
-            artworkUri = written
+            artworkUri = artworkStore(context).publish(bitmap)
         }
         Log.i(TAG, "cluster artwork uri=$artworkUri")
         // Re-send so the cluster picks the new cover up with the current track.
         if (enabled) lastMedia?.let { pushMedia(it) }
     }
+
+    private fun artworkStore(context: Context): ClusterArtworkStore =
+        artworkStore ?: synchronized(pushLock) {
+            artworkStore ?: ClusterArtworkStore(context).also { artworkStore = it }
+        }
 
     /**
      * Submits this guidance frame to the cluster, or clears our card when the frame cannot fill one.
@@ -231,14 +319,17 @@ object VendorClusterBridge {
      * The vendor's interaction objects bind asynchronously — our on-car probe got a null
      * `getNaviInteraction()` straight after `create()` — so a miss is retried on the next update
      * instead of being remembered.
+     *
+     * What *is* remembered is resolution: the log line appears only when the vendor object is actually
+     * looked up again, so logcat shows every re-resolution (a failure drops the cached one, G4).
      */
     private fun mediaInteraction(context: Context): Any? {
-        media?.let { return it }
         val owner = dimInstance(context) ?: return null
-        val value = read(owner, "getMediaInteraction") ?: return null
-        media = value
-        Log.i(TAG, "cluster media interaction=${value.javaClass.name}")
-        return value
+        return interactions.media {
+            read(owner, "getMediaInteraction")?.also { value ->
+                Log.i(TAG, "cluster media interaction=${value.javaClass.name}")
+            }
+        }
     }
 
     private fun naviInteraction(context: Context): Any? {
@@ -250,17 +341,12 @@ object VendorClusterBridge {
         return value
     }
 
-    private fun dimInstance(context: Context): Any? {
-        dim?.let { return it }
+    private fun dimInstance(context: Context): Any? = interactions.dim {
         val type = runCatching { Class.forName(DIM) }.getOrNull() ?: run {
             Log.i(TAG, "cluster dim api not on the classpath ($DIM)")
-            return null
+            return@dim null
         }
-        val value = runCatching {
-            type.getMethod("create", Context::class.java).invoke(null, context)
-        }.getOrNull() ?: return null
-        dim = value
-        return value
+        runCatching { type.getMethod("create", Context::class.java).invoke(null, context) }.getOrNull()
     }
 
     /** A dynamic proxy for the vendor's plain `IPlaybackInfo` interface. */
@@ -325,8 +411,12 @@ object VendorClusterBridge {
      * method name: these run per guidance frame, and a repeated warning would fill logcat on the car.
      * The trace line names the signature that was used, so it can no longer be confused with a
      * successful `void` call that returned null.
+     *
+     * The result is returned because "it did not reach the vendor" and "the vendor swallowed it" look
+     * the same from here: only the media path acts on it (a miss *or* a throw means the cached
+     * interaction object is dropped and the payload retried, G4).
      */
-    private fun call(target: Any, method: String, vararg args: Any?) {
+    private fun call(target: Any, method: String, vararg args: Any?): Boolean {
         val argumentTypes = args.map { it?.javaClass }
         val overloads = target.javaClass.methods.filter { it.name == method }
         val match = VendorMethodMatcher.select(overloads, argumentTypes)
@@ -338,13 +428,181 @@ object VendorClusterBridge {
                 "cluster $method args=${VendorMethodMatcher.describeArguments(argumentTypes)} -> " +
                     "skipped: no overload matches"
             }
-            return
+            return false
         }
         val result = runCatching { match.method.invoke(target, *args) }
             .onFailure { Log.w(TAG, "cluster ${match.signature}(${args.joinToString()}) failed", it) }
         com.shilapi.xcertplay.diag.DiagLog.trace(TAG) {
             "cluster ${match.signature} args=[${args.joinToString()}] -> ${result.getOrNull()}"
         }
+        return result.isSuccess
+    }
+}
+
+/** The thread the while-playing re-push runs on; it is not the iAP2 control thread (G7). */
+internal const val CLUSTER_REPUSH_THREAD = "diplay-cluster-repush"
+
+/**
+ * How often the re-push is *considered*, not how often it pushes.
+ *
+ * [ClusterPushSchedule] decides whether anything is due, so this is only the resolution of that
+ * decision: it has to be short enough that the shorter post-failure wait is honoured within a second
+ * or two, and cheap enough to be irrelevant (a timestamp comparison). The reference implementation's
+ * own refresh is a 10 s timeout (`PRESENTATION_REFRESH_TIMEOUT_MS`, docs/_digest/45 §2.3), which is
+ * 20 times the ~2 Hz `NowPlayingUpdate` rate -- a keep-alive, not a stream.
+ */
+internal const val CLUSTER_REPUSH_TICK_MILLIS = 2_000L
+
+/** How long a successful push keeps the cluster correct before it is repeated [G7]. */
+internal const val CLUSTER_REPUSH_INTERVAL_MILLIS = 10_000L
+
+/**
+ * How long a *failed* push waits before it is retried.
+ *
+ * Shorter than [CLUSTER_REPUSH_INTERVAL_MILLIS] on purpose: a failure means either the vendor's DI is
+ * a shell or the service restarted, and both are states that can clear themselves, so the retry is
+ * worth more than the regular refresh. It is not zero either -- a wedged service must not be called in
+ * a tight loop.
+ */
+internal const val CLUSTER_REPUSH_RETRY_MILLIS = 3_000L
+
+/**
+ * Whether a while-playing re-push is due, and whether the previous one failed.
+ *
+ * A pure state machine over an injected clock (`nowMillis` is an argument, never read from a clock
+ * inside), so the interval, the retry and the "paused pushes nothing" rule are unit-tested without a
+ * timer or a car. "Paused" is a refusal, not a delay: a paused cluster would be re-pushing a card the
+ * driver is not listening to, and the reference's refresh is gated on `playing == true` too.
+ */
+internal class ClusterPushSchedule(
+    private val intervalMillis: Long = CLUSTER_REPUSH_INTERVAL_MILLIS,
+    private val retryMillis: Long = CLUSTER_REPUSH_RETRY_MILLIS,
+) {
+    private var lastAt = 0L
+    private var failed = false
+
+    /** The push at [nowMillis] reached the vendor. */
+    fun notePushed(nowMillis: Long) {
+        lastAt = nowMillis
+        failed = false
+    }
+
+    /** The push at [nowMillis] did not reach the vendor; the next one waits [retryMillis]. */
+    fun noteFailed(nowMillis: Long) {
+        lastAt = nowMillis
+        failed = true
+    }
+
+    /** True when something is playing and the last attempt is old enough to be repeated. */
+    fun isDue(nowMillis: Long, playing: Boolean): Boolean {
+        if (!playing) return false
+        return nowMillis - lastAt >= if (failed) retryMillis else intervalMillis
+    }
+}
+
+/** The device clock the re-push timestamps come from; monotonic, so a clock change cannot stall it. */
+private fun elapsedNow(): Long = SystemClock.elapsedRealtime()
+
+/**
+ * What one media push actually puts in front of the vendor.
+ *
+ * Field for field what `IPlaybackInfo` exposes to the cluster and nothing else: `sourceApp` and
+ * `artworkTransferId` stay out, because a change to them changes nothing the cluster can see and must
+ * therefore not cost a reflective dispatch and a proxy allocation (docs/_digest/45 G9).
+ */
+internal data class ClusterMediaUpdate(
+    val title: String?,
+    val artist: String?,
+    val album: String?,
+    val durationMillis: Long?,
+    val elapsedMillis: Long?,
+    val playing: Boolean,
+    val artworkUri: android.net.Uri?,
+)
+
+/** The payload of one push, as the vendor's getters will see it. */
+internal fun clusterMediaUpdate(now: CarPlayNowPlaying, artworkUri: android.net.Uri?): ClusterMediaUpdate =
+    ClusterMediaUpdate(
+        title = now.title,
+        artist = now.artist,
+        album = now.album,
+        durationMillis = now.durationMillis,
+        elapsedMillis = now.elapsedMillis,
+        playing = now.playing,
+        artworkUri = artworkUri,
+    )
+
+/**
+ * Remembers the last payload the vendor was handed.
+ *
+ * The navigation path already refuses an unchanged frame (`CarPlayGlance.publishLocked`); this is the
+ * same rule for media, where the frames arrive about twice a second. A push that *failed* must not be
+ * remembered as sent, hence [forget]: the next frame has to try again.
+ */
+internal class ClusterMediaPushGate {
+    private var last: ClusterMediaUpdate? = null
+
+    /** True unless [update] is exactly what the vendor was already given. */
+    fun shouldPush(update: ClusterMediaUpdate): Boolean = update != last
+
+    /** Records [update] as handed over. */
+    fun notePushed(update: ClusterMediaUpdate) {
+        last = update
+    }
+
+    /** Drops the record, so the next frame is dispatched even if it is identical. */
+    fun forget() {
+        last = null
+    }
+}
+
+/**
+ * The vendor objects resolved so far, and the one rule for giving them up.
+ *
+ * Caching matters: `DimInteraction.create()` binds a service asynchronously and the interaction
+ * objects are per-process handles, so resolving once per push would be wasteful. Trusting the cache
+ * forever is what does not work -- the vendor can hand back an object whose *internal* DI is null
+ * (its own jar contains `getMediaInteraction() mMediaDI is null`, docs/_digest/45 §1.8) and then
+ * silently discards every call, and a service restart leaves a dead binder that fails the same way.
+ * Neither raises anything we could distinguish from success, so a failed media push calls
+ * [invalidateMedia] and the next update resolves again.
+ *
+ * Only the media path is invalidated: the navigation card has its own cached handle and a separate,
+ * just-fixed submission path that a media failure must not disturb.
+ */
+internal class ClusterInteractionCache {
+    private var dim: Any? = null
+    private var media: Any? = null
+
+    /** The facade, resolved once. */
+    @Synchronized
+    fun dim(resolve: () -> Any?): Any? {
+        dim?.let { return it }
+        val value = resolve() ?: return null
+        dim = value
+        return value
+    }
+
+    /** The media interaction object, resolved once per facade. */
+    @Synchronized
+    fun media(resolve: () -> Any?): Any? {
+        media?.let { return it }
+        val value = resolve() ?: return null
+        media = value
+        return value
+    }
+
+    /**
+     * Forgets the media handle *and* the facade it came from.
+     *
+     * The facade is dropped too because the shell object is produced by the facade: a re-resolve that
+     * kept the same facade would just hand the same shell back. The cached navigation handle is a
+     * different object and keeps working.
+     */
+    @Synchronized
+    fun invalidateMedia() {
+        media = null
+        dim = null
     }
 }
 

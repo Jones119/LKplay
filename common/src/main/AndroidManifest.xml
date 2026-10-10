@@ -31,6 +31,18 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/diagnostic_report_paths" />
         </provider>
+        <!--
+            The instrument cluster's album cover, read by the head unit's own processes (the DIM
+            service and the car's media centre) across a process boundary. It is exported because
+            those readers have to resolve the authority at all; access is still per-Uri, granted by
+            `VendorClusterBridge` for each cover it hands over (docs/_digest/45 G5). The authority
+            must stay `<applicationId>.artwork`: the bridge builds the Uri from `getPackageName()`.
+        -->
+        <provider
+            android:name="com.shilapi.xcertplay.ClusterArtworkProvider"
+            android:authorities="${applicationId}.artwork"
+            android:exported="true"
+            android:grantUriPermissions="true" />
         <activity android:name="com.shilapi.xcertplay.DiPlayActivity"
             android:exported="true" android:launchMode="singleTop"
             android:resizeableActivity="true"
