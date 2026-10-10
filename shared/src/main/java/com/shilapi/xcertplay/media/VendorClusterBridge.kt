@@ -89,6 +89,16 @@ object VendorClusterBridge {
     private var artworkStore: ClusterArtworkStore? = null
 
     /**
+     * Where the last cover Uri came from, so the bench log gets one line per *change*.
+     *
+     * Created with the first cover rather than in the object's initialiser, because the read is an
+     * override that must be re-read per handover (see [clusterArtworkUriProperty]) while the change
+     * detection is the only state worth keeping.
+     */
+    @Volatile
+    private var artworkUriChanges: ClusterArtworkUriChangeGate? = null
+
+    /**
      * True once a complete card of ours reached the cluster, so a later stop clears *our* card only.
      *
      * There is no "guidance started" call any more: it submitted `turnState=0`, which the service
@@ -244,38 +254,102 @@ object VendorClusterBridge {
     /**
      * The album art arrives from the iPhone as a Bitmap, and the cluster takes it as a Uri
      * (`IPlaybackInfo.getArtwork`). [ClusterArtworkStore] owns *how* it is handed over -- JPEG at
-     * quality 88, longest edge 256 px, encoded under 1 MiB, as a world-readable `file://` copy under the
-     * app's external files directory first, with the `content://` provider Uri plus an explicit read
-     * grant as the fallback -- and its KDoc says why each tier exists (docs/_digest/45 G5).
+     * quality 88, longest edge 256 px, encoded under 1 MiB, served as
+     * `http://127.0.0.1:<port>/covers/<session>/<uuid>.jpg` by our own loopback server when a port can
+     * be bound, otherwise a world-readable `file://` copy in the shared tree, otherwise the
+     * `content://` provider Uri plus an explicit read grant -- and its KDoc says why each tier exists
+     * (docs/_digest/45 G5 and §2.4).
      *
-     * The order is the car's, not the reference's: on 2026-10-09 the `content://` handover succeeded
-     * three times in a row (`grants=2 provider=true`, and the vendor's own service logged every new Uri)
-     * while the cluster never painted one, whereas the 2026-10-08 run showed the cover from a
-     * `file://` path with `setReadable(true, false)`. [ClusterArtworkTransport]'s KDoc is where the two
-     * tiers and the reason they are ordered this way are written down.
+     * The order is the car's, not the reference's. On 2026-10-09 the `content://` handover succeeded
+     * three times in a row (`grants=2 provider=true`, and the vendor's own service logged every new
+     * Uri) while the cluster never painted one, and the 2026-10-10 `file://` copies under
+     * `/sdcard/DiPlay/` were logged 36 + 6 times and drawn just as little, although `adb shell cat` read
+     * all 31326 bytes of them. The car's own media application hands the cluster an `http://` URL for a
+     * cover it does display, so the loopback server goes first now.
+     *
+     * [CLUSTER_ARTWORK_URI_OVERRIDE] wins over all three when it is set to an absolute `http`/`https`
+     * URL, and an unset or unparseable value leaves the tier walk in charge -- which is what makes the
+     * one decisive bench experiment possible without a rebuild: hand the vendor a known-good remote URL
+     * and see whether the cluster paints it (see [artworkOverride]).
      *
      * A null cover is a real answer, not a failure: it clears the slot, so the head unit paints its
      * own default instead of our placeholder being submitted as if it were the album's art (G6).
      */
     fun setArtwork(bitmap: android.graphics.Bitmap?) {
         val context = appContext ?: return
+        // Read once per handover, so a `setprop` between the decision and the log cannot make the two
+        // disagree, and never cached, so the very next track sees a property that was just set.
+        val property = clusterArtworkUriProperty()
         if (bitmap == null) {
             // Nothing is shown any more, so the covers held for the cluster are revoked and deleted
-            // rather than left readable in the cache for the rest of the drive.
+            // rather than left readable in the cache for the rest of the drive. The override is not
+            // kept either: it describes the *next* handover, not a cover the vendor may still fetch.
             artworkUri = null
             artworkStore?.clear()
         } else {
-            artworkUri = artworkStore(context).publish(bitmap)
+            val computed = artworkStore(context).publish(bitmap)
+            artworkUri = handoverUri(property, computed)
         }
-        Log.i(TAG, "cluster artwork uri=$artworkUri")
+        val accepted = parseArtworkUriOverride(property)
+        val source = if (accepted != null) CLUSTER_ARTWORK_SOURCE_OVERRIDE else CLUSTER_ARTWORK_SOURCE_TIER
+        // One line per change: `setArtwork` runs about twice a second while the iPhone updates, so an
+        // unconditional line would bury the on-car grep.
+        if (artworkChangeGate().shouldLog(artworkUri?.toString(), source)) {
+            Log.i(TAG, "cluster artwork uri=$artworkUri source=$source")
+        }
         // Re-send so the cluster picks the new cover up with the current track.
         if (enabled) lastMedia?.let { pushMedia(it) }
+    }
+
+    /**
+     * The Uri for this handover: the usable bench override when one is set, the computed one otherwise.
+     *
+     * The rule itself is [clusterArtworkHandover]; what lives here is the logging a bench session needs
+     * to read. A property that is present but not usable is named with its raw value, because "the typo
+     * never applied" and "nothing was set" produce identical delivered Uris and only the raw value tells
+     * them apart; the successful case is named by the `source=override` line.
+     */
+    private fun handoverUri(property: String?, computed: android.net.Uri?): android.net.Uri? {
+        if (parseArtworkUriOverride(property) == null && !property.isNullOrEmpty()) {
+            Log.w(TAG, "cluster artwork override ignored property=$property")
+        }
+        val delivered = clusterArtworkHandover(property, computed?.toString()) ?: return null
+        return android.net.Uri.parse(delivered)
+    }
+
+    private fun artworkChangeGate(): ClusterArtworkUriChangeGate {
+        artworkUriChanges?.let { return it }
+        synchronized(pushLock) {
+            artworkUriChanges?.let { return it }
+            return ClusterArtworkUriChangeGate().also { artworkUriChanges = it }
+        }
     }
 
     private fun artworkStore(context: Context): ClusterArtworkStore =
         artworkStore ?: synchronized(pushLock) {
             artworkStore ?: ClusterArtworkStore(context).also { artworkStore = it }
         }
+
+    /**
+     * Tears the bridge down with the host activity: the covers go and the loopback port is released.
+     *
+     * The HTTP tier is the reason this exists. Until it did, a session's covers were files nothing
+     * could reach without the Uri, so leaving them in place cost storage and nothing else; now each
+     * handover is also a URL on a port this process owns, and `onDestroy` is the moment nothing will
+     * fetch it any more. [ClusterArtworkStore.close] revokes and deletes the retained covers *and*
+     * closes the listening socket, and the store is dropped so a later `setArtwork` builds a fresh one
+     * on a fresh port instead of reusing a closed server. The vendor is told nothing here: the cluster
+     * keeps whatever it last painted, which is the same behaviour a teardown had before.
+     */
+    fun detach() {
+        val store = synchronized(pushLock) {
+            artworkStore.also { artworkStore = null }
+        }
+        artworkUri = null
+        artworkUriChanges = null
+        runCatching { store?.close() }
+            .onFailure { Log.w(TAG, "cluster artwork store close failed", it) }
+    }
 
     /**
      * Submits this guidance frame to the cluster, or clears our card when the frame cannot fill one.
@@ -692,17 +766,6 @@ internal fun clusterSwitchProperty(): String? = debugProperty(CLUSTER_SWITCH)
  * [parseArrowOverride] and [clusterArrowId]).
  */
 internal fun clusterArrowProperty(): String? = debugProperty(CLUSTER_ARROW)
-
-/**
- * One `debug.diplay.*` property, read reflectively because `android.os.SystemProperties` is not part of
- * the public SDK. A missing class (the JVM unit tests) or a hidden-API refusal reads as "unset", which
- * every caller treats as "no override".
- */
-private fun debugProperty(name: String): String? = runCatching {
-    val get = Class.forName("android.os.SystemProperties")
-        .getMethod("get", String::class.java, String::class.java)
-    get.invoke(null, name, "") as? String
-}.getOrNull()
 
 /**
  * Remembers which method names were already reported as having no matching overload.

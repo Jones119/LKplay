@@ -995,6 +995,9 @@ class CarPlayHostActivity : ComponentActivity() {
 
     override fun onDestroy() {
         resetSidePanel()
+        // The cluster push's own teardown: the artwork tier owns a loopback port and the covers held
+        // for the cluster, so both go with the activity rather than waiting for the process to die.
+        runCatching { com.shilapi.xcertplay.media.VendorClusterBridge.detach() }
         nightModeController.pause()
         pictureBinding?.close()
         pictureBinding = null

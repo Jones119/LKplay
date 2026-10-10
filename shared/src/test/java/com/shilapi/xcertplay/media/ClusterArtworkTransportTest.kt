@@ -11,14 +11,17 @@ import java.io.File
 import java.util.UUID
 
 /**
- * The rules for handing a cover to the head unit (docs/_digest/38 §3 and 45 G5).
+ * The rules for handing a cover to the head unit (docs/_digest/38 §3 and 45 G5/§2.4).
  *
- * The encoding rules (JPEG, longest edge 256 px, encoded under 1 MiB), the tier precedence the car
- * forced on us (a readable external `file://` first, the `content://` provider only when there is
- * none), the provider's exact Uri shape and the mapping it parses back are all decided here, on the
- * JVM. What needs the car -- whether the cluster really paints a `file://` cover, and whether the
- * vendor's process opens either Uri -- is listed in the digest rather than asserted here, because a
- * JVM test cannot speak for another process.
+ * The encoding rules (JPEG, longest edge 256 px, encoded under 1 MiB), the three-tier precedence the
+ * car forced on us (the loopback HTTP server when it bound, a readable external `file://` otherwise,
+ * the `content://` provider only when there is no file), the provider's exact Uri shape, the mapping it
+ * parses back and the loopback URL's shape are all decided here, on the JVM. What needs the car --
+ * whether the cluster really paints a cover, and whether the vendor's process opens a `file://` Uri,
+ * fetches the loopback URL or does neither -- is listed in the digest rather than asserted here,
+ * because a JVM test cannot speak for another process. The server's own wire behaviour is asserted
+ * against a real socket in `ClusterArtworkHttpServerTest`, and the tier a store really ends in in
+ * `ClusterArtworkStoreHttpTierTest`.
  *
  * A temporary directory stands in for `cacheDir` and for the external files directory, so both the
  * provider mapping and the cleanup sweeps are checked against real files instead of a mocked
@@ -153,8 +156,10 @@ class ClusterArtworkTransportTest {
     }
 
     @Test
-    fun theReadableExternalFileWinsAndTheProviderOnlyCoversItsFailure() {
-        // The tier the car demonstrably displays, even when the provider tier is fully ready.
+    fun theReadableExternalFileWinsOverTheProviderAndTheProviderOnlyCoversItsFailure() {
+        // The tier the car demonstrably displays, even when the provider tier is fully ready. This is
+        // the rule *without* the HTTP tier, i.e. the handover a car that cannot bind a loopback port
+        // gets; the server's own precedence is in `ClusterArtworkTierTest`.
         assertEquals(
             ClusterArtworkTier.FILE,
             clusterArtworkTier(fileUsable = true, providerRegistered = true, granted = 2),

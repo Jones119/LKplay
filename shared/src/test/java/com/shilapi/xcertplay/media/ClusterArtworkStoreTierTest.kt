@@ -19,13 +19,19 @@ import org.robolectric.annotation.Config
  * Which tier a handover ends in and what the delivered string is, driven through the real
  * [ClusterArtworkStore] (docs/_digest/38 §3, the 2026-10-09 on-car run and the 2026-10-10 `adb` one).
  *
- * The pure rules are asserted in `ClusterArtworkTransportTest` and
- * `ClusterArtworkBaseSelectionTest`; this file checks the part that needs real file I/O -- that the
- * bytes really are written where the delivered string says they are, that a tier which cannot write
- * falls through to the next one and then to the provider, and that neither tier leaves its file
- * behind for the other. The device facts the store needs are constructor parameters, so the answers can
- * be produced without a car: the shared base it writes into, the external directory, the internal tree
- * the provider serves from, and whether the provider is registered.
+ * The pure rules are asserted in `ClusterArtworkTransportTest`, `ClusterArtworkBaseSelectionTest` and
+ * `ClusterArtworkTierTest`; this file checks the part that needs real file I/O -- that the bytes really
+ * are written where the delivered string says they are, that a tier which cannot write falls through to
+ * the next one and then to the provider, and that no tier leaves its file behind for another. The
+ * device facts the store needs are constructor parameters, so the answers can be produced without a
+ * car: the shared base it writes into, the external directory, the internal tree the provider serves
+ * from, whether the provider is registered, and -- since the loopback HTTP tier exists -- a server
+ * whose bind is refused (see `clusterArtworkServerWithoutPort`).
+ *
+ * That refused server is what keeps this file about the *cheaper* tiers. A handover that can bind a
+ * loopback port is now delivered as `http://127.0.0.1:<port>/covers/…` and is asserted in
+ * `ClusterArtworkStoreHttpTierTest` instead; everything below states what the car gets when it cannot,
+ * which is the behaviour the 2026-10-09/10-10 runs were measured with.
  *
  * The shared base is injected as a temporary directory rather than `/sdcard/DiPlay`, because only the
  * car can confirm that `/sdcard` resolves for the reader there. What this file proves is the
@@ -90,6 +96,7 @@ class ClusterArtworkStoreTierTest {
             externalFilesDir = null,
             cacheRoot = cacheRoot,
             providerRegistered = { true },
+            server = clusterArtworkServerWithoutPort(),
             sharedBases = listOf(refusedAlias, sharedBasePath),
             raw = withoutTheSdcardSpelling(),
         )
@@ -120,6 +127,7 @@ class ClusterArtworkStoreTierTest {
             externalFilesDir = null,
             cacheRoot = cacheRoot,
             providerRegistered = { true },
+            server = clusterArtworkServerWithoutPort(),
             sharedBases = listOf(sharedBasePath),
         )
 
@@ -142,10 +150,14 @@ class ClusterArtworkStoreTierTest {
         assertTrue("one session directory per process", sessionDirectory.name.length == 36)
         assertTrue("a fresh UUID file name per handover", file.name.length == 40)
         assertTrue("the handed-over file exists: $file", clusterArtworkFileReadable(file))
-        // The cache copy exists only for the provider tier, which lost this handover.
-        assertFalse("no cache session directory may survive the file tier", cacheRoot.listFiles().orEmpty().any {
-            it.isDirectory && it.listFiles().orEmpty().isNotEmpty()
-        })
+        // The cache copy exists only for the provider tier, which lost this handover. The session
+        // directory itself stays (the store's session is per process and a later cover may use it
+        // again), so what is asserted is that no cover survives in it.
+        assertFalse(
+            "no cached cover may survive the file tier: " +
+                cacheRoot.walkTopDown().filter { it.isFile }.map { it.path }.toList(),
+            cacheRoot.walkTopDown().any { it.isFile },
+        )
         // The probe file must not be left next to the covers.
         assertFalse(
             "the base probe cleans up after itself",
@@ -164,6 +176,7 @@ class ClusterArtworkStoreTierTest {
             externalFilesDir = externalRoot,
             cacheRoot = folder.newFolder("cache-root"),
             providerRegistered = { true },
+            server = clusterArtworkServerWithoutPort(),
             sharedBases = listOf(blocked.path),
         )
 
@@ -190,6 +203,7 @@ class ClusterArtworkStoreTierTest {
             externalFilesDir = null,
             cacheRoot = cacheRoot,
             providerRegistered = { true },
+            server = clusterArtworkServerWithoutPort(),
             sharedBases = listOf(File(volume, CLUSTER_ARTWORK_SHARED_ROOT).path),
             // A volume that cannot be created at all. On a JVM the host creates every directory it is
             // asked for, so the "no external storage" car has to be said rather than arranged.
@@ -217,6 +231,7 @@ class ClusterArtworkStoreTierTest {
             externalFilesDir = null,
             cacheRoot = cacheRoot,
             providerRegistered = { false },
+            server = clusterArtworkServerWithoutPort(),
             sharedBases = listOf(File(volume, CLUSTER_ARTWORK_SHARED_ROOT).path),
             raw = noSuchVolume(volume),
         )
@@ -236,6 +251,7 @@ class ClusterArtworkStoreTierTest {
             externalFilesDir = null,
             cacheRoot = folder.newFolder("cache-root"),
             providerRegistered = { true },
+            server = clusterArtworkServerWithoutPort(),
             sharedBases = listOf(sharedBasePath),
         )
         val uri = store.publish(bitmap())
@@ -259,6 +275,7 @@ class ClusterArtworkStoreTierTest {
             externalFilesDir = null,
             cacheRoot = cacheRoot,
             providerRegistered = { true },
+            server = clusterArtworkServerWithoutPort(),
             sharedBases = listOf(sharedBasePath),
         )
 

@@ -9,14 +9,44 @@ import android.os.Environment
 import android.util.Log
 import java.io.File
 import java.io.FileOutputStream
+import java.net.URI
 import java.util.UUID
 
 /**
  * How one album cover reaches the head unit, in the order this car was measured to accept.
  *
- * Two tiers remain, and the car -- not the reference implementation -- decided which one goes first:
+ * Three tiers remain, and the car -- not the reference implementation -- decided which one goes first:
  *
- * 1. **A world-readable `file://` copy under a directory the reading process may actually open.**
+ * 1. **A loopback `http://127.0.0.1:<port>/covers/<session>/<uuid>.jpg` served by
+ *    [ClusterArtworkHttpServer] out of the same shared file copy.** This is the tier the car's own
+ *    behaviour points at, and it was added after two cheaper tiers had been delivered to the car and
+ *    drawn by nothing:
+ *
+ *    | delivered | vendor received | cluster drew |
+ *    |---|---|---|
+ *    | `content://<pkg>.artwork/covers/…` + `grantUriPermission` (grants=2, provider=true) | yes, 3 UUIDs | no |
+ *    | `file:///storage/emulated/0/Android/data/<pkg>/files/cluster-artwork/…` | yes, 3 UUIDs | no |
+ *    | `file:///sdcard/DiPlay/cluster-artwork/<session>/<uuid>.jpg` | yes, 36 + 6 lines | no |
+ *
+ *    The third row is provably readable by another process -- `adb shell ls -l` shows
+ *    `-rw-rw---- root sdcard_r`, the same shape as the car media app's own JPEGs under
+ *    `/sdcard/Music/mediacenter/images/`, and `adb shell cat` returns all 31326 bytes for a
+ *    shell uid that holds only `sdcard_r`/`sdcard_rw` -- and the cluster still drew none of them.
+ *    Meanwhile the car's **own** media application, whose covers the cluster does display and switch
+ *    per track, hands it `http://y.gtimg.cn/music/photo_new/T002R300x300M000000FUEPg2e4lIX_3.jpg` for
+ *    its online tracks (its local-file entries in that same `/sdcard/Music/mediacenter/images/` tree
+ *    are the ones we have never seen drawn). The working hypothesis is therefore that **the reading
+ *    process fetches a remote `http`/`https` URL and never opens a `content` or `file` Uri**, which is
+ *    also why the reference implementation carries a loopback HTTP server as a tier at all and enables
+ *    it only on this model (docs/_digest/45 §2.4). The server is [ClusterArtworkHttpServer]; it starts
+ *    lazily on the first cover and stops when the bridge is torn down, and its KDoc records the port,
+ *    threading and lifecycle design in full.
+ *
+ *    This tier is *preferred* but strictly optional: the cover is still written to the shared tree
+ *    first, so when the server cannot bind the very same file is delivered as `file://` and the
+ *    fallbacks below are unchanged. One handover therefore never depends on a port being free.
+ *
+ * 2. **A world-readable `file://` copy under a directory the reading process may actually open.**
  *    The copy is *not* written into the app's own external files directory any more. The 2026-10-10
  *    on-car `adb` run showed why that tree can never work on this ROM, whatever string it is handed
  *    over as:
@@ -51,14 +81,12 @@ import java.util.UUID
  *    service logged every new Uri as `albumCover2 = content://…`) while the instrument cluster never
  *    painted one of them. A reader that accepts our Uri and then never opens it is not something grants
  *    or a manifest can fix from here, so the file goes first.
- * 2. **`content://<package>.artwork/covers/<session>/<uuid>.jpg` plus an explicit
+ * 3. **`content://<package>.artwork/covers/<session>/<uuid>.jpg` plus an explicit
  *    `grantUriPermission` to each reader package**, kept for a car whose external tree is missing or
  *    unwritable. It stays fully wired (the provider is registered in `:common`'s manifest). This is
  *    the tier docs/_digest/45 §2.4 recorded from the reference app's `LegacyArtworkLoader` -- content
  *    provider plus grant first, then a loopback HTTP server -- and our own car disagreed with that
- *    order, which is why the two are swapped here. The reference's HTTP tier is still deliberately not
- *    built: it costs a port, a lifetime and a single-pass socket, and it only matters once both cheap
- *    tiers have failed (docs/_digest/45 §7.4).
+ *    order twice over, which is why the server is first here and the provider last.
  *
  * Encoding is not a tier. Whichever path serves the bytes, the head unit's reader was built around
  * JPEG at quality 88, a longest edge of at most 256 px and an encoded size under 1 MiB, so a cover is
@@ -66,9 +94,10 @@ import java.util.UUID
  * both far larger and a format that reader was never proven to take.
  *
  * Everything that can be decided without a device lives in this file as a pure function, so the
- * scale, the byte budget, the Uri shape, the grant list, the tier precedence, the path mapping, the
- * candidate order and how a candidate is accepted or rejected are unit-tested; only the compression,
- * the real read-back and the file I/O need the car (see [ClusterArtworkStore]).
+ * scale, the byte budget, the Uri shape, the grant list, the tier precedence, the override, the path
+ * mapping, the candidate order and how a candidate is accepted or rejected are unit-tested; only the
+ * compression, the real read-back, the socket and the file I/O need the car (see [ClusterArtworkStore]
+ * and [ClusterArtworkHttpServer]).
  */
 
 /** `<applicationId>.artwork`: the authority registered by the provider in `:common`'s manifest. */
@@ -215,7 +244,14 @@ internal const val CLUSTER_ARTWORK_GRANT_FLAG = Intent.FLAG_GRANT_READ_URI_PERMI
 
 private const val TAG = "DiPlay-Cluster"
 
-private val UUID_PATTERN = Regex("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+/**
+ * A cover's session or file stem, as the provider, the sweeps and the loopback server all match it.
+ *
+ * `internal` rather than file-private because [ClusterArtworkHttpServer] uses the same pattern to
+ * decide which path segments may name a cover: two spellings of "is this a cover name" would be one
+ * more place for the two tiers to disagree about what they serve.
+ */
+internal val UUID_PATTERN = Regex("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 
 /** The name of the file a base probe writes: fixed per process, so a reused path cannot look fresh. */
 private const val CLUSTER_ARTWORK_PROBE_FILE = "base-probe.jpg"
@@ -332,6 +368,119 @@ internal fun clusterArtworkUriText(packageName: String, session: String, fileNam
 internal fun clusterArtworkFileUriText(path: String): String = "file://$path"
 
 /**
+ * The bench override for the cover Uri: `debug.diplay.artwork_uri`.
+ *
+ * The 2026-10-09/10 runs handed the car three tiers and the cluster drew none of them, so the next
+ * question is not which of *our* Uris is best but whether the reading process fetches a remote URL at
+ * all. One ignition window with
+ *
+ * ```
+ * adb shell setprop debug.diplay.artwork_uri 'http://y.gtimg.cn/music/photo_new/T002R300x300M000000FUEPg2e4lIX_3.jpg'
+ * ```
+ *
+ * hands the vendor the exact URL the car's own media application uses for a cover the cluster is
+ * known to display: if the cluster paints a cover that never passed through this app, the reader does
+ * fetch HTTP and the loopback tier is the right shape; if it paints nothing, the problem is not the
+ * Uri scheme and the remaining suspects are the vendor's own `setAlbumCover2` path or its use of
+ * `albumCover2`, which no delivery string can fix. The property is read reflectively through the same
+ * helper as `debug.diplay.arrow`/`debug.diplay.cluster` (never `android.os.SystemProperties`
+ * directly: it is not public SDK and the JVM tests have no such class).
+ */
+internal const val CLUSTER_ARTWORK_URI_OVERRIDE = "debug.diplay.artwork_uri"
+
+/** The `source=` value of a cover Uri that came from [CLUSTER_ARTWORK_URI_OVERRIDE]. */
+internal const val CLUSTER_ARTWORK_SOURCE_OVERRIDE = "override"
+
+/** The `source=` value of a cover Uri the tier walk computed. */
+internal const val CLUSTER_ARTWORK_SOURCE_TIER = "tier"
+
+/**
+ * [property] as a Uri this app may hand the vendor, or null when it is not one.
+ *
+ * Only an absolute `http://`/`https://` URL is accepted, because that is the whole point of the
+ * override: a bench session types one remote URL by hand and asks whether the reader fetches it. A
+ * blank/unset property, a typo, a relative string, a `file://` path and every other scheme answer null
+ * and leave the computed tier in charge, so a broken property can never cost the driver a cover --
+ * which is the same rule [resolveClusterBridgeEnabled] and [parseArrowOverride] follow.
+ *
+ * Kept as a string rather than an `android.net.Uri`, so the rule is unit-tested on a JVM; the caller
+ * parses the answer. An unset property and an unparseable one are both "no override" here, and the
+ * caller's log line is what tells them apart (`property=` empty versus a value).
+ */
+internal fun parseArtworkUriOverride(property: String?): String? {
+    if (property.isNullOrEmpty()) return null
+    val trimmed = property.trim()
+    val uri = runCatching { URI(trimmed) }.getOrNull() ?: return null
+    val scheme = uri.scheme?.lowercase() ?: return null
+    if (scheme != "http" && scheme != "https") return null
+    if (uri.host.isNullOrEmpty()) return null
+    // The trimmed text, so what the vendor is handed is what the URL check accepted: `setprop` from a
+    // shell cannot add whitespace, but a quoted value typed on a bench occasionally does.
+    return trimmed
+}
+
+/**
+ * What the vendor is handed for one handover: the override when it is usable, the computed Uri
+ * otherwise.
+ *
+ * The single precedence rule of the artwork path, and the reason the bench experiment needs no second
+ * code path: `debug.diplay.artwork_uri` is handed over *instead of* whatever the tiers produced, so a
+ * cover the cluster paints under the override proves the reader fetches that URL, and a cover it still
+ * does not paint proves the problem is not the Uri at all. An unset, empty or unparsable property is
+ * not an error state: it leaves [computed] in charge, so a typo on the bench cannot cost the driver the
+ * cover the tiers would have delivered.
+ *
+ * [parseArtworkUriOverride] does the accepting, so this stays a two-line rule that cannot drift from
+ * what the tests assert.
+ */
+internal fun clusterArtworkHandover(property: String?, computed: String?): String? =
+    parseArtworkUriOverride(property) ?: computed
+
+/**
+ * Remembers the last cover Uri announced, so a per-track log line is not repeated for one Uri.
+ *
+ * `setArtwork` runs about twice a second while the iPhone is updating and the re-push repeats the same
+ * payload every [CLUSTER_REPUSH_INTERVAL_MILLIS], so an unconditional line would bury the on-car
+ * check, which greps for exactly that line. The key includes the source, because "the override stopped
+ * applying" is worth seeing even when the Uri it forced happens to equal the computed one.
+ *
+ * Synchronised because the artwork path can be observed from a test thread while the real pushes all
+ * run on the cluster worker thread.
+ */
+internal class ClusterArtworkUriChangeGate {
+    private var last: String? = null
+
+    /** True the first time [uri] is announced from [source], false for every repeat. */
+    @Synchronized
+    fun shouldLog(uri: String?, source: String): Boolean {
+        val key = "$source/$uri"
+        if (key == last) return false
+        last = key
+        return true
+    }
+}
+
+/**
+ * One `debug.diplay.*` property, read reflectively because `android.os.SystemProperties` is not part of
+ * the public SDK. A missing class (the JVM unit tests) or a hidden-API refusal reads as "unset", which
+ * every caller treats as "no override".
+ */
+internal fun debugProperty(name: String): String? = runCatching {
+    val get = Class.forName("android.os.SystemProperties")
+        .getMethod("get", String::class.java, String::class.java)
+    get.invoke(null, name, "") as? String
+}.getOrNull()
+
+/**
+ * Reads [CLUSTER_ARTWORK_URI_OVERRIDE], the bench override for the cover Uri.
+ *
+ * Read per handover rather than cached, so `adb shell setprop` reaches the very next track of a running
+ * session -- the same rule the cluster switch and the arrow override follow -- and "unset" (the state
+ * after every ignition, because `setprop` does not survive one) leaves the tier walk in charge.
+ */
+internal fun clusterArtworkUriProperty(): String? = debugProperty(CLUSTER_ARTWORK_URI_OVERRIDE)
+
+/**
  * One candidate base, as a path a [File] can build on.
  *
  * Android has a single separator and no volume letters, so for the car this only removes a trailing
@@ -422,26 +571,56 @@ internal fun <T : Any> encodeClusterArtworkWithinBudget(
 
 /** Which tier the handover ended in. */
 internal enum class ClusterArtworkTier {
-    /** The primary tier: a readable `file://` copy in a tree the reader can open. */
+    /** The preferred tier: our own loopback HTTP server, serving the shared copy (docs/_digest/45 §2.4). */
+    HTTP,
+
+    /** The first fallback: a readable `file://` copy in a tree the reader can open. */
     FILE,
 
-    /** The fallback tier: `content://` with an explicit read grant for the vendor's reader processes. */
+    /** The last fallback: `content://` with an explicit read grant for the vendor's reader processes. */
     CONTENT,
 }
 
 /**
- * The tier to use, given what the device answered, or null when neither tier can serve the cover.
+ * The tier to use, given what the device answered, or null when no tier can serve the cover.
  *
- * The external copy is decided first because it is the only one the car ever proved it displays (see
- * the file KDoc). The provider is reached only when no base validated: either half of that tier
- * missing -- no provider in the merged manifest, or every grant refused -- means the cover is dropped
- * instead, because a Uri its reader can only fail on is worse than no cover at all.
+ * The loopback server is decided first because it is the only shape the car's own media application is
+ * observed to use for a cover the cluster displays, and [httpStarted] is already the successful bind --
+ * this function does not start anything. It is deliberately a *preference*, not a requirement: the
+ * cover is written to the shared tree before this is called, so [fileUsable] is normally true here and
+ * a car that refuses to bind a port still gets the `file://` string it got before this tier existed.
+ *
+ * The external copy is decided second because it is the only cheap one the car ever had on disk. The
+ * provider is reached only when no base validated: either half of that tier missing -- no provider in
+ * the merged manifest, or every grant refused -- means the cover is dropped instead, because a Uri its
+ * reader can only fail on is worse than no cover at all.
  */
 internal fun clusterArtworkTier(
     fileUsable: Boolean,
     providerRegistered: Boolean,
     granted: Int,
+): ClusterArtworkTier? = clusterArtworkTier(
+    httpStarted = false,
+    fileUsable = fileUsable,
+    providerRegistered = providerRegistered,
+    granted = granted,
+)
+
+/**
+ * The tier to use when the loopback server's state is known; [clusterArtworkTier] without [httpStarted]
+ * is the same rule with the HTTP tier unavailable.
+ *
+ * Split rather than given a default so every existing caller keeps its meaning: the three-argument form
+ * answers what a car with no loopback server would hand over, which is exactly the fallback order the
+ * on-car 2026-10-10 run worked in.
+ */
+internal fun clusterArtworkTier(
+    httpStarted: Boolean,
+    fileUsable: Boolean,
+    providerRegistered: Boolean,
+    granted: Int,
 ): ClusterArtworkTier? = when {
+    httpStarted -> ClusterArtworkTier.HTTP
     fileUsable -> ClusterArtworkTier.FILE
     providerRegistered && granted > 0 -> ClusterArtworkTier.CONTENT
     else -> null
@@ -489,10 +668,10 @@ internal fun clusterArtworkFileMatchesBytes(file: File, expected: ByteArray): Bo
  * shape, so there is exactly one implementation of it, and it takes plain values rather than an
  * `android.net.Uri` so it is unit-testable without a device.
  *
- * Only the fallback tier writes into [cacheDir]: the primary tier's `file://` copy is never served
- * through the provider. Returns null for anything that is not our authority, carries a query or
- * fragment, has the wrong number of path segments, or names a file that is not there: a provider that
- * guessed would hand out files outside the cover directory.
+ * Only the last-resort tier writes into [cacheDir]: the HTTP and `file://` tiers read the shared-tree
+ * copy instead and never route a cover through the provider. Returns null for anything that is not our
+ * authority, carries a query or fragment, has the wrong number of path segments, or names a file that
+ * is not there: a provider that guessed would hand out files outside the cover directory.
  */
 fun clusterArtworkCoverFile(
     cacheDir: File,
@@ -809,13 +988,13 @@ internal class ClusterArtworkBaseSelector(
  * Encodes one cover and hands it over, or returns null when no tier could.
  *
  * Device-only work: JPEG compression, the session directories, the candidate probes, the external
- * copy with its read-back of the delivered string, the provider check and the grants. What can be
- * decided without a device is delegated to the pure functions above. A [ClusterArtworkStore] is
- * created once per process: its session directory lets the next process recognise and delete this
- * run's leftovers (see [cleanStaleClusterArtworkSessions]).
+ * copy with its read-back of the delivered string, the loopback HTTP server, the provider check and
+ * the grants. What can be decided without a device is delegated to the pure functions above. A
+ * [ClusterArtworkStore] is created once per process: its session directory lets the next process
+ * recognise and delete this run's leftovers (see [cleanStaleClusterArtworkSessions]).
  *
- * The device facts the tier decision needs ([externalFilesDir], [cacheRoot], [providerRegistered])
- * are constructor parameters, so both tiers can be exercised in a JVM test; the car passes its own
+ * The device facts the tier decision needs ([externalFilesDir], [cacheRoot], [providerRegistered]) are
+ * constructor parameters, so all three tiers can be exercised in a JVM test; the car passes its own
  * external directory and asks its own package manager.
  */
 internal class ClusterArtworkStore(
@@ -836,6 +1015,15 @@ internal class ClusterArtworkStore(
     private val sdkInt: Int = Build.VERSION.SDK_INT,
     /** The shared roots to try, in order; the car leaves this at [clusterArtworkSharedBases]. */
     private val sharedBases: List<String>? = null,
+    /**
+     * The loopback HTTP tier, created on the first cover and bound only once a base validated.
+     *
+     * Injected so a JVM test can hand over a server whose bind is already known to fail and still
+     * assert the `file://` fallback; the car leaves the default, which binds `127.0.0.1` on a port the
+     * kernel picks. It is constructed lazily here and *bound* lazily in [publish], so a process that
+     * never publishes a cover never opens a port (see [ClusterArtworkHttpServer]).
+     */
+    private val server: ClusterArtworkHttpServer = ClusterArtworkHttpServer(),
 ) {
     private val session = newClusterArtworkSession()
     private val cacheDirectory = File(cacheRoot, session)
@@ -908,14 +1096,17 @@ internal class ClusterArtworkStore(
      *
      * The cover is always encoded into the cache first, because that tree is the reliably writable one
      * and because the provider tier serves from it; the file tier then *moves* those exact bytes to a
-     * base that validated. Only one of the two survives a handover: the cache file is deleted once the
-     * file tier has it, and the external copy is deleted when the file tier gave up, so neither tier
-     * leaves a file behind for the other. The quality ladder means a noisy cover is retried smaller
-     * rather than dropped.
+     * base that validated, and the HTTP tier serves that very file. Only one of the three survives a
+     * handover: the cache copy is deleted once the external write succeeded (`file://` and the loopback
+     * server both read the external copy, so nothing serves the cache one any more), and the external
+     * copy is deleted when the file tier gave up, so no tier leaves a file behind for another. The
+     * quality ladder means a noisy cover is retried smaller rather than dropped.
      *
      * [ClusterArtworkBaseSelector.select] answers the *delivered* spelling -- `/sdcard/…` whenever that
-     * alias read the cover back -- so the target built from it and the string logged as `uri=` are the
-     * same text the last successful probe validated, on this ROM and in the reader's namespace.
+     * alias read the cover back -- so the file target built from it and the string logged as `uri=` are
+     * the same text the last successful probe validated, on this ROM and in the reader's namespace. The
+     * loopback server is *started* only after that write succeeded and is told about the directory it
+     * must serve, so a car whose storage refuses the cover never pays for a port either.
      */
     fun publish(bitmap: Bitmap): Uri? {
         val encoded = encodeCover(bitmap) ?: return null
@@ -925,9 +1116,24 @@ internal class ClusterArtworkStore(
             val directory = File(File(base, CLUSTER_ARTWORK_DIRECTORY), session)
             val target = File(directory, encoded.name)
             if (deliverToBase(encoded, target)) {
-                // Moved, not copied: nothing will serve the cache copy now that the provider tier lost.
-                runCatching { encoded.delete() }
+                val serving = serverOrNull(directory)
+                if (serving != null) {
+                    // Moved, not copied: the loopback server reads the external file per request, so the
+                    // cache copy has no reader left. The server was told about `directory` before the URL
+                    // that names it was returned, so the URL cannot 404 on a handover that just worked.
+                    runCatching { encoded.delete() }
+                    val url = serving.uriFor(target)
+                    evict(retention.add(ClusterArtworkRetention.Entry(target, null)))
+                    Log.i(
+                        TAG,
+                        "cluster artwork tier=http port=${serving.port} bytes=${target.length()} " +
+                            "uri=$url source=$CLUSTER_ARTWORK_SOURCE_TIER",
+                    )
+                    return Uri.parse(url)
+                }
+                // No port this time: the very same file is delivered on its `file://` string.
                 val delivered = target.absolutePath
+                runCatching { encoded.delete() }
                 evict(retention.add(ClusterArtworkRetention.Entry(target, uriFor(delivered))))
                 return uriFor(delivered)
             }
@@ -937,7 +1143,11 @@ internal class ClusterArtworkStore(
         val uri = Uri.parse(clusterArtworkUriText(context.packageName, session, encoded.name))
         val registered = providerRegistered()
         val granted = if (registered) grant(uri) else 0
-        Log.i(TAG, "cluster artwork fallback grants=$granted provider=$registered uri=$uri")
+        Log.i(
+            TAG,
+            "cluster artwork fallback grants=$granted provider=$registered " +
+                "source=$CLUSTER_ARTWORK_SOURCE_TIER uri=$uri",
+        )
         if (clusterArtworkTier(fileUsable = false, providerRegistered = registered, granted = granted) ==
             ClusterArtworkTier.CONTENT
         ) {
@@ -949,9 +1159,38 @@ internal class ClusterArtworkStore(
         return null
     }
 
+    /**
+     * The started loopback server, or null when it cannot serve this handover.
+     *
+     * The server is bound at most once per store and the directory it serves is (re-)registered on
+     * every handover, because a base that was refused earlier can come back and the cover can move with
+     * it. A failed bind is cached in the negative sense -- [ClusterArtworkHttpServer.start] answers null
+     * without retrying a port it cannot have, and this returns null so the caller delivers `file://` --
+     * which is what keeps a broken port from costing a cover or a log line per track.
+     */
+    private fun serverOrNull(directory: File): ClusterArtworkHttpServer? {
+        val started = server.start() ?: return null
+        started.register(directory)
+        return started
+    }
+
     /** Revokes and deletes everything this store handed over; called when a session ends. */
     fun clear() {
         evict(retention.clear())
+    }
+
+    /**
+     * Ends this store for good: the covers go and the loopback port is released.
+     *
+     * Called by `VendorClusterBridge.detach()` when the bridge is torn down. [clear] alone is not
+     * enough once the HTTP tier exists, because a retained cover is also a *live URL*: shutting the
+     * server down is what makes that URL stop resolving, and it is why the store is not reused after a
+     * teardown (the bridge drops it). Idempotent -- [ClusterArtworkHttpServer.shutdown] is -- so a
+     * second teardown on a process that is going away cannot fail.
+     */
+    fun close() {
+        clear()
+        server.shutdown()
     }
 
     private fun encodeCover(bitmap: Bitmap): File? {
@@ -1055,7 +1294,7 @@ internal class ClusterArtworkStore(
             Log.i(
                 TAG,
                 "cluster artwork tier=file chmod=$worldReadable bytes=${target.length()} " +
-                    "uri=${clusterArtworkFileUriText(delivered)}",
+                    "uri=${clusterArtworkFileUriText(delivered)} source=$CLUSTER_ARTWORK_SOURCE_TIER",
             )
             true
         } catch (refused: Exception) {
