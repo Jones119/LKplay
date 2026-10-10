@@ -23,6 +23,13 @@ import org.junit.rules.TemporaryFolder
  * DIM service's reader can open `/sdcard/DiPlay/cluster-artwork/…` on the CS11 is an on-car fact (the
  * shared directory exists because the car's own media application keeps its covers in one), and the
  * `logcat` lines named in [ClusterArtworkRejection] are what the car has to answer.
+ *
+ * The second half of that on-car fact is the *spelling*: the injected filesystem here can be told that
+ * `/storage/emulated/0/DiPlay` and `/sdcard/DiPlay` are one directory, and the selector then has to
+ * deliver the alias -- but no JVM can prove that the alias is the spelling a reader outside our process
+ * resolves on the CS11, nor that our own process reaches the same directory through both. Those are the
+ * `adb` lines in [CLUSTER_ARTWORK_SDCARD_ROOT], and the on-car check is
+ * `cluster artwork base=/sdcard/DiPlay (probe ok)` followed by a painted cover.
  */
 class ClusterArtworkBaseSelectionTest {
     @get:Rule
@@ -35,6 +42,15 @@ class ClusterArtworkBaseSelectionTest {
 
     private val session = "0f0e0d0c-0b0a-0908-0706-050403020100"
     private val shared = "/sdcard/$CLUSTER_ARTWORK_SHARED_ROOT"
+
+    /**
+     * The very same shared directory as [shared], spelled the way the framework answers on the car.
+     *
+     * This is the spelling the 2026-10-10 delivery put into the `uri=` line, and the one that resolves
+     * only inside our own process' mount namespace (`adb shell cat` on it answers
+     * `No such file or directory` while the `/sdcard` spelling of the same file reads 31326 bytes).
+     */
+    private val frameworkShared = "/storage/emulated/0/$CLUSTER_ARTWORK_SHARED_ROOT"
 
     /**
      * A candidate as the store builds it: a root, then the `cluster-artwork` directory.
@@ -222,6 +238,120 @@ class ClusterArtworkBaseSelectionTest {
     }
 
     @Test
+    fun aValidatedFrameworkSpellingIsDeliveredOnItsSdcardSpelling() {
+        // The car's own `/storage/emulated/0/DiPlay` and `/sdcard/DiPlay` are one directory inside our
+        // process, and only the alias is a path outside it. A candidate list that happens to hold the
+        // framework spelling (the 2026-10-10 order) must therefore still end in the alias.
+        val raw = FakeRaw(exists = mutableSetOf(frameworkShared, shared))
+        val selector = selector(listOf(frameworkShared), raw)
+
+        val chosen = selector.select(source)
+
+        assertEquals("the delivered spelling is the one the reader can resolve", shared, chosen)
+        assertEquals(
+            "the framework spelling was probed, then the alias was re-probed through the delivered shape",
+            listOf(frameworkShared, shared),
+            raw.probeWrites.map { it.first },
+        )
+        assertEquals("the cached decision is the delivered spelling too", shared, selector.currentBase)
+        // The re-probe happens against the delivered path shape, exactly as the first probe did.
+        assertEquals(
+            listOf(
+                "$frameworkShared/$CLUSTER_ARTWORK_DIRECTORY/$session",
+                "$shared/$CLUSTER_ARTWORK_DIRECTORY/$session",
+            ),
+            raw.mkdirsCalls,
+        )
+        // Both probe files are cleaned up: the alias probe must not leave a file the reader could see.
+        assertEquals(2, raw.deleted.count { it.endsWith("/$PROBE_NAME") })
+    }
+
+    @Test
+    fun anAliasThatReadsBackNothingKeepsTheSpellingThatDid() {
+        // A ROM where the alias spelling is not readable: the cover is delivered on the spelling whose
+        // probe read it back, however unportable that spelling is -- a cover nobody can open still beats
+        // no cover, and the `alias … refused` line says which one the driver got.
+        val raw = FakeRaw(exists = mutableSetOf(frameworkShared, shared), silentBases = mutableSetOf(shared))
+
+        val chosen = selector(listOf(frameworkShared), raw).select(source)
+
+        assertEquals(frameworkShared, chosen)
+        assertEquals(listOf(frameworkShared, shared), raw.probeWrites.map { it.first })
+    }
+
+    @Test
+    fun anAliasThatReadsBackDifferentBytesKeepsTheSpellingThatDid() {
+        // The alias resolves but holds something else: a stale or half-written file at that path, which
+        // must not be announced as this track's cover.
+        val raw = FakeRaw(
+            exists = mutableSetOf(frameworkShared, shared),
+            wrongBytes = mutableMapOf(shared to byteArrayOf(1, 2, 3, 4, 5)),
+        )
+
+        val chosen = selector(listOf(frameworkShared), raw).select(source)
+
+        assertEquals(frameworkShared, chosen)
+        assertEquals(listOf(frameworkShared, shared), raw.probeWrites.map { it.first })
+    }
+
+    @Test
+    fun anAliasThatCannotBeWrittenKeepsTheSpellingThatDid() {
+        val raw = FakeRaw(exists = mutableSetOf(frameworkShared, shared), throwOnWrite = mutableSetOf(shared))
+
+        val chosen = selector(listOf(frameworkShared), raw).select(source)
+
+        assertEquals(frameworkShared, chosen)
+        assertEquals(listOf(frameworkShared, shared), raw.probeWrites.map { it.first })
+    }
+
+    @Test
+    fun theSdcardSpellingIsPreferredWithoutARewriteWheneverItIsACandidate() {
+        // The preference is a candidate order first and a rewrite second: an alias that is already the
+        // first candidate is probed once and delivered, so the ordinary car path pays nothing extra.
+        val raw = FakeRaw(exists = mutableSetOf(shared, frameworkShared))
+
+        val chosen = selector(listOf(shared, frameworkShared), raw).select(source)
+
+        assertEquals(shared, chosen)
+        assertEquals(
+            "no second probe for a spelling that is already the delivered one",
+            listOf(shared),
+            raw.probeWrites.map { it.first },
+        )
+    }
+
+    @Test
+    fun theDeliveredBaseIsTheOneWhoseProbeReadTheCoverBack() {
+        // The delivered string is never a string that was not read back: with the rewrite accepted it is
+        // the alias (the last probe), with the rewrite refused it is the framework spelling (the last
+        // probe that actually read the cover), and never the refused alias -- which is what makes the
+        // `uri=` line the store logs a string that a reader has a chance of opening.
+        val accepted = FakeRaw(exists = mutableSetOf(frameworkShared, shared))
+        val acceptedBase = selector(listOf(frameworkShared), accepted).select(source)
+        assertEquals(
+            "the last probe is the alias, and the alias is what is delivered",
+            accepted.probeWrites.last().first,
+            acceptedBase,
+        )
+
+        val refused = FakeRaw(exists = mutableSetOf(frameworkShared, shared), silentBases = mutableSetOf(shared))
+        val refusedBase = selector(listOf(frameworkShared), refused).select(source)
+        assertEquals(frameworkShared, refusedBase)
+        assertEquals("the alias came last but read nothing back", shared, refused.probeWrites.last().first)
+    }
+
+    @Test
+    fun theSdcardSpellingOfTheSharedTreeIsTheFirstCandidate() {
+        // The on-car failure in one line: the framework's own `/storage/emulated/0` answer won the walk
+        // because it was listed before the alias. Whatever the ROM answers for external storage, the
+        // literal `/sdcard` spelling is now candidate number one.
+        assertEquals(
+            "/sdcard/$CLUSTER_ARTWORK_SHARED_ROOT",
+            clusterArtworkSharedBases().first(),
+        )
+    }
+
+    @Test
     fun aRejectionIsReportedOncePerBaseNotOncePerTrack() {
         // The shared base takes the bytes and reads nothing back; the framework directory cannot even
         // be created; neither is reported more than once, however many tracks are published.
@@ -290,6 +420,34 @@ class ClusterArtworkBaseSelectionTest {
         assertFalse(clusterArtworkFileMatchesBytes(File(target.parentFile, "missing.jpg"), payload))
         // An encoding outside the accepted range is refused before any file is consulted.
         assertFalse(clusterArtworkFileMatchesBytes(target, ByteArray(0)))
+    }
+
+    @Test
+    fun theAliasRuleRewritesTheVolumesOfThisRomAndNothingElse() {
+        // Every spelling of the one external volume the car exposes becomes `/sdcard/…`, whatever the
+        // tail is -- the shared tree and the framework's `Android/data/<pkg>/…` form alike.
+        assertEquals(shared, clusterArtworkSdcardSpelling(frameworkShared))
+        assertEquals(shared, clusterArtworkSdcardSpelling("/mnt/shell/emulated/0/$CLUSTER_ARTWORK_SHARED_ROOT"))
+        assertEquals(shared, clusterArtworkSdcardSpelling("/storage/emulated/legacy/$CLUSTER_ARTWORK_SHARED_ROOT"))
+        assertEquals(shared, clusterArtworkSdcardSpelling("/storage/sdcard0/$CLUSTER_ARTWORK_SHARED_ROOT"))
+        assertEquals(
+            "/sdcard/Android/data/com.shihab.diplay.hudtest/files/cluster-artwork",
+            clusterArtworkSdcardSpelling(
+                "/storage/emulated/0/Android/data/com.shihab.diplay.hudtest/files/cluster-artwork",
+            ),
+        )
+        assertEquals("/sdcard", clusterArtworkSdcardSpelling("/storage/emulated/0/"))
+        // The boundary is a separator, not a prefix: another directory that merely starts with the same
+        // characters is not the volume, so nothing is rewritten to a path that may not exist.
+        assertNull(clusterArtworkSdcardSpelling("/storage/emulated/0x/DiPlay"))
+        assertNull(clusterArtworkSdcardSpelling("/storage/emulated/0extra"))
+        // Already portable: a second rewrite would only produce a second probe.
+        assertNull(clusterArtworkSdcardSpelling(shared))
+        assertNull(clusterArtworkSdcardSpelling("/sdcard"))
+        // A path outside the volume, and a host path from a JVM, are left exactly as they are.
+        assertNull(clusterArtworkSdcardSpelling("/data/data/com.shihab.diplay.hudtest/files/cluster-artwork"))
+        assertNull(clusterArtworkSdcardSpelling("C:\\temp\\sdcard-DiPlay"))
+        assertNull(clusterArtworkSdcardSpelling(""))
     }
 
     @Test

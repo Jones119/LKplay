@@ -34,6 +34,15 @@ import org.robolectric.annotation.Config
  * reader opens that string, which is what `cluster artwork tier=file … uri=file:///sdcard/DiPlay/…`
  * followed by a painted cover answers.
  *
+ * The spelling rule added on top of that mechanism is decided by [ClusterArtworkBaseSelector] and
+ * asserted in `ClusterArtworkBaseSelectionTest` on the injected filesystem; here only the two halves
+ * that need real files are checked: that the store's own candidate list leads with the literal `/sdcard`
+ * spelling of the shared tree however the ROM answers the framework, and that a `/sdcard` candidate
+ * which cannot be written does not become the delivered string. **Only the car can confirm** the third
+ * half -- that `/sdcard/DiPlay/cluster-artwork/<session>/<uuid>.jpg` and
+ * `/storage/emulated/0/DiPlay/cluster-artwork/<session>/<uuid>.jpg` really are one file there while only
+ * the first is a path the cluster's reader can open.
+ *
  * Robolectric supplies the Context (the store grants through it) and a real JPEG encoder.
  */
 @RunWith(RobolectricTestRunner::class)
@@ -53,6 +62,55 @@ class ClusterArtworkStoreTierTest {
 
     /** A candidate root that does not exist: on a car with no writable external tree. */
     private fun missingBasePath(name: String): String = File(folder.root, name).path
+
+    @Test
+    fun theSharedCandidatesStartWithTheSdcardSpellingTheReadersResolve() {
+        // The whole 2026-10-10 bug in one assertion: the candidate list was the framework's own answer
+        // (`/storage/emulated/0/DiPlay` on the car) ahead of the alias, so the walk adopted a spelling
+        // that exists only inside our process' mount namespace. The literal `/sdcard` spelling is now
+        // first whatever `Environment` answers -- and it stays first when it is also that answer, since
+        // the list is de-duplicated.
+        assertEquals(
+            "/sdcard/$CLUSTER_ARTWORK_SHARED_ROOT",
+            clusterArtworkSharedBases().first(),
+        )
+    }
+
+    @Test
+    fun aCandidateWhoseSdcardSpellingCannotBeWrittenDoesNotBecomeTheDeliveredString() {
+        // A `/sdcard` candidate that cannot be written, next to a base that can: the cover must be
+        // delivered on the base whose own write and read-back worked, and the `uri=` text must name that
+        // base rather than a spelling nothing validated. On this host `/sdcard` is exactly that -- a
+        // path no process can create -- which is the same rule the car applies when the alias is refused
+        // (see `ClusterArtworkBaseSelectionTest` for the accepted-rewrite half).
+        val cacheRoot = folder.newFolder("cache-root")
+        val refusedAlias = "/sdcard/$CLUSTER_ARTWORK_SHARED_ROOT"
+        val store = ClusterArtworkStore(
+            context = context,
+            externalFilesDir = null,
+            cacheRoot = cacheRoot,
+            providerRegistered = { true },
+            sharedBases = listOf(refusedAlias, sharedBasePath),
+            raw = withoutTheSdcardSpelling(),
+        )
+
+        val uri = store.publish(bitmap())
+
+        assertNotNull("the cover must still be handed over", uri)
+        assertEquals("file", uri!!.scheme)
+        assertFalse(
+            "a refused spelling must not appear in the delivered text: $uri",
+            uri.toString().contains(refusedAlias),
+        )
+        val delivered = File(clusterArtworkUriPath(uri.toString()))
+        assertTrue(
+            "the delivered string names the base that was validated: ${uri}",
+            sameDirectory(sharedBase, clusterArtworkBaseOf(delivered)),
+        )
+        // Read back through the delivered string itself, which is the string the store validated.
+        assertTrue("the delivered file holds the cover: $delivered", clusterArtworkFileReadable(delivered))
+        assertTrue(clusterArtworkWithinBudget(delivered.length()))
+    }
 
     @Test
     fun aReadableSharedCopyIsTheUriHandedOverAndTheCacheCopyIsNotLeftBehind() {
@@ -224,6 +282,26 @@ class ClusterArtworkStoreTierTest {
         isDirectory = { file -> !file.path.startsWith(volume.path) && file.isDirectory },
         mkdirs = { file -> !file.path.startsWith(volume.path) },
     )
+
+    /**
+     * The same real file operations, with one thing said rather than arranged: `/sdcard` is not a
+     * directory.
+     *
+     * A host JVM resolves `/sdcard/…` against its own drive root, so "this device cannot write the
+     * alias" has to be stated -- and stating it is also what keeps the assertion independent of whether
+     * the machine running the tests happens to allow a directory at a drive root. Every other operation
+     * stays the real one, because the point of this file is the real write and the real read-back.
+     */
+    private fun withoutTheSdcardSpelling(): RawFileSystem = RawFileSystem(
+        isDirectory = { file -> !isSdcardPath(file) && file.isDirectory },
+        mkdirs = { file -> !isSdcardPath(file) && (file.mkdirs() || file.isDirectory) },
+    )
+
+    /** Whether [file] is spelled under the alias, whatever separator the host folded into it. */
+    private fun isSdcardPath(file: File): Boolean {
+        val path = file.path.replace('\\', '/')
+        return path == CLUSTER_ARTWORK_SDCARD_ROOT || path.startsWith("$CLUSTER_ARTWORK_SDCARD_ROOT/")
+    }
 
     /** The path of a delivered `file://` string, which is the text the store announced. */
     private fun clusterArtworkUriPath(delivered: String): String =

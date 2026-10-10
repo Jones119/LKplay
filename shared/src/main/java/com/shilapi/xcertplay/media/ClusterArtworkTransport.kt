@@ -38,6 +38,13 @@ import java.util.UUID
  *    (docs/_digest/38 §3) -- the difference is which tree the reader could open, which is exactly what
  *    [ClusterArtworkBaseSelector] now probes instead of assuming.
  *
+ *    The *spelling* of the delivered path matters as much as the tree it points into, and that is the
+ *    half the 2026-10-10 change still got wrong: it wrote the bytes into a shared tree and then handed
+ *    over `/storage/emulated/0/...`, the framework's own answer, which resolves only inside our own
+ *    process' mount namespace. `/sdcard` is the alias every other process on this ROM uses. See
+ *    [CLUSTER_ARTWORK_SDCARD_ROOT] for the `adb` evidence and [clusterArtworkSdcardSpelling] for the
+ *    rule that rewrites a validated path onto it.
+ *
  *    A `content://` handover is still *below* this tier. On 2026-10-09 it succeeded three times in a
  *    row (`artwork decoded id=…` -> `cluster cover identity=… published=true` -> `cluster artwork
  *    encoded bytes=…` -> `cluster artwork grants=2 provider=true uri=content://…`, and the vendor's own
@@ -87,6 +94,76 @@ internal const val CLUSTER_ARTWORK_DIRECTORY = "cluster-artwork"
  * name is ours so nothing else's files are ever swept (see [cleanStaleClusterArtworkSessions]).
  */
 internal const val CLUSTER_ARTWORK_SHARED_ROOT = "DiPlay"
+
+/**
+ * The external-storage spelling a reader outside our process can resolve on this ROM: the literal
+ * `/sdcard` alias.
+ *
+ * `Environment.getExternalStorageDirectory()` answers `/storage/emulated/0` on the car, and *inside our
+ * own process* that spelling is a perfectly working path -- the store created it, wrote a JPEG into it
+ * and read the same bytes back, which is why the 2026-10-10 probe passed -- but the path exists only in
+ * that process' mount namespace. The global alias chain
+ * `/sdcard` -> `/storage/emulated/legacy` -> `/mnt/shell/emulated/0` is what the shell (uid 2000) and
+ * the vendor's reader resolve, and it is also the spelling the car's own media application delivers
+ * (`file:///sdcard/Music/mediacenter/images/…`, docs/_digest/48). Both name one file, and the latest
+ * `adb` run on the car is the whole evidence:
+ *
+ * ```
+ * $ adb shell ls -l /sdcard/DiPlay/cluster-artwork/<session>/
+ *   -rw-rw---- root sdcard_r 31326 …/4f928ddd-….jpg
+ * $ adb shell cat /sdcard/DiPlay/cluster-artwork/<session>/4f928ddd-….jpg | wc -c
+ *   31326                                    # the file our app wrote, readable from outside it
+ * $ adb shell cat /storage/emulated/0/DiPlay/cluster-artwork/<session>/4f928ddd-….jpg | wc -c
+ *   0    /  No such file or directory        # the string we actually delivered
+ * ```
+ *
+ * That is why the delivered `file://` text has to carry this prefix, and why
+ * [clusterArtworkSdcardSpelling] rewrites a path that validated under another spelling onto it before
+ * anything is handed over.
+ */
+internal const val CLUSTER_ARTWORK_SDCARD_ROOT = "/sdcard"
+
+/**
+ * The other spellings of that one volume this ROM was measured to expose, without `/sdcard` itself.
+ *
+ * They are the prefixes [clusterArtworkSdcardSpelling] rewrites. `/mnt/sdcard` and `/storage/sdcard0`
+ * are included because the candidate list already carries them as fallbacks for ROMs that disagree;
+ * listing them here costs nothing and keeps "the same volume, another name" in one place. Longest
+ * first is not needed -- no entry is a prefix of another -- but the boundary is checked on `/`, so
+ * `/storage/emulated/0` never matches a directory called `/storage/emulated/0x`.
+ */
+private val CLUSTER_ARTWORK_VOLUME_SPELLINGS = listOf(
+    "/storage/emulated/0",
+    "/storage/emulated/legacy",
+    "/mnt/shell/emulated/0",
+    "/mnt/sdcard",
+    "/storage/sdcard0",
+)
+
+/**
+ * [path] rewritten onto its [CLUSTER_ARTWORK_SDCARD_ROOT] spelling, or null when there is nothing to
+ * rewrite.
+ *
+ * Null means "deliver [path] as it is": the path already names the alias, it carries a volume this ROM
+ * was never measured with, or it is a host path from a JVM test. The caller re-probes whatever this
+ * returns through the rewritten string before it delivers it, so a wrong answer here costs one probe
+ * and never a cover (see [ClusterArtworkBaseSelector]).
+ *
+ * The whole path is rewritten, not just its first segment, so the `Android/data/<pkg>/…` form of the
+ * file tier gets `/sdcard/Android/data/<pkg>/…` as well. A trailing separator is dropped, because two
+ * spellings of one directory would otherwise be probed twice for the same answer.
+ */
+internal fun clusterArtworkSdcardSpelling(path: String): String? {
+    val compact = path.replace('\\', '/').trimEnd('/')
+    if (compact.isEmpty()) return null
+    for (root in CLUSTER_ARTWORK_VOLUME_SPELLINGS) {
+        if (compact == root) return CLUSTER_ARTWORK_SDCARD_ROOT
+        if (compact.startsWith("$root/")) {
+            return CLUSTER_ARTWORK_SDCARD_ROOT + compact.substring(root.length)
+        }
+    }
+    return null
+}
 
 /**
  * The flat name the pre-2026-10-09 fallback wrote straight into the external files directory
@@ -146,17 +223,22 @@ private const val CLUSTER_ARTWORK_PROBE_FILE = "base-probe.jpg"
 /**
  * The shared roots a `file://` cover may be written under, in the order they are probed.
  *
- * `/sdcard/DiPlay` is first because that is the form the car's own media application uses for the
- * covers the cluster demonstrably displays, and because `/sdcard` is the alias the 2026-10-10 `adb`
- * run showed to be the one that resolves on this ROM (`/sdcard` -> `/storage/emulated/legacy` ->
- * `/mnt/shell/emulated/0`, while `/storage/emulated/0` is not a path at all there). The legacy and
- * `sdcard0` spellings follow as fallbacks for ROMs that disagree, and each is only ever probed when
- * every earlier candidate failed, so the normal case pays one probe.
+ * The literal `/sdcard` alias is first, and it is first *as text* -- not merely as "whatever the
+ * framework answers" -- because that is the form the car's own media application uses for the covers
+ * the cluster demonstrably displays, because it is the spelling the latest `adb` run proved resolvable
+ * from outside our process, and because the 2026-10-10 build put the framework's own
+ * `/storage/emulated/0` answer ahead of it and delivered a cover no reader could open (see
+ * [CLUSTER_ARTWORK_SDCARD_ROOT]). The framework's answer, `/storage/emulated/legacy`, the shell's
+ * `/mnt/shell/emulated/0` and `sdcard0` follow as fallbacks for ROMs that disagree; each is only ever
+ * probed when every earlier candidate failed, so the normal case pays one probe. A fallback that wins
+ * is still delivered on its `/sdcard` spelling when that spelling reads the cover back
+ * ([clusterArtworkSdcardSpelling]).
  *
  * Duplicates are removed, because two spellings of one volume would otherwise be probed twice.
  */
 internal fun clusterArtworkSharedBases(): List<String> = clusterArtworkSharedBasesFrom(
     listOf(
+        CLUSTER_ARTWORK_SDCARD_ROOT,
         externalStorageRoot(),
         "/storage/emulated/legacy",
         "/mnt/shell/emulated/0",
@@ -182,6 +264,12 @@ internal fun clusterArtworkSharedBasesFrom(roots: List<String?>): List<String> =
  * Extracted (and deprecated-suppressed) in one place so the candidate list above stays portable: a
  * device that exposes no external storage simply contributes no candidate, and a device with normal
  * storage contributes the same path the framework's own external files directory is built on.
+ *
+ * On this ROM the answer is `/storage/emulated/0`, which is a working path *for us* and no path at all
+ * for anybody else (see [CLUSTER_ARTWORK_SDCARD_ROOT]). It stays a candidate -- writing through it and
+ * reading the cover back through it is how this process finds out whether the volume is there at all --
+ * but it is deliberately not the string that gets delivered: [clusterArtworkSdcardSpelling] turns it
+ * into the `/sdcard` form before the handover.
  */
 @Suppress("DEPRECATION")
 internal fun externalStorageRoot(): String? =
@@ -196,6 +284,11 @@ internal fun externalStorageRoot(): String? =
  * `/…/Android/…` tail onto `/sdcard` and `/storage/emulated/legacy` gives the file tier two more
  * spellings to try before it gives up on files altogether. Only the `Android/` tail is taken, so a
  * framework answer of an unexpected shape produces no candidate rather than a guessed path.
+ *
+ * The caller puts [CLUSTER_ARTWORK_SDCARD_ROOT] first among [aliases], so the spelling a reader can
+ * resolve is the first of these to be probed, exactly as in [clusterArtworkSharedBases]. This whole
+ * family is the *second* choice: `/sdcard/Android/data/<pkg>/` is still unreadable for another UID on
+ * this ROM (docs/_digest/48 §1), so it only ever carries a cover once no shared tree validated.
  */
 internal fun frameworkAliasCandidates(frameworkFilesRoot: File?, aliases: List<File>): List<File> {
     val root = frameworkFilesRoot ?: return emptyList()
@@ -535,6 +628,12 @@ internal data class RawFileSystem(
  * `<base>/cluster-artwork/<session>/`, the same directory the cover goes into. Validating only the
  * volume or only the writability of the base would accept exactly the ROM this class exists for,
  * where the bytes are on disk and the string handed to the reader still resolves nowhere.
+ *
+ * That shape rule is now also applied to the *spelling* of the base: the base this class answers is the
+ * one that will be delivered, so a candidate that read its bytes back under `/storage/emulated/0/…` is
+ * re-probed through its `/sdcard` spelling and the alias is adopted only when it reads the same bytes
+ * back in turn (see [deliverableBase]). The probe stays the ordinary one -- one write, one read of the
+ * delivered bytes, one delete -- so the alias is never trusted for free.
  */
 internal class ClusterArtworkBaseSelector(
     private val candidates: List<String>,
@@ -552,14 +651,23 @@ internal class ClusterArtworkBaseSelector(
     /** A base that was chosen and then failed a write: probed first on the next handover. */
     private var suspect: String? = null
 
-    /** The base a previous handover proved, or null while a probe has to run. */
+    /**
+     * The base a previous handover proved *and delivered on*, or null while a probe has to run.
+     *
+     * It is the delivered spelling, not the candidate that won the walk, so a store reading this back
+     * (or a test asserting it) sees the same string the reader was given.
+     */
     val currentBase: String? get() = chosen
 
     /**
-     * The first candidate that accepts [source] and reads it back, or null when none does.
+     * The first candidate that accepts [source] and reads it back, as the spelling to deliver on, or
+     * null when none does.
      *
      * [source] is the freshly encoded cover, so validation compares the real payload rather than a
-     * marker string; the probe copy is deleted again, whatever the answer.
+     * marker string; the probe copy is deleted again, whatever the answer. The answered string is the
+     * one the last successful probe read back -- the `/sdcard` spelling of the candidate when that
+     * alias validated too (see [deliverableBase]) -- so the caller can build the delivered path from it
+     * directly.
      */
     fun select(source: File): String? {
         chosen?.let { return it }
@@ -569,30 +677,78 @@ internal class ClusterArtworkBaseSelector(
         // probed once, and a second refusal is not logged, because the on-car log already has the reason.
         val retry = suspect
         suspect = null
-        if (retry != null && probeCandidate(retry, source)) return retry
+        if (retry != null) probeCandidate(retry, source)?.let { return it }
         for (candidate in candidates) {
             if (candidate == retry || candidate in rejected) continue
-            if (probeCandidate(candidate, source)) return candidate
+            probeCandidate(candidate, source)?.let { return it }
         }
         return null
     }
 
-    /** Probes one candidate and adopts it when it validates. */
-    private fun probeCandidate(candidate: String, source: File): Boolean =
+    /**
+     * Probes one candidate, adopts it when it validates, and answers the base to *deliver* on.
+     *
+     * The answer can differ from [candidate]: a base that validated under a spelling only this process
+     * can resolve is delivered on its `/sdcard` spelling instead (see [deliverableBase]). Answering the
+     * delivered spelling -- rather than a boolean with the caller re-deriving the base -- is what keeps
+     * the retry path of [select] and the ordinary walk from handing `publish` a different base than the
+     * one the last successful probe read back.
+     */
+    private fun probeCandidate(candidate: String, source: File): String? =
         when (val probe = probe(candidate, source)) {
             is ClusterArtworkBaseProbe.Valid -> {
-                chosen = candidate
-                Log.i(TAG, "cluster artwork base=$candidate (probe ok)")
-                true
+                val delivered = deliverableBase(candidate, source)
+                chosen = delivered
+                Log.i(TAG, "cluster artwork base=$delivered (probe ok)")
+                delivered
             }
             is ClusterArtworkBaseProbe.Invalid -> {
                 rejected += candidate
                 if (reported.add(candidate)) {
                     runCatching { onRejected.rejected(candidate, probe.reason) }
                 }
-                false
+                null
             }
         }
+
+    /**
+     * The base to deliver on: [base] itself, or its `/sdcard` spelling once that spelling has read the
+     * cover back too.
+     *
+     * This is the one place where a spelling the framework handed us can win its probe and still not be
+     * the string the reader is told to open. `/storage/emulated/0/DiPlay` and `/sdcard/DiPlay` are one
+     * directory inside this process while only the alias resolves in the DIM service's namespace (see
+     * [CLUSTER_ARTWORK_SDCARD_ROOT]), so a base that validated under the framework's spelling is
+     * re-probed through the alias with the ordinary rule -- the same write, the same read-back of the
+     * same bytes and the same delete against `<alias>/cluster-artwork/<session>/`. Nothing weaker is
+     * accepted here: the alias is adopted only after it has read the cover back itself, and it is then
+     * the base `publish` writes to and reads back, so the delivered string is a validated one by
+     * construction.
+     *
+     * One extra write-and-read per process is the whole cost, and only when a rewrite happens: the
+     * shared candidate list already puts `/sdcard` first, so the normal case never reaches this.
+     *
+     * A rewrite that does not read the same bytes back keeps [base] and says so. An alias nobody can
+     * open is worth one log line, while refusing the cover because its *portable* spelling is missing
+     * would cost the driver the only cover this process can prove is on disk -- a spelling that is not
+     * ideal still beats the blank the car shows today.
+     */
+    private fun deliverableBase(base: String, source: File): String {
+        val alias = clusterArtworkSdcardSpelling(base) ?: return base
+        return when (val probe = probe(alias, source)) {
+            is ClusterArtworkBaseProbe.Valid -> {
+                Log.i(TAG, "cluster artwork alias $base -> $alias")
+                alias
+            }
+            is ClusterArtworkBaseProbe.Invalid -> {
+                // Not routed through `onRejected`: that log is about a base being unusable, and this one
+                // *is* usable -- it is only its portable spelling that is not, which the driver's log
+                // has to be able to tell apart.
+                Log.w(TAG, "cluster artwork alias $base -> $alias refused reason=${probe.reason}")
+                base
+            }
+        }
+    }
 
     /**
      * Forgets a base that accepted a probe but failed a later write, so the next handover probes it
@@ -695,10 +851,13 @@ internal class ClusterArtworkStore(
      * Every root the file tier may write into, in the order they are probed.
      *
      * The shared roots come first (the car's own media application proves the cluster's reader is
-     * given a path there), then the framework's external files directory, then its `/sdcard` and
-     * `/storage/emulated/legacy` spellings. On API 29+ the sandbox alias is dropped: the platform
-     * documents that path as unreadable for other apps there, so it would only add a rejection line to
-     * a tablet that does not need it.
+     * given a path there) and the first of them is the literal `/sdcard` alias, then the framework's
+     * external files directory with the alias spelling of its `Android/` tail ahead of it. Whichever
+     * candidate wins, the base handed to [publish] is the one whose own probe read the cover back
+     * through the string that will be delivered -- the alias spelling when it works, the spelling that
+     * did when it does not. On API 29+ the sandbox alias is dropped: the platform documents that path
+     * as unreadable for other apps there, so it would only add a rejection line to a tablet that does
+     * not need it.
      */
     private val externalDirectories: List<String> = ArrayList<String>(resolvedSharedBases.size + 4).apply {
         addAll(resolvedSharedBases)
@@ -707,7 +866,13 @@ internal class ClusterArtworkStore(
             addAll(
                 frameworkAliasCandidates(
                     externalFilesDir,
-                    listOfNotNull(externalStorageRoot()?.let(::File), File("/storage/emulated/legacy")),
+                    // `/sdcard` first: of these spellings it is the one a reader outside our process can
+                    // open, and the framework's own answer is the one it cannot.
+                    listOfNotNull(
+                        File(CLUSTER_ARTWORK_SDCARD_ROOT),
+                        externalStorageRoot()?.let(::File),
+                        File("/storage/emulated/legacy"),
+                    ),
                 ).map { File(it, CLUSTER_ARTWORK_DIRECTORY).path },
             )
         }
@@ -747,6 +912,10 @@ internal class ClusterArtworkStore(
      * file tier has it, and the external copy is deleted when the file tier gave up, so neither tier
      * leaves a file behind for the other. The quality ladder means a noisy cover is retried smaller
      * rather than dropped.
+     *
+     * [ClusterArtworkBaseSelector.select] answers the *delivered* spelling -- `/sdcard/…` whenever that
+     * alias read the cover back -- so the target built from it and the string logged as `uri=` are the
+     * same text the last successful probe validated, on this ROM and in the reader's namespace.
      */
     fun publish(bitmap: Bitmap): Uri? {
         val encoded = encodeCover(bitmap) ?: return null
@@ -852,6 +1021,11 @@ internal class ClusterArtworkStore(
      * reader was given pointed nowhere. `setReadable(true, false)` stays best-effort and its answer is
      * only logged -- the project already learned that chmod on the emulated `/sdcard` view does not
      * necessarily reach another UID (docs/_digest/38 §3) -- so a false from it must not cost the cover.
+     *
+     * [target] is built from the base [ClusterArtworkBaseSelector] answered, so on this ROM the text
+     * below reads `uri=file:///sdcard/DiPlay/…` whenever the alias spelling validated; the framework's
+     * `/storage/emulated/0/…` form only appears when the alias could not be read back, and then it is
+     * the only string this process could prove, not a preferred one.
      *
      * [target] is never deleted here. It may be the cached source when a probe returned the cache tree
      * itself, and even when it is a copy the next candidate's write simply overwrites it, so a failed
