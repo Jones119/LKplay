@@ -119,6 +119,8 @@ class CarPlayHostActivity : ComponentActivity() {
     private data class SettingsBaseline(
         val safeAreaRects: MutableMap<DisplaySize, SafeAreaRect?>,
         val customIconBytes: ByteArray?,
+        /** The corner mask saves as soon as its switch moves, so Cancel has to undo it by hand. */
+        val screenCornerMask: Boolean,
     )
 
     private var connectionPanel: View? = null
@@ -252,6 +254,7 @@ class CarPlayHostActivity : ComponentActivity() {
     private var picturePanel: View? = null
     private var picturePanelGeneration = 0
     private var gestureOverlay: View? = null
+    private var cornerMaskOverlay: CarPlayCornerMaskOverlay? = null
     private var settingsMenu: View? = null
     private var mfiTargetGroup: RadioGroup? = null
     private var mfiRemoteFields: View? = null
@@ -328,6 +331,8 @@ class CarPlayHostActivity : ComponentActivity() {
     private var hideTopBar = true
     private var hideBottomBar = true
     private var safeAreaDrawOutside = true
+    /** Paints the screen's four corners to match the car's rounded bezel; off by default. */
+    private var screenCornerMask = false
     private var locationReportingEnabled = false
     private var locationPermissionAvailable = false
     /**
@@ -591,6 +596,7 @@ class CarPlayHostActivity : ComponentActivity() {
         hideTopBar = AirPlayPersistence.loadHideTopBar(this)
         hideBottomBar = AirPlayPersistence.loadHideBottomBar(this)
         safeAreaDrawOutside = AirPlayPersistence.loadSafeAreaDrawOutside(this)
+        screenCornerMask = AirPlayPersistence.loadScreenCornerMask(this)
         locationPermissionAvailable = hasFineLocationPermission()
         loadConnectionSettings()
         wirelessPermissionsReady = !wirelessEnabled || hasRequiredWirelessPermissions()
@@ -1029,6 +1035,12 @@ class CarPlayHostActivity : ComponentActivity() {
             setOnTouchListener { view, event -> onHostTouch(view, event) }
         }
         root.addView(video, FrameLayout.LayoutParams(-1, -1))
+        // The corner mask sits over the picture but under the touch layer: it is drawn, never
+        // dispatched to, so the three-finger gesture and every CarPlay touch reach the layer above
+        // it exactly as before. Its four children are non-clickable and non-focusable for the same
+        // reason, and the flag only toggles the mask's visibility so the tree never changes here.
+        val cornerMask = CarPlayCornerMaskOverlay(this)
+        root.addView(cornerMask, FrameLayout.LayoutParams(-1, -1))
         root.addView(gestureLayer, FrameLayout.LayoutParams(-1, -1))
         // Measure the preparation content naturally, then fit it inside the safe viewport.
         val viewport = object : FrameLayout(this) {
@@ -1179,6 +1191,9 @@ class CarPlayHostActivity : ComponentActivity() {
         root.addView(safeAreaEditor, FrameLayout.LayoutParams(-1, -1))
         videoView = video
         gestureOverlay = gestureLayer
+        cornerMaskOverlay = cornerMask
+        // On activity start the setting is the persisted one, so a reboot brings the mask back.
+        applyScreenCornerMask()
         settingsGestureHint = gestureHint
         stageStatusView = stage
         connectionPanel = viewport
@@ -1607,6 +1622,14 @@ class CarPlayHostActivity : ComponentActivity() {
         }
 
         content.addView(
+            buildScreenCornerMaskSection(),
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = dp(30) },
+        )
+
+        content.addView(
             buildSafeAreaSection(),
             LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -1839,6 +1862,9 @@ class CarPlayHostActivity : ComponentActivity() {
         AirPlayPersistence.saveHideTopBar(this, hideTopBar)
         AirPlayPersistence.saveHideBottomBar(this, hideBottomBar)
         AirPlayPersistence.saveSafeAreaDrawOutside(this, safeAreaDrawOutside)
+        // Already saved when the switch moved, because it applies live; kept here so the saved menu
+        // still writes it if a future change makes the row a deferred one.
+        AirPlayPersistence.saveScreenCornerMask(this, screenCornerMask)
     }
 
     private fun captureSettingsBaseline(): SettingsBaseline {
@@ -1854,6 +1880,7 @@ class CarPlayHostActivity : ComponentActivity() {
                 safeAreaSize?.let { put(it, AirPlayPersistence.loadSafeAreaRect(this@CarPlayHostActivity, it.width, it.height)) }
             },
             customIconBytes = customIconBytes,
+            screenCornerMask = AirPlayPersistence.loadScreenCornerMask(this),
         )
     }
 
@@ -1888,6 +1915,11 @@ class CarPlayHostActivity : ComponentActivity() {
             Log.w(TAG, "Could not restore the previous AirPlay icon", error)
         }
         settingsBaseline = null
+        // The mask was saved the moment its switch moved, so a cancel has to put both the setting and
+        // the live overlay back to the value the menu opened with.
+        screenCornerMask = baseline.screenCornerMask
+        AirPlayPersistence.saveScreenCornerMask(this, screenCornerMask)
+        applyScreenCornerMask()
         locationPermissionAvailable = hasFineLocationPermission()
         hotspotStatus = HotspotStatus(state = if (wirelessEnabled) getString(R.string.hotspot_state_stopped) else getString(R.string.hotspot_state_off))
         syncMfiSettingsControls()
@@ -2158,6 +2190,55 @@ class CarPlayHostActivity : ComponentActivity() {
                 ).apply { topMargin = dp(6) },
             )
         }
+
+    /**
+     * The four-corner mask switch, in the display area where the picture's shape is decided
+     * (docs/_digest/42 §C12).
+     *
+     * Saving here and now is deliberate: unlike the resolution and codec rows this does not touch the
+     * stream, so there is nothing to renegotiate and the owner can watch the corners change as the
+     * switch moves. The switch row's description is dropped by the overlay theme, so the sentence is
+     * drawn as its own line, the same way the cluster push section does it.
+     */
+    private fun buildScreenCornerMaskSection(): View =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(
+                settingsSwitchRow(
+                    label = getString(R.string.screen_corner_mask),
+                    checked = screenCornerMask,
+                    description = getString(R.string.screen_corner_mask_description),
+                ) { checked ->
+                    if (screenCornerMask == checked) return@settingsSwitchRow
+                    screenCornerMask = checked
+                    AirPlayPersistence.saveScreenCornerMask(this@CarPlayHostActivity, checked)
+                    applyScreenCornerMask()
+                    appendLog("Screen corner mask ${if (checked) "enabled" else "disabled"}")
+                },
+                LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                ),
+            )
+            addView(
+                menuText(getString(R.string.screen_corner_mask_description), 14f, MENU_SECONDARY),
+                LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                ).apply { topMargin = dp(6) },
+            )
+        }
+
+    /**
+     * Shows or hides the four corner views. Only visibility changes, so the mask stays in the tree
+     * between the picture and the touch layer and its draw order is fixed for the life of the
+     * activity -- it can be switched on and off while CarPlay keeps running.
+     */
+    private fun applyScreenCornerMask() {
+        val overlay = cornerMaskOverlay ?: return
+        val visible = screenCornerMask && !menuOpen
+        overlay.visibility = if (visible) View.VISIBLE else View.GONE
+    }
 
     private fun onLocationReportingChanged(checked: Boolean) {
         if (locationReportingEnabled == checked) return
@@ -4163,6 +4244,9 @@ class CarPlayHostActivity : ComponentActivity() {
         }
         menuOpen = true
         gestureOverlay?.visibility = View.GONE
+        // Nothing of the picture is visible under the menu, so the mask is hidden with it; the
+        // persisted flag is only re-applied when the menu closes.
+        applyScreenCornerMask()
         settingsMenu?.visibility = View.VISIBLE
         safeAreaEditor?.visibility = View.GONE
         updateSafeAreaSummary()
@@ -4215,6 +4299,8 @@ class CarPlayHostActivity : ComponentActivity() {
         menuOpen = false
         settingsMenu?.visibility = View.GONE
         gestureOverlay?.visibility = View.VISIBLE
+        // The corner mask is hidden while the menu covers the screen, whatever the switch says.
+        applyScreenCornerMask()
         // The cluster switch may have changed in here (or been restored by a cancel); the bridge is
         // inert until it is told, so hand it the settled value before the session carries on.
         attachClusterBridge()

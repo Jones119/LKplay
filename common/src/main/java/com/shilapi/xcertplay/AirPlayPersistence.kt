@@ -86,6 +86,7 @@ object AirPlayPersistence {
     private const val KEY_RIGHT_HAND_DRIVE = "right_hand_drive"
     private const val KEY_HIDE_TOP_BAR = "hide_top_bar"
     private const val KEY_HIDE_BOTTOM_BAR = "hide_bottom_bar"
+    private const val KEY_SCREEN_CORNER_MASK = "screen_corner_mask"
     private const val KEY_SAFE_AREA_DRAW_OUTSIDE = "safe_area_draw_outside"
     private const val KEY_ADAPT_PIP_RESOLUTION = "adapt_pip_resolution"
     private const val KEY_AUTO_START_ON_BOOT = "auto_start_on_boot"
@@ -791,6 +792,25 @@ object AirPlayPersistence {
     fun saveHideBottomBar(context: Context, hide: Boolean) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putBoolean(KEY_HIDE_BOTTOM_BAR, hide)
+            .apply()
+    }
+
+    /**
+     * Whether the CarPlay picture gets its four screen corners painted black to match the car's
+     * rounded bezel (docs/_digest/42 §C12).
+     *
+     * Default off: it is a cosmetic correction for a screen whose physical opening is rounded, and on
+     * a panel that already shows the whole picture the mask would only cut the corners of CarPlay for
+     * nothing. Persisted rather than property-gated because the setting has to survive an ignition,
+     * the same reason the cluster push is a key and not `debug.diplay.*`.
+     */
+    fun loadScreenCornerMask(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getBoolean(KEY_SCREEN_CORNER_MASK, false)
+
+    fun saveScreenCornerMask(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putBoolean(KEY_SCREEN_CORNER_MASK, enabled)
             .apply()
     }
 

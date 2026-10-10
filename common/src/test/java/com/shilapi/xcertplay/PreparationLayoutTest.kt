@@ -20,7 +20,8 @@ class PreparationLayoutTest {
         val method = CarPlayHostActivity::class.java.getDeclaredMethod("buildContentView")
         method.isAccessible = true
         val root = method.invoke(activity) as android.widget.FrameLayout
-        val viewport = root.getChildAt(2) as FrameLayout
+        // video, corner mask, gesture layer, then the preparation viewport.
+        val viewport = root.getChildAt(3) as FrameLayout
         val panel = viewport.getChildAt(0) as LinearLayout
         val density = activity.resources.displayMetrics.density
         fun layout(heightDp: Int) {

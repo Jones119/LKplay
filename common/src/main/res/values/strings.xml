@@ -670,4 +670,6 @@
     <string name="microphone_status_available">Microphone: available, CarPlay voice input can use it</string>
     <string name="microphone_status_blocked">Microphone: held by the head unit voice assistant, so CarPlay cannot hear you</string>
     <string name="microphone_status_hint">If it is held, switch the car voice wake word (嗨领克 / 小度小度) off in the head unit settings; CarPlay then owns the microphone.</string>
+    <string name="screen_corner_mask">Screen corner mask</string>
+    <string name="screen_corner_mask_description">The visible screen opening has rounded corners, so a full-screen CarPlay picture is clipped by the car\'s bezel there. This paints the screen\'s four corners black in the same curve, so CarPlay fits the opening exactly. Off by default; turn it on only if the car clips the picture.</string>
 </resources>
