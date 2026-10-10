@@ -10,29 +10,39 @@ import java.io.FileOutputStream
 import java.util.UUID
 
 /**
- * How one album cover reaches the head unit, in the order of preference the working reference
- * implementation uses on this exact car (docs/_digest/45 §2.4, `LegacyArtworkLoader`).
+ * How one album cover reaches the head unit, in the order this car was measured to accept.
  *
- * Three tiers exist, and each one exists for a measured reason:
+ * Two tiers remain, and the car -- not the reference implementation -- decided which one goes first:
  *
- * 1. **JPEG, quality 88, longest edge <= 256 px, encoded < 1 MiB.** The head unit's own reader is
- *    built around those numbers and the vendor's loader rejects anything else before it ever gets
- *    there. We used to hand over a full-size PNG, which is both far larger and a format the reader
- *    was never proven to take.
+ * 1. **A world-readable `file://` copy under the app's external files directory.** On 2026-10-09 the
+ *    `content://` handover below *succeeded three times in a row* on the car (fresh app process, fresh
+ *    CarPlay session, music playing): `artwork decoded id=…` -> `cluster cover identity=… published=true`
+ *    -> `cluster artwork encoded bytes=… edge=256x256` -> `cluster artwork grants=2 provider=true
+ *    uri=content://…`, and the vendor's own service logged receiving every new Uri
+ *    (`albumCover2 = content://…`) -- yet the instrument cluster never painted one of them, including
+ *    in a session whose media card was created from scratch with that very Uri. In the 2026-10-08 run
+ *    the same feature handed over a `file://` path in `getExternalFilesDir(null)` with
+ *    `setReadable(true, false)` and the cluster *did* show the cover (docs/_digest/38 §3). A reader
+ *    that accepts our Uri and then never opens it is not something grants or a manifest can fix from
+ *    here, so the file goes first.
  * 2. **`content://<package>.artwork/covers/<session>/<uuid>.jpg` plus an explicit
- *    `grantUriPermission` to each reader package.** A `file://` Uri depends on the emulated-storage
- *    FUSE view and on mode bits that a different UID does not necessarily see, which is why the
- *    reference grants the read permission explicitly instead of relying on the file being readable.
- * 3. **The `file://` path.** It is the tier that was in place before this change and that did show
- *    the first track's cover on the car, so it is kept as the fallback for the case where the
- *    provider is missing from the merged manifest or every grant is refused. Tier 3 of the reference
- *    -- a loopback HTTP server -- is deliberately *not* built here: the two cheap tiers are
- *    unverified on the car, and the HTTP one costs a port, a lifetime and a socket for a benefit
- *    that only exists if both cheaper tiers fail (docs/_digest/45 §7.4).
+ *    `grantUriPermission` to each reader package**, kept for a car whose external tree is missing or
+ *    unwritable. It stays fully wired (the provider is registered in `:common`'s manifest). This is
+ *    the tier docs/_digest/45 §2.4 recorded from the reference app's `LegacyArtworkLoader` -- content
+ *    provider plus grant first, then a loopback HTTP server -- and our own car disagreed with that
+ *    order, which is why the two are swapped here. The reference's HTTP tier is still deliberately not
+ *    built: it costs a port, a lifetime and a single-pass socket, and it only matters once both cheap
+ *    tiers have failed (docs/_digest/45 §7.4).
+ *
+ * Encoding is not a tier. Whichever path serves the bytes, the head unit's reader was built around
+ * JPEG at quality 88, a longest edge of at most 256 px and an encoded size under 1 MiB, so a cover is
+ * scaled, encoded and size-checked identically here: we used to hand over a full-size PNG, which is
+ * both far larger and a format that reader was never proven to take.
  *
  * Everything that can be decided without a device lives in this file as a pure function, so the
- * scale, the byte budget, the Uri shape, the grant list and the path mapping are unit-tested; only
- * the compression, the grant and the file I/O need the car (see [ClusterArtworkStore]).
+ * scale, the byte budget, the Uri shape, the grant list, the tier precedence and the path mapping are
+ * unit-tested; only the compression, the read-back, the grant and the file I/O need the car (see
+ * [ClusterArtworkStore]).
  */
 
 /** `<applicationId>.artwork`: the authority registered by the provider in `:common`'s manifest. */
@@ -41,8 +51,22 @@ internal const val CLUSTER_ARTWORK_AUTHORITY_SUFFIX = ".artwork"
 /** The path segment the reference uses (`.../covers/<session>/<uuid>.jpg`). */
 internal const val CLUSTER_ARTWORK_PATH = "covers"
 
-/** `<cacheDir>/cluster-artwork/<session>/`; a cache, never external storage, for the provider tier. */
+/**
+ * `<root>/cluster-artwork/<session>/`, under the cache for the provider tier and under the external
+ * files directory for the file tier. One session directory per process, so a run's covers can be
+ * recognised and deleted as a group.
+ */
 internal const val CLUSTER_ARTWORK_DIRECTORY = "cluster-artwork"
+
+/**
+ * The flat name the pre-2026-10-09 fallback wrote straight into the external files directory
+ * (`cluster-artwork-<millis>.jpg`).
+ *
+ * Nothing produces it any more; it is a constant because the leftovers of that implementation are
+ * still on the car's storage and have to be recognised to be deleted (see
+ * [cleanLegacyClusterArtworkFiles]).
+ */
+internal const val CLUSTER_ARTWORK_LEGACY_FILE_PREFIX = "cluster-artwork-"
 
 /** The first JPEG quality tried, and the value the reference encodes with. */
 internal const val CLUSTER_ARTWORK_QUALITY = 88
@@ -72,9 +96,10 @@ internal const val CLUSTER_ARTWORK_MAX_RETAINED = 4
 /**
  * The two processes that read the cover, taken from the reference's `OEM_READERS`.
  *
- * `com.ecarx.dim_interaction` is the DIM service whose log line proves the channel works (the
+ * `com.ecarx.dim_interaction` is the DIM service whose log line proves the *handover* works (the
  * `albumCover2` line in docs/_digest/48 §1); `ecarx.xsf.mediacenter` is the car's own media centre,
- * which shows the same artwork elsewhere on the head unit.
+ * which shows the same artwork elsewhere on the head unit. Neither line proves the cluster painted it,
+ * which is what the 2026-10-09 run taught us.
  */
 internal val CLUSTER_ARTWORK_READERS = listOf("com.ecarx.dim_interaction", "ecarx.xsf.mediacenter")
 
@@ -160,25 +185,47 @@ internal fun <T : Any> encodeClusterArtworkWithinBudget(
     return null
 }
 
-/** Which of the two cheap tiers the handover ended in. */
+/** Which tier the handover ended in. */
 internal enum class ClusterArtworkTier {
-    /** Tier 2: `content://` with an explicit read grant for the vendor's reader processes. */
-    CONTENT,
-
-    /** Tier 3: the `file://` Uri the previous implementation used. */
+    /** The primary tier: a readable `file://` copy in the app's external files directory. */
     FILE,
+
+    /** The fallback tier: `content://` with an explicit read grant for the vendor's reader processes. */
+    CONTENT,
 }
 
 /**
- * The tier to use, given what the device answered.
+ * The tier to use, given what the device answered, or null when neither tier can serve the cover.
  *
- * The `content://` tier needs both halves: a provider that the merged manifest actually registered
- * (otherwise the Uri resolves to nothing) and at least one granted reader (otherwise the reader gets
- * `SecurityException` instead of bytes). Either half missing means the fallback, which is what the
- * car already proved readable.
+ * The external copy is decided first because it is the only one the car ever proved it displays (see
+ * the file KDoc). The provider is reached only when there is no readable external file: either half
+ * of that tier missing -- no provider in the merged manifest, or every grant refused -- means the
+ * cover is dropped instead, because a Uri its reader can only fail on is worse than no cover at all.
  */
-internal fun clusterArtworkTier(providerRegistered: Boolean, granted: Int): ClusterArtworkTier =
-    if (providerRegistered && granted > 0) ClusterArtworkTier.CONTENT else ClusterArtworkTier.FILE
+internal fun clusterArtworkTier(
+    fileUsable: Boolean,
+    providerRegistered: Boolean,
+    granted: Int,
+): ClusterArtworkTier? = when {
+    fileUsable -> ClusterArtworkTier.FILE
+    providerRegistered && granted > 0 -> ClusterArtworkTier.CONTENT
+    else -> null
+}
+
+/**
+ * Whether the external copy can really be handed over: it exists, holds bytes, and one byte reads
+ * back in this process.
+ *
+ * A write that reported success on emulated storage is not proof the file is there -- `/sdcard` is a
+ * FUSE view and `setReadable` on it is best-effort -- and handing over a `file://` Uri nobody can
+ * open is precisely the failure this file exists to avoid, so the copy is read back once before it is
+ * announced. The check is deliberately cheap (a `file://` reader opens the path itself; what matters
+ * is that it yields bytes now) and pure, so both the success and the failure can be tested.
+ */
+internal fun clusterArtworkFileReadable(file: File): Boolean {
+    if (!file.isFile || file.length() == 0L) return false
+    return runCatching { file.inputStream().use { it.read() } >= 0 }.getOrDefault(false)
+}
 
 /**
  * Maps a `content://<package>.artwork/covers/<session>/<uuid>.jpg` Uri back to the cached file.
@@ -188,9 +235,10 @@ internal fun clusterArtworkTier(providerRegistered: Boolean, granted: Int): Clus
  * shape, so there is exactly one implementation of it, and it takes plain values rather than an
  * `android.net.Uri` so it is unit-testable without a device.
  *
- * Returns null for anything that is not our authority, carries a query or fragment, has the wrong
- * number of path segments, or names a file that is not there: a provider that guessed would hand out
- * files outside the cover directory.
+ * Only the fallback tier writes into [cacheDir]: the primary tier's `file://` copy is never served
+ * through the provider. Returns null for anything that is not our authority, carries a query or
+ * fragment, has the wrong number of path segments, or names a file that is not there: a provider that
+ * guessed would hand out files outside the cover directory.
  */
 fun clusterArtworkCoverFile(
     cacheDir: File,
@@ -219,10 +267,10 @@ fun clusterArtworkCoverFile(
  *
  * The cap is the reference's. A cover that falls out of it must stop being readable: the caller
  * revokes the grant and deletes the file for every entry [add] returns, otherwise a long drive would
- * leave every cover of the session readable in the cache (and the grant table growing).
+ * leave every cover of the session readable (and the grant table growing) in one of the two trees.
  */
 internal class ClusterArtworkRetention(private val limit: Int = CLUSTER_ARTWORK_MAX_RETAINED) {
-    /** One handed-over cover: the file on disk and the Uri granted for it, if the content tier ran. */
+    /** One handed-over cover: the file on disk and the Uri granted for it, if the fallback tier ran. */
     data class Entry(val file: File, val uri: Uri?)
 
     private val held = ArrayList<Entry>()
@@ -247,48 +295,71 @@ internal class ClusterArtworkRetention(private val limit: Int = CLUSTER_ARTWORK_
 /**
  * Encodes one cover and hands it over, or returns null when no tier could.
  *
- * Device-only work: JPEG compression, the session directory, the provider check, the grants and the
- * `file://` fallback. What can be decided without a device is delegated to the pure functions above.
- * A [ClusterArtworkStore] is created once per process: its session directory lets the next process
- * recognise and delete this run's leftovers (see [cleanStaleClusterArtworkSessions]).
+ * Device-only work: JPEG compression, the session directories, the external copy with its read-back,
+ * the provider check and the grants. What can be decided without a device is delegated to the pure
+ * functions above. A [ClusterArtworkStore] is created once per process: its session directory lets
+ * the next process recognise and delete this run's leftovers (see [cleanStaleClusterArtworkSessions]).
+ *
+ * The three device facts the tier decision needs ([externalFilesDir], [cacheRoot],
+ * [providerRegistered]) are constructor parameters, so both tiers can be exercised in a JVM test; the
+ * car passes its own external directory and asks its own package manager.
  */
-internal class ClusterArtworkStore(private val context: Context) {
+internal class ClusterArtworkStore(
+    private val context: Context,
+    /** The app's external files directory, or null when the car exposes none; the primary tier writes here. */
+    private val externalFilesDir: File? = context.getExternalFilesDir(null),
+    /** The internal tree the provider serves, `<cacheDir>/cluster-artwork`. */
+    private val cacheRoot: File = File(context.cacheDir, CLUSTER_ARTWORK_DIRECTORY),
+    /** Whether the merged manifest registered the artwork provider (the car answers from its package manager). */
+    private val providerRegistered: () -> Boolean = {
+        runCatching {
+            context.packageManager.resolveContentProvider(clusterArtworkAuthority(context.packageName), 0) != null
+        }.getOrDefault(false)
+    },
+) {
     private val session = newClusterArtworkSession()
-    private val root = File(context.cacheDir, CLUSTER_ARTWORK_DIRECTORY)
-    private val directory = File(root, session)
+    private val externalRoot = externalFilesDir?.let { File(it, CLUSTER_ARTWORK_DIRECTORY) }
+    private val cacheDirectory = File(cacheRoot, session)
     private val retention = ClusterArtworkRetention()
 
     init {
-        cleanStaleClusterArtworkSessions(root, session)
+        cleanStaleClusterArtworkSessions(cacheRoot, session)
+        externalRoot?.let { cleanStaleClusterArtworkSessions(it, session) }
+        cleanLegacyClusterArtworkFiles(externalFilesDir)
     }
 
     /**
      * Encodes [bitmap] and returns the Uri to hand to the bridge, or null when nothing was produced.
      *
-     * The encoded file always lands in the cache first, because the provider tier serves it from
-     * there; only when that tier is unusable is the same encoded bytes copied into the app's external
-     * files directory, where a `file://` reader can reach them. The quality ladder means a noisy
-     * cover is retried smaller rather than dropped.
+     * The cover is always encoded into the cache first, because that tree is the reliably writable one
+     * and because the provider tier serves from it; the primary tier then *moves* those exact bytes to
+     * the external copy the car reads. Only one of the two survives a handover: the cache file is
+     * deleted once the file tier has it, and the external copy is deleted when the file tier gave up,
+     * so neither tier leaves a file behind for the other. The quality ladder means a noisy cover is
+     * retried smaller rather than dropped.
      */
     fun publish(bitmap: Bitmap): Uri? {
-        val file = encodeCover(bitmap) ?: return null
-        val authority = clusterArtworkAuthority(context.packageName)
-        val providerRegistered = runCatching {
-            context.packageManager.resolveContentProvider(authority, 0) != null
-        }.getOrDefault(false)
-        val uri = Uri.parse(clusterArtworkUriText(context.packageName, session, file.name))
-        val granted = if (providerRegistered) grant(uri) else 0
-        Log.i(TAG, "cluster artwork grants=$granted provider=$providerRegistered uri=$uri")
-        if (clusterArtworkTier(providerRegistered, granted) == ClusterArtworkTier.CONTENT) {
-            evict(retention.add(ClusterArtworkRetention.Entry(file, uri)))
+        val encoded = encodeCover(bitmap) ?: return null
+        val external = promoteToExternal(encoded)
+        if (external != null) {
+            // Moved, not copied: nothing will serve the cache copy now that the provider tier lost.
+            runCatching { encoded.delete() }
+            evict(retention.add(ClusterArtworkRetention.Entry(external, null)))
+            return Uri.fromFile(external)
+        }
+        val uri = Uri.parse(clusterArtworkUriText(context.packageName, session, encoded.name))
+        val registered = providerRegistered()
+        val granted = if (registered) grant(uri) else 0
+        Log.i(TAG, "cluster artwork fallback grants=$granted provider=$registered uri=$uri")
+        if (clusterArtworkTier(fileUsable = false, providerRegistered = registered, granted = granted) ==
+            ClusterArtworkTier.CONTENT
+        ) {
+            evict(retention.add(ClusterArtworkRetention.Entry(encoded, uri)))
             return uri
         }
-        val fallback = copyToExternal(file) ?: return null
-        // The cache copy only exists for the provider tier, which just proved unusable: leaving it
-        // behind would be a file nothing can read and nothing ever deletes.
-        runCatching { file.delete() }
-        evict(retention.add(ClusterArtworkRetention.Entry(fallback, null)))
-        return Uri.fromFile(fallback)
+        // No tier can serve it: a cached file nobody may read is a leak, not a cover.
+        runCatching { encoded.delete() }
+        return null
     }
 
     /** Revokes and deletes everything this store handed over; called when a session ends. */
@@ -318,7 +389,7 @@ internal class ClusterArtworkStore(private val context: Context) {
             }.getOrNull() ?: return null
         }
         val encoded = runCatching {
-            if (directory.isDirectory || directory.mkdirs()) {
+            if (cacheDirectory.isDirectory || cacheDirectory.mkdirs()) {
                 encodeClusterArtworkWithinBudget(
                     encode = { quality -> compress(scaled, quality) },
                     sizeOf = File::length,
@@ -339,7 +410,7 @@ internal class ClusterArtworkStore(private val context: Context) {
     }
 
     private fun compress(bitmap: Bitmap, quality: Int): File? {
-        val file = File(directory, newClusterArtworkFileName())
+        val file = File(cacheDirectory, newClusterArtworkFileName())
         return runCatching {
             FileOutputStream(file).use { out ->
                 if (!bitmap.compress(Bitmap.CompressFormat.JPEG, quality, out)) {
@@ -349,6 +420,41 @@ internal class ClusterArtworkStore(private val context: Context) {
             file
         }.getOrElse {
             file.delete()
+            null
+        }
+    }
+
+    /**
+     * The primary tier: copies the encoded cover into `<externalFilesDir>/cluster-artwork/<session>/`
+     * under the same UUID name and returns it, or null when that tree cannot serve it.
+     *
+     * `setReadable(true, false)` is best-effort and its answer is only logged: the project already
+     * learned that chmod on the emulated `/sdcard` view does not necessarily reach another UID
+     * (docs/_digest/38 §3), so a false from it must not cost the cover. What does decide the tier is
+     * [clusterArtworkFileReadable]: a copy that does not read back here is deleted and the fallback
+     * runs, so the external tree never keeps a file no tier owns.
+     */
+    private fun promoteToExternal(encoded: File): File? {
+        val root = externalRoot ?: return null
+        val directory = File(root, session)
+        val target = File(directory, encoded.name)
+        return runCatching {
+            if (!directory.isDirectory && !directory.mkdirs()) {
+                Log.w(TAG, "cluster artwork external directory unavailable dir=$directory")
+                return@runCatching null
+            }
+            encoded.inputStream().use { input -> target.outputStream().use { output -> input.copyTo(output) } }
+            val worldReadable = runCatching { target.setReadable(true, false) }.getOrDefault(false)
+            if (!clusterArtworkFileReadable(target)) {
+                Log.w(TAG, "cluster artwork external copy unreadable file=$target chmod=$worldReadable")
+                target.delete()
+                return@runCatching null
+            }
+            Log.i(TAG, "cluster artwork tier=file chmod=$worldReadable bytes=${target.length()} uri=${Uri.fromFile(target)}")
+            target
+        }.getOrElse {
+            Log.w(TAG, "cluster artwork external copy failed", it)
+            target.delete()
             null
         }
     }
@@ -379,38 +485,16 @@ internal class ClusterArtworkStore(private val context: Context) {
             runCatching { entry.file.delete() }
         }
     }
-
-    /**
-     * The `file://` tier: the encoded bytes copied next to the app's other exported files.
-     *
-     * The reader is another process, and the default 0660 leaves the file unreadable for anything not
-     * in this app's group, which is what the car's service is -- the same rule the previous
-     * implementation relied on when it wrote its PNG here.
-     */
-    private fun copyToExternal(encoded: File): File? = runCatching {
-        val directory = context.getExternalFilesDir(null) ?: return null
-        val file = File(directory, "cluster-artwork-${System.currentTimeMillis()}.jpg")
-        encoded.inputStream().use { input -> file.outputStream().use { output -> input.copyTo(output) } }
-        runCatching { file.setReadable(true, false) }
-        directory.listFiles()?.forEach { candidate ->
-            if (candidate.name.startsWith("cluster-artwork-") && candidate != file) {
-                runCatching { candidate.delete() }
-            }
-        }
-        file
-    }.getOrElse {
-        Log.w(TAG, "cluster artwork file fallback failed", it)
-        null
-    }
 }
 
 /**
  * Deletes the cover directories a previous process left behind in [root].
  *
  * A process that is killed mid-drive never revokes its grants or removes its covers, so the next
- * start cleans up after it. Only directories that are exactly a session UUID are touched, and only
- * inside the given root, so a bug here can not walk out of the app's cache. [activeSession] is spared
- * because it belongs to the store that is doing the cleaning.
+ * start cleans up after it -- in both trees, since the file tier's copy is not visible to the
+ * provider and the provider's is not visible to the file tier. Only directories that are exactly a
+ * session UUID are touched, and only inside the given root, so a bug here can not walk out of the
+ * app's storage. [activeSession] is spared because it belongs to the store that is doing the cleaning.
  */
 internal fun cleanStaleClusterArtworkSessions(root: File, activeSession: String) {
     val entries = root.listFiles() ?: return
@@ -418,5 +502,25 @@ internal fun cleanStaleClusterArtworkSessions(root: File, activeSession: String)
         if (!candidate.isDirectory || !UUID_PATTERN.matches(candidate.name)) continue
         if (candidate.name == activeSession) continue
         runCatching { candidate.deleteRecursively() }
+    }
+}
+
+/**
+ * Deletes the flat `cluster-artwork-<millis>.jpg` files the pre-2026-10-09 `file://` fallback left in
+ * the root of the external files directory.
+ *
+ * That implementation wrote one file per handover directly into this directory and deleted only the
+ * previous one, so the last cover of every run stayed there. The current writer uses
+ * `<root>/cluster-artwork/<session>/` instead, which is why these leftovers can go unconditionally:
+ * nothing produces this shape any more, and a `file://` reader that lists the directory is only
+ * confused by them. Only the app's own files directory is passed in, so the sweep cannot reach
+ * anything else.
+ */
+internal fun cleanLegacyClusterArtworkFiles(externalFilesRoot: File?) {
+    val entries = externalFilesRoot?.listFiles() ?: return
+    for (candidate in entries) {
+        if (!candidate.isFile) continue
+        if (!candidate.name.startsWith(CLUSTER_ARTWORK_LEGACY_FILE_PREFIX)) continue
+        runCatching { candidate.delete() }
     }
 }

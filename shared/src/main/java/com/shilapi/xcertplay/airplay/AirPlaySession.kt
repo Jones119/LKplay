@@ -586,6 +586,9 @@ class AirPlaySession(
                         "audioFormats=${(info["audioFormats"] as? List<*>)?.size ?: 0} " +
                         "audioLatencies=${(info["audioLatencies"] as? List<*>)?.size ?: 0}",
                 )
+                // The OEM icon never appeared on the CS11 while /info kept declaring it, so what we
+                // actually declare is logged once per session (OemIconDiagnostic explains the format).
+                Log.i(TAG, oemIconDiagnostic(config))
                 debugLog(
                     "airplay /info videoInCar=${config.videoInCar} " +
                         "videoPlaybackAllowed=${if (config.videoInCar) VideoInCar.allowed else "not-offered"}",
