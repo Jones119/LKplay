@@ -197,8 +197,19 @@ class UsbMuxIssue100RegressionTest {
         } catch (error: InvocationTargetException) { throw error.targetException }
     }
 
-    private fun remainder(host: Iap2UsbMuxHost): ByteArray =
-        ReflectionHelpers.getField(frameBuffer(host), "bytes")
+    /**
+     * The bytes still waiting to be framed. [UsbMuxFrameBuffer] now keeps them as a live window
+     * (`[start, end)`) inside a reused backing array, so the remainder is that window rather than the
+     * whole array; the invariant these tests assert - only the untouched trailing bytes survive - is
+     * unchanged.
+     */
+    private fun remainder(host: Iap2UsbMuxHost): ByteArray {
+        val buffer = frameBuffer(host)
+        val bytes: ByteArray = ReflectionHelpers.getField(buffer, "bytes")
+        val start: Int = ReflectionHelpers.getField(buffer, "start")
+        val end: Int = ReflectionHelpers.getField(buffer, "end")
+        return bytes.copyOfRange(start, end)
+    }
     private fun frameBuffer(host: Iap2UsbMuxHost): UsbMuxFrameBuffer =
         ReflectionHelpers.getField(host, "receiveFrames")
     private fun frameLength(frame: Any?): Int = ReflectionHelpers.getField(frame!!, "length")

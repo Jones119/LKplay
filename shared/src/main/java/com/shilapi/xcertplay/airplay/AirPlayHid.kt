@@ -53,6 +53,29 @@ object AirPlayHid {
         return report
     }
 
+    /**
+     * The same report with the normalized contacts scaled to a display, so a drag does not have to
+     * build a scaled copy of its contact list for every finger move (docs/_digest/51 §12): the car
+     * sends 60-120 touch states per second, and `contacts.map { it.copy(x = x * width, ...) }`
+     * allocated a list plus one object per finger on every one of them.
+     */
+    fun touchReport(contacts: List<AirPlayContact>, widthPixels: Int, heightPixels: Int): ByteArray {
+        val report = ByteArray(BYTES_PER_FINGER * TOUCH_CONTACTS)
+        for (slot in 0 until TOUCH_CONTACTS) {
+            val offset = slot * BYTES_PER_FINGER
+            report[offset] = slot.toByte()
+            val contact = contacts.getOrNull(slot) ?: continue
+            report[offset + 1] = if (contact.down) 0x01 else 0x00
+            writeU16Le(report, offset + 2, scaledAxis(contact.x, widthPixels))
+            writeU16Le(report, offset + 4, scaledAxis(contact.y, heightPixels))
+        }
+        return report
+    }
+
+    /** One normalized axis to a pixel coordinate the way the pre-scaling call site did it. */
+    private fun scaledAxis(value: Double, pixels: Int): Int =
+        Math.round((value * pixels).coerceAtLeast(0.0)).toInt()
+
     fun knobReport(state: AirPlayKnobState): ByteArray {
         val report = ByteArray(4)
         report[0] = (

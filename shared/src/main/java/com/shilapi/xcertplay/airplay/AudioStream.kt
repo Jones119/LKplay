@@ -91,6 +91,12 @@ class AudioStream(
         val buffer = ByteArray(DATAGRAM_BYTES)
         // Reused 12-byte AEAD nonce: four zero bytes followed by the packet's eight-byte tail nonce.
         val nonce = ByteArray(12)
+        // CS11: the sealed packet is copied out of the shared datagram buffer only so the next receive
+        // cannot overwrite it mid-decrypt, and nothing downstream keeps it - the capture writes it out
+        // immediately and the queue takes the decrypted RTP array instead (docs/_digest/51 §12). So one
+        // buffer is reused across packets and only resized when a packet arrives with a new length,
+        // which on the wired LPCM stream (137 identical packets per second) is once per track.
+        var wire = ByteArray(0)
         try {
             while (!closed.get()) {
                 val packet = DatagramPacket(buffer, buffer.size)
@@ -107,7 +113,8 @@ class AudioStream(
                     } else null,
                     timestamp = if (packet.length >= RTP_HEADER_LEN) readU32Be(buffer, 4) else null,
                 )
-                val wire = packet.data.copyOf(packet.length)
+                if (wire.size != packet.length) wire = ByteArray(packet.length)
+                buffer.copyInto(wire, 0, 0, packet.length)
                 val packetNumber = receivedPackets.incrementAndGet()
                 if (wire.size < RTP_HEADER_LEN + TAIL_LEN) {
                     if (packetNumber == 1) {

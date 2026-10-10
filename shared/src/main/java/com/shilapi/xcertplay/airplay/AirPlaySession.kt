@@ -334,10 +334,10 @@ class AirPlaySession(
     }
 
     fun sendTouch(contacts: List<AirPlayContact>, enqueuedNs: Long = System.nanoTime()): Boolean {
-        val scaled = contacts.map {
-            it.copy(x = it.x * config.main.widthPixels, y = it.y * config.main.heightPixels)
-        }
-        val report = AirPlayHid.touchReport(scaled)
+        // CS11: the report is encoded straight from the normalized contacts (docs/_digest/51 §12). The
+        // previous `contacts.map { it.copy(x = it.x * widthPixels, ...) }` allocated a scaled list plus
+        // one object per finger for each of the 60-120 states a drag produces every second.
+        val report = AirPlayHid.touchReport(contacts, config.main.widthPixels, config.main.heightPixels)
         val sendStartNs = System.nanoTime()
         val sent = sendHidReport(AirPlayHid.TOUCH_HID_UID, report)
         if (sent) {
@@ -346,11 +346,13 @@ class AirPlaySession(
             )
         }
         if (sent && firstTouchSendLogged.compareAndSet(false, true)) {
-            val first = scaled.firstOrNull()
+            val first = contacts.firstOrNull()
+            val firstX = first?.let { Math.round((it.x * config.main.widthPixels).coerceAtLeast(0.0)) }
+            val firstY = first?.let { Math.round((it.y * config.main.heightPixels).coerceAtLeast(0.0)) }
             Log.i(
                 TAG,
-                "airplay touch report sent contacts=${scaled.size} first=" +
-                    "(${first?.x},${first?.y},down=${first?.down}) report=${report.toHexString()}",
+                "airplay touch report sent contacts=${contacts.size} first=" +
+                    "($firstX,$firstY,down=${first?.down}) report=${report.toHexString()}",
             )
         } else if (!sent && touchSendFailureLogged.compareAndSet(false, true)) {
             Log.w(TAG, "airplay touch dropped: event channel is not ready")

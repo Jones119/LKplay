@@ -1008,6 +1008,13 @@ private class AudioRenderer(
     private var softwareOpus: LegacyNativeOpus.Decoder? = null
     private var track: AudioTrack? = null
     private var pcm = ByteArray(64 * 1024)
+    /**
+     * Reused destination for the wired LPCM byte swap (docs/_digest/51 §12). The wired link carries
+     * 137 uncompressed packets per second and every one of them used to allocate a fresh copy of its
+     * payload just to swap it; the render thread owns this buffer and reuses it for the life of the
+     * track, so the swap costs no allocation at all.
+     */
+    private var pcmSwap = ByteArray(0)
     private var playbackStarted = false
     private var prebufferBytes = 0
     private var startThresholdBytes = 0
@@ -1436,7 +1443,14 @@ private class AudioRenderer(
         val rtp = packet.rtp
         val timestampUs = sampleTimestampUs(packet.sample)
         when (format.codec) {
-            AudioCodecKind.LPCM -> writePcm(byteSwapS16(rtp.copyOfRange(12, rtp.size)))
+            AudioCodecKind.LPCM -> {
+                val payloadBytes = rtp.size - RTP_HEADER_BYTES
+                if (payloadBytes > 0) {
+                    if (pcmSwap.size < payloadBytes) pcmSwap = ByteArray(payloadBytes)
+                    byteSwapS16Into(rtp, RTP_HEADER_BYTES, payloadBytes, pcmSwap)
+                    writePcm(pcmSwap, 0, payloadBytes)
+                }
+            }
             AudioCodecKind.AAC_LC -> {
                 val accessUnit = rtp.copyOfRange(12, rtp.size)
                 if (accessUnit.isNotEmpty()) {
@@ -1776,13 +1790,21 @@ private class AudioRenderer(
         }
     }
 
-    private fun byteSwapS16(source: ByteArray): ByteArray {
-        for (index in 0 until source.size - 1 step 2) {
-            val tmp = source[index]
-            source[index] = source[index + 1]
-            source[index + 1] = tmp
+    /**
+     * Writes the big-endian 16-bit LPCM payload at [sourceOffset] into [destination] as little-endian,
+     * without allocating: the wired link carries 137 of these per second and the previous
+     * `byteSwapS16(rtp.copyOfRange(...))` allocated a fresh payload copy for every one of them
+     * (docs/_digest/51 §12). An odd trailing byte - which an S16 stream should never have - is copied
+     * unchanged rather than dropped, so a malformed packet cannot lose its last byte silently.
+     */
+    private fun byteSwapS16Into(source: ByteArray, sourceOffset: Int, length: Int, destination: ByteArray) {
+        var index = 0
+        while (index + 1 < length) {
+            destination[index] = source[sourceOffset + index + 1]
+            destination[index + 1] = source[sourceOffset + index]
+            index += 2
         }
-        return source
+        if (index < length) destination[index] = source[sourceOffset + index]
     }
 
     @Synchronized
@@ -1828,6 +1850,8 @@ private class AudioRenderer(
     private companion object {
         const val TAG = "xcertplay-usb"
         const val AAC_OBJECT_TYPE_LC = 2
+        /** The RTP header every audio packet carries ahead of its payload. */
+        const val RTP_HEADER_BYTES = 12
         const val MIN_OPUS_PACKET_BYTES = 4
         const val OPUS_CODEC_DELAY_NANOS = 6_500_000L
         const val OPUS_SEEK_PRE_ROLL_NANOS = 80_000_000L

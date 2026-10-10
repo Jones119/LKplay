@@ -86,7 +86,7 @@ internal class VideoStats(
             (bytes * 8 / 1000 / seconds).toLong(), recoveries,
             touchAvgMs, maxTouchLatencyNs / 1_000_000, touchSamples,
             TouchLatencyProbe.maxSendNs / 1_000_000, TouchLatencyProbe.maxQueueNs / 1_000_000,
-        )
+        ) + allocationSegment(now)
         TouchLatencyProbe.maxSendNs = 0
         TouchLatencyProbe.maxQueueNs = 0
         log(line)
@@ -96,6 +96,17 @@ internal class VideoStats(
         presentSamples = 0; presentIndex = 0
         touchSamples = 0; touchLatencySumNs = 0; maxTouchLatencyNs = 0
         return line
+    }
+
+    /**
+     * Appends the app-wide allocation/GC rate to the main screen's line while high-rate tracing is on
+     * (docs/_digest/51 §12). Only the main stream reports it: the counters are process-wide, so a second
+     * stream would print the same numbers twice. Empty when tracing is off, which is the shipped state.
+     */
+    private fun allocationSegment(nowNs: Long): String {
+        if (label.isNotEmpty()) return ""
+        val segment = com.shilapi.xcertplay.diag.AllocationStats.reportIfTracing(nowNs) ?: return ""
+        return " $segment"
     }
 
     private fun presentPercentiles(): Pair<Long, Long> {
