@@ -79,11 +79,14 @@ class ScreenStream(private val key: ByteArray, private val onDiagnostic: (String
             // CS11: TCP flow control is our only throttle on the phone's video sender. A big
             // receive window lets it dump multi-megabit bursts into the NCM link, and those
             // bursts are what evict the audio datagrams (Udp6InErrors spikes while scrolling).
-            // 64 KiB keeps the pipe full while pacing the sender.
-            runCatching { accepted.receiveBufferSize = VIDEO_RECEIVE_BUFFER_BYTES }
+            // 64 KiB keeps the pipe full while pacing the sender; VideoReceiveWindow lets a
+            // prop override it so one ignition window can compare values (see its KDoc).
+            val windowBytes = VideoReceiveWindow.current()
+            runCatching { accepted.receiveBufferSize = windowBytes }
             runCatching { accepted.tcpNoDelay = true }
             onDiagnostic(
-                "video socket accepted rcvbuf=${runCatching { accepted.receiveBufferSize }.getOrDefault(0)}",
+                "video socket accepted rcvbuf=${runCatching { accepted.receiveBufferSize }.getOrDefault(0)}" +
+                    " requested=$windowBytes",
             )
             run(accepted)
         } catch (error: Exception) {
@@ -215,8 +218,6 @@ class ScreenStream(private val key: ByteArray, private val onDiagnostic: (String
         const val OP_VIDEO_FRAME = 0
         const val OP_VIDEO_CONFIG = 1
         const val MAX_BODY = 8 * 1024 * 1024
-        /** Cap on the TCP receive window for the video stream (see accept()). */
-        const val VIDEO_RECEIVE_BUFFER_BYTES = 64 * 1024
     }
 }
 
