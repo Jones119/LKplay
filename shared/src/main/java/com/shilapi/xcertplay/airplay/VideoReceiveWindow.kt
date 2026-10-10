@@ -11,8 +11,7 @@ import android.util.Log
  * only end-to-end throttle we own: a smaller window caps how much the phone may have in flight, so it
  * arrives in smaller bursts and competes less with the audio.
  *
- * 64 KiB is the shipped value (docs/_digest/18 §3 item 3). The window is a live system property so a
- * single ignition window can compare values without a rebuild:
+ * The window is a live system property so one ignition window can compare values without a rebuild:
  *
  * ```
  * adb shell setprop debug.diplay.video_rcvbuf 32768   # takes effect on the next stream SETUP
@@ -20,9 +19,7 @@ import android.util.Log
  *
  * **The kernel doubles what is requested**: `setReceiveBufferSize(8192)` makes `getReceiveBufferSize()`
  * report 16384, so the numbers here are requests and the socket's own log line ("accepted rcvbuf=")
- * reports the real, doubled value. Measured on the wire (2026-10-10, same injected load, CS11 wired):
- * effective 128 KiB -> 0.65 % UDP loss, 161 late frames dropped, max frame gap 1736 ms;
- * effective 16 KiB -> 0.20 % UDP loss, 28 dropped, max gap 331 ms.
+ * reports the real, doubled value. [DEFAULT_BYTES] carries the retuning measurements.
  *
  * Anything unset, unparsable, zero or negative falls back to the shipped default, and a positive
  * out-of-range value is clamped, so a bad property can never make the video path untestable.
@@ -31,8 +28,26 @@ object VideoReceiveWindow {
     private const val TAG = "xcertplay-usb"
     private const val PROPERTY = "debug.diplay.video_rcvbuf"
 
-    /** The shipped window (docs/_digest/18 §3 item 3): full pipe, sender still paced. */
-    const val DEFAULT_BYTES = 64 * 1024
+    /**
+     * The shipped request: 8 KiB, which the kernel doubles into a 16 KiB window.
+     *
+     * It began as 64 KiB (docs/_digest/18 §3 item 3) and was retuned on the car on 2026-10-10 with an
+     * injected interaction load, three samples per size, all at similar or higher bitrate than the
+     * larger windows (so the difference is not "cheaper content"):
+     *
+     * | requested | real window | late frames dropped | max frame gap | touch2frame p50 |
+     * |---|---|---|---|---|
+     * | 64 KiB (old) | 128 KiB | 161 | 1736 ms | 86 ms |
+     * | 32 KiB | 64 KiB | 53 | 1687 ms | 65 ms |
+     * | 8 KiB | 16 KiB | 17-28 | 304-331 ms | 53-60 ms |
+     * | 4 KiB | 8 KiB | 17 | 239 ms | 51 ms |
+     *
+     * The kernel-dropped UDP audio (`Udp6InErrors`) did not move with the window (0.20-1.19 % at 16 KiB
+     * against 0.60-0.65 % at 128 KiB), so this tuning buys frame delivery and touch latency, not loss.
+     * 16 KiB is the shipped value rather than the marginally better 8 KiB because the headroom matters
+     * if a heavier stream (1080p/60) is ever selected.
+     */
+    const val DEFAULT_BYTES = 8 * 1024
 
     /** Below one large video frame in flight there is no pipelining left at all. */
     const val MIN_BYTES = 4 * 1024
