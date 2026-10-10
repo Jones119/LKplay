@@ -24,12 +24,17 @@ import org.junit.Test
  *  - the road name walks the reference's `afterRoad → road → currentRoad` chain and is cut to 120 UTF-8
  *    bytes without splitting a character.
  *
+ * A card that is already on the cluster then survives a frame that cannot fill one, for the reference's
+ * own 3 s grace: the iPhone stops describing the card for about 1.6 s on every recalculation, and
+ * clearing at once is the blink the driver reported (15:16:30.851 clear, 15:16:32.431 re-submit). The
+ * window, the clock and the terminal-route rule are pure, so the whole debounce is tested here.
+ *
  * The submission sequence is pinned down separately, against both a recording fake and a fake with the
  * vendor's method shapes: `notifyTurnByTurnStarted()` must never be reached (it submits `turnState=0`,
  * which the service answers with `RuntimeException("Navigation state is not correct.")`).
  *
- * Everything here is plain JVM: the mapping, the card gate, the override parser and the change gate are
- * pure functions over their arguments, so no Robolectric test is needed for any of them.
+ * Everything here is plain JVM: the mapping, the card gate, the override parser, the change gate and the
+ * hold gate are pure functions over their arguments, so no Robolectric test is needed for any of them.
  */
 class ClusterGuidanceCardTest {
     private fun snapshot(
@@ -344,6 +349,174 @@ class ClusterGuidanceCardTest {
         clearClusterCard(VendorClusterBridge.guidanceSink(target))
         assertEquals("stopped", target.calls.last())
         assertTrue("notifyTurnByTurnStarted must never be called", target.calls.none { it == "started" })
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // The grace G5 was missing: an unfillable frame holds the card instead of clearing it, and only a
+    // route that is really over clears at once. The window and the clock are injected, so the whole rule
+    // is exercised here without a timer, a vendor object or a car (docs/_digest/46 G5).
+    // ---------------------------------------------------------------------------------------------
+
+    @Test
+    fun anIncompleteSnapshotInsideTheWindowHoldsTheCardAndSendsNothing() {
+        val gate = ClusterCardHoldGate()
+
+        // The car's own timings: cleared at 15:16:30.851 and re-submitted 1.6 s later, because the route
+        // state had moved to 5 while the active maneuver was still the "drive to the route" one (type 11),
+        // which this arrow family cannot draw. That frame is what must hold, not clear.
+        val opened = gate.cardMissing(guidanceEnded = false, nowMillis = 0)
+        assertEquals(ClusterCardAction.HOLD, opened.action)
+        assertEquals("cluster card held (incomplete 0.0s)", opened.logLine)
+
+        val stillHeld = gate.cardMissing(guidanceEnded = false, nowMillis = 1_600)
+        assertEquals("1.6 s is inside the reference's 3 s window", ClusterCardAction.HOLD, stillHeld.action)
+        assertEquals("cluster card held (incomplete 1.6s)", stillHeld.logLine)
+
+        // Held means nothing is sent: the bridge's unfillable branch reaches the clear call on CLEAR only,
+        // so neither verdict above may produce one.
+        val stop = RecordingSink()
+        for (frame in listOf(opened, stillHeld)) {
+            if (frame.action == ClusterCardAction.CLEAR) clearClusterCard(stop)
+        }
+        assertTrue("a held card sends nothing to the vendor", stop.calls.isEmpty())
+        // The frame itself could not have been submitted either: type 11 with a route state that is no
+        // longer 6 is exactly what the car sent at 15:16:30.841, and this family has no arrow for it.
+        assertNull(clusterGuidanceCard(snapshot(type = 11, routeState = 5)))
+    }
+
+    @Test
+    fun anIncompleteSnapshotPastTheWindowClearsTheCard() {
+        val gate = ClusterCardHoldGate()
+        assertEquals(ClusterCardAction.HOLD, gate.cardMissing(guidanceEnded = false, nowMillis = 40_000).action)
+
+        val expired = gate.cardMissing(guidanceEnded = false, nowMillis = 43_400)
+        assertEquals(ClusterCardAction.CLEAR, expired.action)
+        assertEquals("cluster card cleared (incomplete 3.4s)", expired.logLine)
+
+        // And the window is spent: the next unfillable frame opens a new one instead of clearing again.
+        assertEquals(ClusterCardAction.HOLD, gate.cardMissing(guidanceEnded = false, nowMillis = 43_500).action)
+    }
+
+    @Test
+    fun aTerminalRouteStateClearsImmediatelyHoweverYoungTheWindowIs() {
+        // Nothing has been held yet: an ended route clears at once rather than waiting 3 s.
+        assertEquals(
+            ClusterCardAction.CLEAR,
+            ClusterCardHoldGate().cardMissing(guidanceEnded = true, nowMillis = 900_000).action,
+        )
+
+        // And it overrides a hold that just started, which is the case the window would otherwise keep:
+        // a route that is over must not leave a card behind for the rest of the window.
+        val gate = ClusterCardHoldGate()
+        assertEquals(ClusterCardAction.HOLD, gate.cardMissing(guidanceEnded = false, nowMillis = 0).action)
+        val ended = gate.cardMissing(guidanceEnded = true, nowMillis = 200)
+        assertEquals(ClusterCardAction.CLEAR, ended.action)
+        assertEquals("cluster card cleared (guidance ended)", ended.logLine)
+    }
+
+    @Test
+    fun aTerminalRouteStateIsAnEndedRouteAndNotAMidRouteRecalculation() {
+        // The three shapes an ended route has: no state at all (RouteGuidanceState clears itself on Apple's
+        // NoRouteSet 0 and Arrived 2, and a cleared route is published as null), and those two numbers
+        // themselves, which a snapshot would carry if the parser ever stopped collapsing them.
+        assertTrue(clusterGuidanceEnded(routeState = null))
+        assertTrue("NoRouteSet is the end of a route, not a gap in one", clusterGuidanceEnded(routeState = 0))
+        assertTrue(clusterGuidanceEnded(routeState = 2))
+
+        // Everything else is "not displayable yet", including the two states the car walks through during
+        // a recalculation: 5 and 3 arrived 1.1 s apart in the middle of one (15:16:30.841 / 15:16:31.941)
+        // and state 1 with a fresh maneuver came 0.5 s later, so clearing on either is the blink itself.
+        for (state in listOf(1, 3, 4, 5, 6, 7, 99)) {
+            assertFalse("route state $state is not an ending", clusterGuidanceEnded(routeState = state))
+        }
+        // The whitelist and the terminal set must not overlap, or a displayable card would never be sent.
+        for (state in listOf(1, 5, 6)) {
+            assertFalse("route state $state is displayable", clusterGuidanceEnded(routeState = state))
+        }
+    }
+
+    @Test
+    fun aDisplayableSnapshotSubmitsAndRestartsTheWindow() {
+        val gate = ClusterCardHoldGate()
+        assertEquals("the first unfillable frame opens the window", ClusterCardAction.HOLD, gate.cardMissing(false, 0).action)
+
+        // A frame that can fill a card is submitted, which is what the bridge does before telling the gate.
+        val sink = RecordingSink()
+        submitClusterCard(sink, clusterGuidanceCard(snapshot())!!)
+        assertEquals(5, sink.calls.size)
+        gate.cardSubmitted()
+
+        // The window now counts from the submission: 3.5 s after the *first* unfillable frame is inside it,
+        // where an unreset window would already have cleared at 3 s.
+        assertEquals(ClusterCardAction.HOLD, gate.cardMissing(guidanceEnded = false, nowMillis = 3_500).action)
+        assertEquals(
+            ClusterCardAction.CLEAR,
+            gate.cardMissing(guidanceEnded = false, nowMillis = 6_500).action,
+        )
+    }
+
+    @Test
+    fun aMediaPushDoesNotResetTheGuidanceHoldWindow() {
+        val gate = ClusterCardHoldGate()
+        assertEquals(ClusterCardAction.HOLD, gate.cardMissing(guidanceEnded = false, nowMillis = 0).action)
+
+        // The media path's own entry points, driven for real: a track, a cover redraw and the while-playing
+        // re-push all run while the guidance card is held, and none of them may touch its window.
+        VendorClusterBridge.pushMedia(
+            CarPlayNowPlaying(title = "Track", artist = "Artist", playing = true, elapsedMillis = 1_000L),
+        )
+        VendorClusterBridge.repushTick()
+        VendorClusterBridge.setArtwork(null)
+
+        assertEquals(
+            "still the same window, counted from the guidance frame",
+            ClusterCardAction.HOLD,
+            gate.cardMissing(guidanceEnded = false, nowMillis = 2_900).action,
+        )
+        assertEquals(
+            ClusterCardAction.CLEAR,
+            gate.cardMissing(guidanceEnded = false, nowMillis = 3_000).action,
+        )
+    }
+
+    @Test
+    fun aHeldCardAndAClearedCardAreToldApartInLogcat() {
+        val held = clusterCardLogLine(ClusterCardAction.HOLD, 1_200)!!
+        val cleared = clusterCardLogLine(ClusterCardAction.CLEAR, 3_400)!!
+        val ended = clusterCardLogLine(ClusterCardAction.CLEAR, null)!!
+
+        // `logcat | grep "cluster card"` has to answer "did it clear?" without reading any other field.
+        assertEquals("cluster card held (incomplete 1.2s)", held)
+        assertEquals("cluster card cleared (incomplete 3.4s)", cleared)
+        assertEquals("cluster card cleared (guidance ended)", ended)
+        assertTrue(held.contains("held"))
+        assertFalse(held.contains("cleared"))
+        assertTrue(cleared.contains("cleared"))
+        assertTrue(ended.contains("cleared"))
+        // Sub-second tenths are truncated, not rounded, so a hold never reports more time than it has.
+        assertEquals("cluster card held (incomplete 0.9s)", clusterCardLogLine(ClusterCardAction.HOLD, 999)!!)
+    }
+
+    @Test
+    fun theHoldWindowAndItsClockAreInjectedValues() {
+        assertEquals("the reference's own 3 s grace (docs/_digest/46 §3)", 3_000L, CLUSTER_CARD_HOLD_MILLIS)
+
+        val short = ClusterCardHoldGate(windowMillis = 250)
+        assertEquals(ClusterCardAction.HOLD, short.cardMissing(guidanceEnded = false, nowMillis = 1_000).action)
+        assertEquals(ClusterCardAction.HOLD, short.cardMissing(guidanceEnded = false, nowMillis = 1_249).action)
+        assertEquals(ClusterCardAction.CLEAR, short.cardMissing(guidanceEnded = false, nowMillis = 1_250).action)
+
+        // The default is the constant, so the car's rule and the tested one are the same number.
+        val standard = ClusterCardHoldGate()
+        assertEquals(ClusterCardAction.HOLD, standard.cardMissing(guidanceEnded = false, nowMillis = 0).action)
+        assertEquals(
+            ClusterCardAction.HOLD,
+            standard.cardMissing(guidanceEnded = false, nowMillis = CLUSTER_CARD_HOLD_MILLIS - 1).action,
+        )
+        assertEquals(
+            ClusterCardAction.CLEAR,
+            standard.cardMissing(guidanceEnded = false, nowMillis = CLUSTER_CARD_HOLD_MILLIS).action,
+        )
     }
 
     /** The five setters plus the clear, recording the call order. */

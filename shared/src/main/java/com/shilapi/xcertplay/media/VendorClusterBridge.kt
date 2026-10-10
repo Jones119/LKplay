@@ -93,10 +93,19 @@ object VendorClusterBridge {
      *
      * There is no "guidance started" call any more: it submitted `turnState=0`, which the service
      * rejects, and the card appears with the first legal `turnState=1` submission anyway (docs/_digest/46
-     * G4). Ownership simply follows the same event.
+     * G4). Ownership simply follows the same event, and it survives a hold: a card kept through an
+     * unfillable frame is still ours to clear ([cardHold]).
      */
     @Volatile
     private var cardOnCluster = false
+
+    /**
+     * How long that card survives a guidance snapshot that cannot fill one (G5's missing grace).
+     *
+     * The rule, the window and the clock all live in [ClusterCardHoldGate]; this object owns one instance
+     * of it, exactly as `pushSchedule` owns the media re-push's timing.
+     */
+    private val cardHold = ClusterCardHoldGate()
 
     /** The artwork the cluster should show, as a file the head unit's own process can read. */
     @Volatile
@@ -235,9 +244,15 @@ object VendorClusterBridge {
     /**
      * The album art arrives from the iPhone as a Bitmap, and the cluster takes it as a Uri
      * (`IPlaybackInfo.getArtwork`). [ClusterArtworkStore] owns *how* it is handed over -- JPEG at
-     * quality 88, longest edge 256 px, encoded under 1 MiB, served as a `content://` Uri with an
-     * explicit read grant to the vendor's reader processes, with the previous `file://` path as the
-     * fallback -- and its KDoc says why each tier exists (docs/_digest/45 G5).
+     * quality 88, longest edge 256 px, encoded under 1 MiB, as a world-readable `file://` copy under the
+     * app's external files directory first, with the `content://` provider Uri plus an explicit read
+     * grant as the fallback -- and its KDoc says why each tier exists (docs/_digest/45 G5).
+     *
+     * The order is the car's, not the reference's: on 2026-10-09 the `content://` handover succeeded
+     * three times in a row (`grants=2 provider=true`, and the vendor's own service logged every new Uri)
+     * while the cluster never painted one, whereas the 2026-10-08 run showed the cover from a
+     * `file://` path with `setReadable(true, false)`. [ClusterArtworkTransport]'s KDoc is where the two
+     * tiers and the reason they are ordered this way are written down.
      *
      * A null cover is a real answer, not a failure: it clears the slot, so the head unit paints its
      * own default instead of our placeholder being submitted as if it were the album's art (G6).
@@ -270,6 +285,14 @@ object VendorClusterBridge {
      * `<1min` seen on the car (docs/_digest/46 §1.3(c) and G5). Refusing the card makes the display
      * honest: nothing, rather than numbers nobody measured. The bitmap route is gone with the arrow
      * renderer that fed it; every value here is one the vendor documents.
+     *
+     * A frame that cannot fill a card therefore no longer clears at once. The iPhone stops being able to
+     * describe the card for a moment whenever it recalculates the route -- on the car the card was
+     * cleared and re-submitted 1.6 s later (15:16:30.851 clear, 15:16:32.431 re-submit), which is the
+     * blink the driver reported -- so the card already on the cluster is held for
+     * [CLUSTER_CARD_HOLD_MILLIS] and cleared only once the frame stays unfillable that long
+     * ([ClusterCardHoldGate]). A route that has really ended clears immediately instead
+     * ([clusterGuidanceEnded]), so a card cannot linger past the end of a route.
      */
     fun pushGuidance(snapshot: CarPlayGlance.Snapshot) {
         if (!enabled) return
@@ -280,7 +303,14 @@ object VendorClusterBridge {
         val forced = parseArrowOverride(clusterArrowProperty())
         val card = clusterGuidanceCard(snapshot, forced)
         if (card == null) {
-            stopGuidance()
+            // Nothing displayable this frame. Only a card of ours is worth holding: with nothing of ours
+            // on the cluster there is no window to keep and nothing to clear, which is also why
+            // [stopGuidance] would refuse the clear.
+            if (cardOnCluster) {
+                val hold = cardHold.cardMissing(clusterGuidanceEnded(snapshot.routeState), elapsedNow())
+                hold.logLine?.let { Log.i(TAG, it) }
+                if (hold.action == ClusterCardAction.CLEAR) stopGuidance()
+            }
             return
         }
         val target = naviInteraction(context) ?: return
@@ -292,6 +322,8 @@ object VendorClusterBridge {
         }
         submitClusterCard(guidanceSink(target), card)
         cardOnCluster = true
+        // A complete card is on the cluster again, so the next unfillable frame starts a fresh window.
+        cardHold.cardSubmitted()
     }
 
     /** Clears the card this bridge submitted; it never touches a card somebody else owns. */
@@ -902,6 +934,28 @@ private const val ROAD_TO_ROUTE_START = "前往路线"
 private val DISPLAYABLE_ROUTE_STATES = setOf(1, 5, 6)
 
 /**
+ * The route states that mean guidance is over, so a card must not linger: a route state of `null`, Apple's
+ * NoRouteSet (0) and the vendor's `STATE_REACHED` (2).
+ *
+ * `null` is the shape an ended route actually has in a snapshot, and it is the common one:
+ * [com.shilapi.xcertplay.hud.RouteGuidanceState] treats NoRouteSet (0) and Arrived (2) as the two states
+ * that end a route, clears itself on both, and a cleared route is published as `routeState == null` (see
+ * `CarPlayGlance.Snapshot`). A wired disconnect does the same. The two numbers stay in the set anyway,
+ * because they are the states themselves -- the vendor's own name for arrival is `STATE_REACHED`
+ * (docs/_digest/46 §2/§4) -- and a snapshot that carries either directly must clear too.
+ *
+ * `STATE_END` (3) is deliberately *not* here, although doc 46 §2/§4 gives the vendor's `turnState` that
+ * value: the state byte we read back is Apple's, not the vendor's, and on the car it is a re-route marker
+ * rather than an end. Both recorded sessions walk 5 -> 3 -> 1 around every recalculation
+ * (15:16:30.841 state 5, 15:16:31.941 state 3, 15:16:32.411 state 1, with the new maneuver list still
+ * arriving in between), and 3 also opened the very first route of a session (15:15:19.811, before the
+ * state 6 that submitted the first card). Clearing on 3 would re-create the blink this window exists to
+ * remove, one frame early. The vendor's `STATE_*` numbering is what we *send*
+ * (`notifyTurnByTurnStopped()` is its `turnState=3`); it is not what we receive.
+ */
+private val TERMINAL_ROUTE_STATES = setOf(0, 2)
+
+/**
  * The largest remaining-time value the vendor's `secondToTime` renders sanely.
  *
  * It converts to minutes with `(second + 30) / 60` and then to hours and days, so a value at or above
@@ -966,6 +1020,139 @@ internal fun submitClusterCard(sink: ClusterGuidanceSink, card: ClusterGuidanceC
 internal fun clearClusterCard(sink: ClusterGuidanceSink) {
     sink.notifyTurnByTurnStopped()
 }
+
+/**
+ * True when [routeState] says guidance is over rather than merely incomplete ([TERMINAL_ROUTE_STATES]).
+ *
+ * The distinction decides whether the card on the cluster goes now or waits out
+ * [CLUSTER_CARD_HOLD_MILLIS]: an unbuildable frame during a re-route is a gap the driver should not see,
+ * while an ended route is a card that must not be left behind.
+ */
+internal fun clusterGuidanceEnded(routeState: Int?): Boolean =
+    routeState == null || routeState in TERMINAL_ROUTE_STATES
+
+/**
+ * How long a card we own survives a guidance snapshot that cannot fill one: the reference's own window.
+ *
+ * The reference hides a card whose maneuver list has been empty for `EMPTY_LIST_HIDE_NS = 3 s` and treats
+ * a route as stale after `STALE_ROUTE_NS = 30 s` (docs/_digest/46 §3 and G5, which also records that G5
+ * asks for exactly this grace: "参考用 3 s 宽限 + 30 s 过期"). We ported the completeness gate but not the
+ * grace, so our card blinked on every recalculation: the iPhone could not fill a card for 1.6 s on the car
+ * (cleared 15:16:30.851, re-submitted 15:16:32.431) because the route state had moved on to 5 while the
+ * active maneuver was still the old "drive to the route" one, which this arrow family cannot draw.
+ *
+ * 3 s covers that 1.6 s gap with room for a slower recalculation, while staying an order of magnitude
+ * below the 30 s stale window, so a snapshot that never becomes displayable again cannot leave a wrong
+ * card on the cluster for long. It is the reference's number, not a new one: matching it keeps our card's
+ * behaviour identical to the working implementation's for the same iPhone behaviour. A route that really
+ * ended does not wait for it at all ([clusterGuidanceEnded]).
+ *
+ * What is held is the last card *already submitted* -- its arrow, road, distances and ETA as of then --
+ * never a partially filled one, because a half-filled card makes the cluster paint its own placeholders
+ * (G5). Nothing is re-submitted from here: the card the cluster keeps drawing is the one it already has.
+ */
+internal const val CLUSTER_CARD_HOLD_MILLIS = 3_000L
+
+/** What the cluster should do with our card after one frame ([ClusterCardHoldGate]). */
+internal enum class ClusterCardAction {
+    /** The frame cannot fill a card, but the last one is young enough to keep: leave it on the cluster. */
+    HOLD,
+
+    /** Take our card off the cluster with `notifyTurnByTurnStopped()`. */
+    CLEAR,
+}
+
+/** The verdict for one unfillable frame, and whether that frame is worth a log line. */
+internal data class ClusterCardHold(
+    val action: ClusterCardAction,
+    /** The one line this frame logs, or null when it repeats the previous verdict and stays out of logcat. */
+    val logLine: String?,
+)
+
+/**
+ * Decides what an unfillable guidance frame does to the card already on the cluster (G5's missing grace).
+ *
+ * A pure state machine over an injected clock: `nowMillis` is an argument and the window is a constructor
+ * parameter, so the hold, the expiry and the terminal clear are unit-tested without a timer, a vendor
+ * object or a car -- the same shape as [ClusterPushSchedule] and [ClusterMediaPushGate]. The bridge owns
+ * the two facts the rule needs (`clusterGuidanceEnded(snapshot.routeState)` and `elapsedNow()`), which is
+ * what keeps this testable on the JVM.
+ *
+ * The window starts with the first unfillable frame and expires [windowMillis] later; a submitted card
+ * restarts it ([cardSubmitted]), because the clock that matters is the age of the *current* card, not the
+ * age of the first gap. Nothing else resets it -- in particular the media path never touches this object,
+ * so a cover or a track change cannot extend or shorten a navigation hold.
+ */
+internal class ClusterCardHoldGate(private val windowMillis: Long = CLUSTER_CARD_HOLD_MILLIS) {
+    /** When the current run of unfillable frames began, or null while no run is open. */
+    private var incompleteSinceMillis: Long? = null
+
+    /** The whole second of the hold already reported, so a held card logs once per second, not per frame. */
+    private var reportedSecond = -1L
+
+    /** A complete card reached the cluster: the window restarts with the next unfillable frame. */
+    @Synchronized
+    fun cardSubmitted() {
+        incompleteSinceMillis = null
+        reportedSecond = -1L
+    }
+
+    /**
+     * The verdict for a frame that cannot fill a card at [nowMillis].
+     *
+     * [guidanceEnded] comes from [clusterGuidanceEnded] and wins over the window: a route that is over
+     * clears immediately, however young the hold is. Otherwise the first frame opens the window and is
+     * held, every frame inside it is held, and the frame that reaches [windowMillis] clears. The log line
+     * follows the same rule as [ClusterArrowChangeGate]: the frame that opens a hold and each new whole
+     * second of it report, so `logcat` shows a held card versus a cleared one instead of one line per
+     * guidance frame.
+     */
+    @Synchronized
+    fun cardMissing(guidanceEnded: Boolean, nowMillis: Long): ClusterCardHold {
+        if (guidanceEnded) {
+            incompleteSinceMillis = null
+            reportedSecond = -1L
+            return ClusterCardHold(ClusterCardAction.CLEAR, clusterCardLogLine(ClusterCardAction.CLEAR, null))
+        }
+        val since = incompleteSinceMillis
+        if (since == null) {
+            incompleteSinceMillis = nowMillis
+            reportedSecond = 0L
+            return ClusterCardHold(ClusterCardAction.HOLD, clusterCardLogLine(ClusterCardAction.HOLD, 0L))
+        }
+        val elapsed = nowMillis - since
+        if (elapsed >= windowMillis) {
+            incompleteSinceMillis = null
+            reportedSecond = -1L
+            return ClusterCardHold(ClusterCardAction.CLEAR, clusterCardLogLine(ClusterCardAction.CLEAR, elapsed))
+        }
+        val second = elapsed / 1_000L
+        if (second == reportedSecond) return ClusterCardHold(ClusterCardAction.HOLD, null)
+        reportedSecond = second
+        return ClusterCardHold(ClusterCardAction.HOLD, clusterCardLogLine(ClusterCardAction.HOLD, elapsed))
+    }
+}
+
+/**
+ * The one log line a hold decision produces, or null when that frame has nothing to report.
+ *
+ * The verb is what an on-car `logcat | grep "cluster card"` sorts on: `held` says the incompleteness was
+ * still young enough to keep the card (the blink that did *not* happen), `cleared` says the card went away
+ * and why -- past [CLUSTER_CARD_HOLD_MILLIS] (`incomplete 3.4s`) or because the route itself is over
+ * (`guidance ended`). The elapsed time is built without a `Locale`, so the car's log reads exactly like
+ * the unit test's.
+ */
+internal fun clusterCardLogLine(action: ClusterCardAction, elapsedMillis: Long?): String? = when (action) {
+    ClusterCardAction.HOLD ->
+        "cluster card held (incomplete ${incompleteSeconds(elapsedMillis ?: 0L)})"
+    ClusterCardAction.CLEAR -> when (elapsedMillis) {
+        null -> "cluster card cleared (guidance ended)"
+        else -> "cluster card cleared (incomplete ${incompleteSeconds(elapsedMillis)})"
+    }
+}
+
+/** `1.2s`: the elapsed hold in tenths, as one `String` concatenation so the format cannot drift. */
+private fun incompleteSeconds(millis: Long): String = "${millis / 1000}.${(millis % 1000) / 100}s"
 
 /**
  * Apple's maneuver type as one of the factory family's icon ids, or null when the family has none.
