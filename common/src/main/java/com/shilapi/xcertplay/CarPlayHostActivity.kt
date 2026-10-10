@@ -64,6 +64,7 @@ import com.shilapi.xcertplay.airplay.CarPlayUiScale
 import com.shilapi.xcertplay.airplay.AirPlayDisplayConfig
 import com.shilapi.xcertplay.airplay.AirPlayIdentity
 import com.shilapi.xcertplay.airplay.AirPlayIcon
+import com.shilapi.xcertplay.airplay.OemIconAbsence
 import com.shilapi.xcertplay.airplay.CarPlayClusterDisplay
 import com.shilapi.xcertplay.airplay.AirPlaySafeArea
 import com.shilapi.xcertplay.airplay.AirPlaySession
@@ -3261,6 +3262,9 @@ class CarPlayHostActivity : ComponentActivity() {
         appendLog(requestSummary)
         appendLog(support.details)
         appendLog(effectiveSummary)
+        // The OEM icon declaration is carried through the config so the /info path can log what was
+        // really sent; the car's own log is the only place that answers why no icon appears.
+        val declaredIcon = loadAirPlayIcon()
         return AirPlayConfig(
             deviceName = "DiPlay",
             deviceId = DiPlayBootstrap.deviceId(airPlayIdentity),
@@ -3279,24 +3283,44 @@ class CarPlayHostActivity : ComponentActivity() {
             manufacturer = normalizedManufacturer(),
             model = normalizedModel(),
             oemLabel = oemLabel,
-            icons = listOf(loadAirPlayIcon()),
+            icons = listOfNotNull(declaredIcon.icon),
+            oemIconAbsence = declaredIcon.absence,
             videoInCar = false,
             mainBufferedAudio = AirPlayPersistence.loadMainBufferedAudio(this),
         )
     }
 
-    private fun loadAirPlayIcon(): AirPlayIcon {
+    /** The OEM icon to declare, plus why there is none when [icon] is null. */
+    private class AirPlayIconDeclaration(val icon: AirPlayIcon?, val absence: OemIconAbsence?)
+
+    /**
+     * Loads the OEM icon the way the previous implementation did -- the user's custom 1:1 image when
+     * it decodes, the packaged `R.raw.ic_car_home` otherwise -- and reports which candidate failed
+     * when neither can be used.
+     *
+     * The one behaviour change is that a packaged icon that does not decode no longer aborts the
+     * session with `IllegalStateException`: an accessory that cannot offer an icon is still a working
+     * accessory, and a crash here costs the whole connect for a decoration. The dictionary then
+     * carries no `oemIcons` at all and [AirPlayConfig.oemIconAbsence] says why, so the reason survives
+     * into the /info log instead of into a stack trace.
+     */
+    private fun loadAirPlayIcon(): AirPlayIconDeclaration {
         val customBytes = try {
             AirPlayPersistence.loadCustomAirPlayIconFile(this)?.readBytes()
         } catch (_: Exception) {
             null
         }
         if (customBytes != null) {
-            decodeAirPlayIcon(customBytes)?.let { return it }
+            decodeAirPlayIcon(customBytes)?.let { return AirPlayIconDeclaration(it, null) }
             AirPlayPersistence.clearCustomAirPlayIcon(this)
         }
-        return decodeAirPlayIcon(defaultAirPlayIconBytes())
-            ?: throw IllegalStateException("Packaged AirPlay icon is invalid")
+        val fallback = runCatching { decodeAirPlayIcon(defaultAirPlayIconBytes()) }.getOrNull()
+        if (fallback != null) return AirPlayIconDeclaration(fallback, null)
+        return AirPlayIconDeclaration(
+            null,
+            if (customBytes != null) OemIconAbsence.CUSTOM_ICON_REJECTED_AS_NOT_SQUARE
+            else OemIconAbsence.NO_CUSTOM_FILE_AND_PACKAGED_DEFAULT_UNDECODABLE,
+        )
     }
 
     private fun decodeAirPlayIcon(encoded: ByteArray): AirPlayIcon? {

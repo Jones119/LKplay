@@ -13,12 +13,17 @@ import java.io.FileNotFoundException
  * Serves the instrument cluster's album cover to the head unit's own processes.
  *
  * The cluster is not drawn by us: the vendor's DIM service (`com.ecarx.dim_interaction`) reads the
- * Uri we submit and opens it in *its* process, so a `file://` path only worked while the emulated
- * storage happened to be readable by that UID -- which is why the reference implementation hands out
- * a `content://` Uri and grants the read permission explicitly (docs/_digest/45 §2.4). This provider
- * is the other half of that: it maps `content://<applicationId>.artwork/covers/<session>/<uuid>.jpg`
- * back to the file `ClusterArtworkStore` encoded under `<cacheDir>/cluster-artwork/`, and refuses
- * everything else.
+ * Uri we submit and opens it in *its* process. That reader is why this provider exists -- and why it
+ * is now the *fallback*: on 2026-10-09 the `content://` handover was granted to both reader packages
+ * and the vendor logged every new Uri, yet the instrument cluster never painted one of them, while the
+ * earlier `file://` copy under `getExternalFilesDir(null)` had shown the cover (docs/_digest/38 §3).
+ * `ClusterArtworkStore` therefore prefers that external file and hands over the `content://` Uri here
+ * only when the external copy cannot be written or read back.
+ *
+ * It maps `content://<applicationId>.artwork/covers/<session>/<uuid>.jpg` back to the file
+ * `ClusterArtworkStore` encoded under `<cacheDir>/cluster-artwork/`, and refuses everything else.
+ * The shape is unchanged from the reference's `LegacyArtworkLoader` (docs/_digest/45 §2.4), so a car
+ * that accepts either tier finds the same authority and path segments.
  *
  * Read-only by construction: [openFile] accepts `"r"` and nothing else, and the mutating operations
  * throw, so a reader can never write into the app's cache. There is no permission attribute: the two

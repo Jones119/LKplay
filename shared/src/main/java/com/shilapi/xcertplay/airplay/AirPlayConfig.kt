@@ -75,6 +75,13 @@ data class AirPlayConfig(
     val model: String = "xcertplay",
     val oemLabel: String = "xcertplay",
     val icons: List<AirPlayIcon> = emptyList(),
+    /**
+     * Why [icons] is empty when it is. Only the code that loaded the icon candidates knows which one
+     * failed, so it travels with the configuration and the /info path prints it
+     * ([oemIconDiagnostic]): an OEM icon iOS silently ignored and one we never declared look exactly
+     * the same on the car's screen.
+     */
+    val oemIconAbsence: OemIconAbsence? = null,
     /** iOS 27 video in car (see [VideoInCar]); video plays only while [VideoInCar.allowed]. */
     val videoInCar: Boolean = false,
     /**
