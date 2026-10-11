@@ -5,6 +5,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import java.io.File
 import java.nio.file.Files
 
 @RunWith(RobolectricTestRunner::class)
@@ -37,6 +38,22 @@ class HotspotJoinJournalTest {
                 store.save(HotspotJoinTransaction.Record("token", "firmware-a", "synthetic-before",
                     "synthetic-after", HotspotJoinTransaction.Stage.PENDING))
                 fail("Unverified durable rename")
+            } catch (_: java.io.IOException) { }
+        } finally { directory.deleteRecursively() }
+    }
+    @Test fun aLeftoverUncommittedTemporaryFileIsNeverReportedAsDurable() {
+        val directory = Files.createTempDirectory("synthetic-hotspot-uncommitted").toFile()
+        try {
+            // AtomicFile only logs the failure when its rename cannot replace the target (a host
+            // that cannot rename over an existing file, or an OEM implementation that swallows the
+            // error) and then leaves its temporary file behind. Simulate that leftover: the journal
+            // must never report the write as durable.
+            val store = HotspotJoinJournal(directory, "firmware-a", codec,
+                syncDirectory = { File(directory, "journal.new").writeBytes(byteArrayOf(1)) })
+            try {
+                store.save(HotspotJoinTransaction.Record("token", "firmware-a", "synthetic-before",
+                    "synthetic-after", HotspotJoinTransaction.Stage.PENDING))
+                fail("Uncommitted write reported as durable")
             } catch (_: java.io.IOException) { }
         } finally { directory.deleteRecursively() }
     }

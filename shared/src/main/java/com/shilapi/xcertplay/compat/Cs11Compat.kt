@@ -25,6 +25,22 @@ fun <T : Any> Context.systemService(serviceClass: Class<T>): T =
             ?: throw IllegalStateException("No system service for ${serviceClass.name}")
     }
 
+/**
+ * 与 [systemService] 相同，但把"本机没有这个服务"如实返回为 `null`。
+ *
+ * `Context.getSystemService(Class)` 在服务缺失时返回 `null`；[systemService] 声明了非空返回
+ * `T`，于是那一刻会抛 `NullPointerException`（API≥23）/ `IllegalStateException`（API<23，车机）。
+ * 凡是写成 `?: 兜底` / `?.` 的调用点都必须改用本函数——否则那些守卫是**死代码**：本机服务缺失
+ * 时不是优雅跳过，而是直接崩（CS11 上 `UsbManager` 缺失会让 CarPlayController 的构造器失败，
+ * 而不是给出"USB service is unavailable on this device"这种可重试的失败态）。
+ */
+fun <T : Any> Context.systemServiceOrNull(serviceClass: Class<T>): T? =
+    if (Build.VERSION.SDK_INT >= 23) {
+        getSystemService(serviceClass)
+    } else {
+        ContextCompat.getSystemService(this, serviceClass)
+    }
+
 // ---------- 媒体路径（API19）----------
 
 /** `MediaCodec.getInputBuffer` 需要 API 21；低版本走已废弃的 `getInputBuffers()` 数组。 */

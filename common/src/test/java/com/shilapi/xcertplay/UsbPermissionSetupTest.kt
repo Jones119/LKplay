@@ -4,6 +4,7 @@ import android.app.AlertDialog
 import android.os.Looper
 import android.provider.Settings
 import com.shilapi.xcertplay.adb.LocalAdb
+import java.nio.file.Files
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.CopyOnWriteArrayList
@@ -193,9 +194,19 @@ class UsbPermissionSetupTest {
     )
 
     private fun runShell(script: String): String {
-        val process = ProcessBuilder("sh", "-c", script).redirectErrorStream(true).start()
-        assertTrue(process.waitFor(3, TimeUnit.SECONDS))
-        return process.inputStream.bufferedReader().readText()
+        // The script has to reach sh byte-exact. Passing it as a Windows command-line argument
+        // (`sh -c <script>`) lets MSYS2's argument conversion consume one level of double quotes,
+        // which turns a correct command into a shell syntax error and hides whether the command
+        // itself is right. Feed the same bytes through stdin instead.
+        val file = Files.createTempFile("diplay-usb-permission", ".sh")
+        return try {
+            file.toFile().writeBytes(script.toByteArray(Charsets.UTF_8))
+            val process = ProcessBuilder("sh").redirectInput(file.toFile()).redirectErrorStream(true).start()
+            assertTrue(process.waitFor(3, TimeUnit.SECONDS))
+            process.inputStream.bufferedReader().readText()
+        } finally {
+            file.toFile().delete()
+        }
     }
 
     private class FakeClient : UsbPermissionSetup.Client {

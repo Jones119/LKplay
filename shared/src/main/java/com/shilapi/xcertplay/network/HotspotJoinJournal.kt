@@ -7,6 +7,12 @@ import java.security.MessageDigest
 /** Shell-private, bounded, versioned journal; never use app external storage or diagnostic export. */
 internal class HotspotJoinJournal<C>(directory: File, private val firmware: String,
     private val codec: Codec<C>, private val syncFile: (FileOutputStream) -> Unit = { it.fd.sync() },
+    // AtomicFile commits with rename(2), which a host cannot do over an existing file (Windows):
+    // the previous generation then stays in place while AtomicFile only logs the failure, and the
+    // commit check in save() detects exactly that. A test whose host behaves that way may pass a
+    // replacing move used only for this recovery; production passes nothing, so an uncommitted
+    // write is still never reported as durable.
+    private val replaceUncommittedFile: ((File, File) -> Boolean)? = null,
     private val syncDirectory: () -> Unit = {}) : HotspotJoinTransaction.Store<C> {
     interface Codec<C> { fun encode(config: C): ByteArray; fun decode(bytes: ByteArray): C }
     class FirmwareChanged : IOException()
@@ -55,11 +61,25 @@ internal class HotspotJoinJournal<C>(directory: File, private val firmware: Stri
             file.finishWrite(stream)
         } catch (error: Exception) { file.failWrite(stream); throw error }
         syncDirectory() // Persist the rename itself, not only the snapshot file contents.
+        // AtomicFile commits with rename(2), which a host cannot do over an existing file
+        // (Windows): it then only logs the failure and leaves its temporary file behind, and the
+        // next openRead() deletes that temp file. So detect the uncommitted write HERE, and either
+        // recover with the caller's replacement or fall through to the verification below.
+        val uncommitted = File(file.baseFile.path + ".new")
+        if (uncommitted.exists()) {
+            val replace = replaceUncommittedFile ?: throw IOException()
+            if (!replace(uncommitted, file.baseFile)) throw IOException()
+            syncDirectory()
+        }
         // Verification is mandatory even if an OEM AtomicFile implementation silently fails.
         val saved = load() ?: throw IOException()
-        if (saved.token != record.token || saved.stage != record.stage ||
-            saved.original != record.original || saved.target != record.target) throw IOException()
+        if (!sameGeneration(saved, record)) throw IOException()
     }
+
+    private fun sameGeneration(saved: HotspotJoinTransaction.Record<C>,
+        record: HotspotJoinTransaction.Record<C>): Boolean =
+        saved.token == record.token && saved.stage == record.stage &&
+            saved.original == record.original && saved.target == record.target
 
     private fun InputStream.readBytesBounded(limit: Int): ByteArray {
         val out = ByteArrayOutputStream()

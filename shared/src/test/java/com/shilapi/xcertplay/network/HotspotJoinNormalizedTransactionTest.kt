@@ -8,6 +8,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import java.io.File
 import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [33], manifest = Config.NONE)
@@ -36,7 +37,14 @@ class HotspotJoinNormalizedTransactionTest {
         val port = HotspotJoinPlatform(service, 33, "synthetic-firmware") {
             HotspotJoinCapability.Snapshot(true, setOf(36, 44))
         }
-        val journal = HotspotJoinJournal(directory, port.firmware(), port.codec)
+        val journal = HotspotJoinJournal(directory, port.firmware(), port.codec,
+            // A Windows host cannot rename over an existing file, so AtomicFile's second commit
+            // would silently leave the previous generation in place. Replace explicitly so the
+            // transaction logic under test is exercised on every host; production never passes this.
+            replaceUncommittedFile = { from, to ->
+                runCatching { Files.move(from.toPath(), to.toPath(), StandardCopyOption.REPLACE_EXISTING) }
+                    .isSuccess
+            })
         var cancelled = false
         fun transaction() = HotspotJoinTransaction(port, journal) { cancelled }
     }
