@@ -9,7 +9,7 @@ import android.content.Context
 import android.os.Handler
 import android.os.HandlerThread
 import android.util.Log
-import com.shilapi.xcertplay.compat.systemService
+import com.shilapi.xcertplay.compat.systemServiceOrNull
 
 /** Whether the phone still holds the Bluetooth media (A2DP) link to this head unit. */
 internal enum class MediaAudioLinkState { CONNECTED, DISCONNECTED, UNKNOWN }
@@ -76,7 +76,7 @@ internal class PhoneMediaAudioWatchdog(private val context: Context) {
     fun start() {
         if (running) return
         val address = DiPlayPreferences.phoneAddress(context)
-        val adapter = runCatching { context.systemService(BluetoothManager::class.java)?.adapter }.getOrNull()
+        val adapter = runCatching { context.systemServiceOrNull(BluetoothManager::class.java)?.adapter }.getOrNull()
         if (adapter == null || address.isNullOrBlank()) {
             log("phone media watchdog not started (adapter=${adapter != null} address=${!address.isNullOrBlank()})")
             return
@@ -111,7 +111,7 @@ internal class PhoneMediaAudioWatchdog(private val context: Context) {
         handler = null
         watcher?.restore()
         watcher = null
-        val adapter = runCatching { context.systemService(BluetoothManager::class.java)?.adapter }.getOrNull()
+        val adapter = runCatching { context.systemServiceOrNull(BluetoothManager::class.java)?.adapter }.getOrNull()
         proxy?.let { runCatching { adapter?.closeProfileProxy(BluetoothProfile.A2DP, it) } }
         proxy = null
         device = null

@@ -30,6 +30,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 import com.shilapi.xcertplay.compat.systemService
+import com.shilapi.xcertplay.compat.systemServiceOrNull
 import com.shilapi.xcertplay.compat.hasPermissionCompat
 
 /**
@@ -713,25 +714,25 @@ class WifiP2pGroupManager(
 
     @Suppress("DEPRECATION")
     private fun readStation(): Station = runCatching {
-        val info = appContext.systemService(WifiManager::class.java)?.connectionInfo
+        val info = appContext.systemServiceOrNull(WifiManager::class.java)?.connectionInfo
         // CS11: WifiInfo.getFrequency 是 API21+
         Station(info?.supplicantState, if (Build.VERSION.SDK_INT >= 21) info?.frequency?.takeIf { it > 0 } else null)
     }.getOrDefault(Station(null, null))
 
     private fun checkPrerequisites(station: Station) {
-        val wifi = appContext.systemService(WifiManager::class.java)
+        val wifi = appContext.systemServiceOrNull(WifiManager::class.java)
         // CS11: is5GHzBandSupported 是 API21+
         val fiveGhzSupported = if (Build.VERSION.SDK_INT >= 21) runCatching { wifi?.is5GHzBandSupported }.getOrNull() else null
         val wifiEnabled = runCatching { wifi?.isWifiEnabled }.getOrNull()
         val locationEnabled = runCatching {
             // CS11: LocationManager.isLocationEnabled 是 API28+
-            if (Build.VERSION.SDK_INT >= 28) appContext.systemService(LocationManager::class.java)?.isLocationEnabled else null
+            if (Build.VERSION.SDK_INT >= 28) appContext.systemServiceOrNull(LocationManager::class.java)?.isLocationEnabled else null
         }.getOrNull()
         val required = if (Build.VERSION.SDK_INT >= 33) Manifest.permission.NEARBY_WIFI_DEVICES
             else Manifest.permission.ACCESS_FINE_LOCATION
         val granted = appContext.hasPermissionCompat(required)
         val locationAccessMode = if (Build.VERSION.SDK_INT in 29..32) runCatching {
-            appContext.systemService(AppOpsManager::class.java)?.unsafeCheckOpNoThrow(
+            appContext.systemServiceOrNull(AppOpsManager::class.java)?.unsafeCheckOpNoThrow(
                 AppOpsManager.OPSTR_FINE_LOCATION, android.os.Process.myUid(), appContext.packageName)
         }.getOrNull() else null
         diagnostic("Wi-Fi P2P preflight wifiEnabled=$wifiEnabled locationEnabled=$locationEnabled permissionGranted=$granted locationAccessMode=${locationAccessMode ?: "unknown"} stationMHz=${station.alignmentFrequency ?: "unknown"} stationState=${station.state ?: "unknown"} reportedStationMHz=${station.reportedFrequency ?: "unknown"} fiveGhzSupported=${fiveGhzSupported ?: "unknown"}")

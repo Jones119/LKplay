@@ -6,7 +6,7 @@ import android.net.wifi.WifiConfiguration
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.util.Log
-import com.shilapi.xcertplay.compat.systemService
+import com.shilapi.xcertplay.compat.systemServiceOrNull
 import java.util.BitSet
 
 /**
@@ -38,7 +38,7 @@ object LegacySoftApControl {
 
     // ---- 读取 ----
     fun readStoredConfiguration(context: Context): StoredApConfiguration? =
-        context.systemService(WifiManager::class.java)?.let(::readStored)
+        context.systemServiceOrNull(WifiManager::class.java)?.let(::readStored)
 
     private fun readStored(wifi: WifiManager): StoredApConfiguration? {
         val raw = runCatching {
@@ -102,7 +102,7 @@ object LegacySoftApControl {
 
     /** true = 平台已受理；调用方仍须轮询状态确认。失败路径自动恢复被关的 Wi-Fi 客户端。 */
     fun requestEnable(context: Context, log: (String) -> Unit = { Log.i(TAG, it) }): Boolean {
-        val wifi = context.systemService(WifiManager::class.java)
+        val wifi = context.systemServiceOrNull(WifiManager::class.java)
         if (wifi == null) { log("legacy AP: WifiManager unavailable"); return false }
         if (!supported()) { log("legacy AP: setWifiApEnabled unavailable"); return false }
         return try {
@@ -174,7 +174,7 @@ object LegacySoftApControl {
     fun restoreWifiClientIfNeeded(context: Context, log: (String) -> Unit = { Log.i(TAG, it) }) {
         if (!clientDisabledByUs) return
         clientDisabledByUs = false
-        val wifi = context.systemService(WifiManager::class.java) ?: return
+        val wifi = context.systemServiceOrNull(WifiManager::class.java) ?: return
         val state = apState(wifi)
         if (state == AP_STATE_ENABLED || state == AP_STATE_ENABLING) {
             log("legacy AP: hotspot is up; keeping the Wi-Fi client off")
@@ -184,7 +184,7 @@ object LegacySoftApControl {
         log("legacy AP: Wi-Fi client restore requested success=$restored")
     }
 
-    fun apState(context: Context): Int? = context.systemService(WifiManager::class.java)?.let(::apState)
+    fun apState(context: Context): Int? = context.systemServiceOrNull(WifiManager::class.java)?.let(::apState)
 
     private fun apState(wifi: WifiManager): Int? = runCatching {
         WifiManager::class.java.getMethod("getWifiApState").invoke(wifi) as? Int

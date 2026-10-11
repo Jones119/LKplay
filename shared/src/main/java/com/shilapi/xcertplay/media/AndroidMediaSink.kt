@@ -29,7 +29,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.TimeUnit
-import com.shilapi.xcertplay.compat.systemService
+import com.shilapi.xcertplay.compat.systemServiceOrNull
 import com.shilapi.xcertplay.compat.inputBufferCompat
 import com.shilapi.xcertplay.compat.outputBufferCompat
 import com.shilapi.xcertplay.compat.trackUnderrunsCompat
@@ -184,7 +184,7 @@ class AndroidMediaSink(
     private val onMediaAudioChanged: (Boolean) -> Unit = {},
 ) : MediaSink {
     private val appContext = context?.applicationContext
-    private val audioManager = appContext?.systemService(AudioManager::class.java)
+    private val audioManager = appContext?.systemServiceOrNull(AudioManager::class.java)
     private val audioFocusCoordinator = AudioFocusCoordinator(
         appContext,
         audioFocusEnabled,

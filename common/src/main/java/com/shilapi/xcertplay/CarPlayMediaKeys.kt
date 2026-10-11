@@ -18,7 +18,7 @@ import com.shilapi.xcertplay.media.CarPlayNowPlaying
 import com.shilapi.xcertplay.orchestration.CarPlayController
 import java.util.concurrent.Executors
 import java.util.concurrent.Executor
-import com.shilapi.xcertplay.compat.systemService
+import com.shilapi.xcertplay.compat.systemServiceOrNull
 import com.shilapi.xcertplay.compat.getDrawableCompat
 
 /**
@@ -277,7 +277,7 @@ internal object CarPlayMediaKeys {
 
     @Suppress("DEPRECATION")
     private fun startLegacyKeys(context: Context) {
-        val audio = context.systemService(AudioManager::class.java) ?: return
+        val audio = context.systemServiceOrNull(AudioManager::class.java) ?: return
         focusHeld = audio.requestAudioFocus(
             legacyFocusListener, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN,
         ) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
@@ -290,7 +290,7 @@ internal object CarPlayMediaKeys {
     private fun stopLegacyKeys(context: Context) {
         if (!legacyKeysRegistered) return
         legacyKeysRegistered = false
-        context.systemService(AudioManager::class.java)?.unregisterMediaButtonEventReceiver(
+        context.systemServiceOrNull(AudioManager::class.java)?.unregisterMediaButtonEventReceiver(
             ComponentName(context, MediaButtonReceiver::class.java),
         )
     }

@@ -93,7 +93,6 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
-import com.shilapi.xcertplay.compat.systemService
 import com.shilapi.xcertplay.compat.systemServiceOrNull
 import com.shilapi.xcertplay.compat.noBackupFilesDirCompat
 
@@ -173,7 +172,7 @@ class CarPlayController(
     private val diagnosticRun = AtomicInteger()
     private val usbManager: UsbManager? = context.systemServiceOrNull(UsbManager::class.java)
     private val bluetoothAdapter =
-        appContext.systemService(BluetoothManager::class.java)?.adapter
+        appContext.systemServiceOrNull(BluetoothManager::class.java)?.adapter
     private val iphoneHost by lazy {
         IphoneUsbHost(
             appContext,

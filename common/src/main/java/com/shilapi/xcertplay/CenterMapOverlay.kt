@@ -21,7 +21,7 @@ import android.view.WindowManager
 import android.widget.FrameLayout
 import kotlin.math.abs
 import kotlin.math.hypot
-import com.shilapi.xcertplay.compat.systemService
+import com.shilapi.xcertplay.compat.systemServiceOrNull
 import android.os.Build
 
 /**
@@ -95,7 +95,7 @@ internal object CenterMapOverlay {
         if (root != null) return true
         if (!aspect.isFinite() || aspect <= 0) return false
         if (!permitted(context)) return false
-        val windows = context.systemService(WindowManager::class.java) ?: return false
+        val windows = context.systemServiceOrNull(WindowManager::class.java) ?: return false
         val metrics = context.resources.displayMetrics
         val screenWidth = metrics.widthPixels
         val screenHeight = metrics.heightPixels
@@ -278,7 +278,7 @@ internal object CenterMapOverlay {
     fun hide() {
         val view = root ?: return
         root = null
-        runCatching { view.context.systemService(WindowManager::class.java)?.removeViewImmediate(view) }
+        runCatching { view.context.systemServiceOrNull(WindowManager::class.java)?.removeViewImmediate(view) }
         Log.i(TAG, "card hidden")
     }
 
