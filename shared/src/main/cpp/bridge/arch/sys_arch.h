@@ -1,0 +1,27 @@
+/*
+ * lwIP's OS type definitions for the pthreads port in bridge/sys_arch.c (docs/_digest/58 §7).
+ *
+ * Semaphores and mailboxes are pointers to opaque structures owned by sys_arch.c, so the NULL sentinels
+ * lwIP's sys.h tests against are plain NULL. Threads are pthread_t.
+ */
+#ifndef CS11_ARCH_SYS_ARCH_H
+#define CS11_ARCH_SYS_ARCH_H
+
+#include <pthread.h>
+
+typedef void *sys_sem_t;
+typedef void *sys_mbox_t;
+typedef pthread_mutex_t *sys_mutex_t;
+typedef pthread_t sys_thread_t;
+
+#define SYS_MBOX_NULL NULL
+#define SYS_SEM_NULL NULL
+
+/* lwIP's sys.h defines the valid/set_invalid helpers from these sentinels, so sys_arch.c must not
+ * define functions with those names. */
+#define sys_sem_valid(sem) (((sem) != NULL) && (*(sem) != SYS_SEM_NULL))
+#define sys_sem_set_invalid(sem) do { if ((sem) != NULL) { *(sem) = SYS_SEM_NULL; } } while (0)
+#define sys_mbox_valid(mbox) (((mbox) != NULL) && (*(mbox) != SYS_MBOX_NULL))
+#define sys_mbox_set_invalid(mbox) do { if ((mbox) != NULL) { *(mbox) = SYS_MBOX_NULL; } } while (0)
+
+#endif /* CS11_ARCH_SYS_ARCH_H */

@@ -54,8 +54,14 @@
 
 /* ── TCP tuned for one video stream plus control channels over a 16 KiB NTB input ─────────────── */
 #define TCP_MSS                         1400
-#define TCP_SND_BUF                     (64 * 1024)
-#define TCP_WND                         (64 * 1024)
+/*
+ * The receive window is the throttle on the phone's video sender, and the kernel path was tuned to
+ * exactly this size on the car: a 128 KiB window let the phone dump multi-megabit bursts into the NCM
+ * link and evict audio, while 16 KiB paced the sender (docs/_digest/51). Without window scaling TCP_WND
+ * must also fit an u16_t.
+ */
+#define TCP_WND                         (16 * 1024)
+#define TCP_SND_BUF                     (16 * 1024)
 #define TCP_SND_QUEUELEN                ((8 * TCP_SND_BUF) / TCP_MSS)
 #define TCP_QUEUE_OOSEQ                 1
 #define MEMP_NUM_TCP_PCB                16
@@ -76,6 +82,9 @@
 #define SO_REUSE                        1
 #define LWIP_TCP_KEEPALIVE              1
 #define LWIP_TCP_TIMESTAMPS             0
+/* Android's libc already provides socklen_t and struct timeval; lwIP would redefine both. */
+#define SOCKLEN_T_DEFINED               1
+#define LWIP_TIMEVAL_PRIVATE            0
 
 /* ── Threading (tcpip_thread + mailboxes; sys_arch is pthreads, see bridge/sys_arch.c) ────────── */
 #define TCPIP_THREAD_NAME               "lwip-tcpip"

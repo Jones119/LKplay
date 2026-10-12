@@ -17,7 +17,17 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
-    // CS11 移植：暂时关闭原生构建（hotspot JNI 模块；后续如需再用 NDK<=r26 接入）
+    // CS11: the native modules (local_hotspot_radio, legacy_usb, lwip_bridge) build through ndk-build.
+    // r25c is the newest NDK that still supports API 19 - its meta/platforms.json says min 19, while
+    // r26's floor is 21 (AGP rejects minSdk 19 with r26 outright) - and src/main/jni/Application.mk
+    // targets android-19 for the same reason.
+    ndkVersion '25.2.9519653'
+    externalNativeBuild {
+        cmake {
+            path file('src/main/cpp/CMakeLists.txt')
+            version '3.22.1'
+        }
+    }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
