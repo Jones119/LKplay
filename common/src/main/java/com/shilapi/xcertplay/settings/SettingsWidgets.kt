@@ -50,9 +50,13 @@ object SettingsWidgets {
         title: String,
         theme: SettingsTheme = SettingsTheme.OVERLAY,
     ): TextView = TextView(context).apply {
-        text = title
-        textSize = if (theme.isOverlay) 16f else 22f
-        setTextColor(if (theme.isOverlay) theme.accent else theme.textPrimary)
+        // A section is a micro-label in this system, not a headline: 12 sp, widely letterspaced, secondary
+        // colour, and uppercase where the script has a case (docs/_digest/60). The hierarchy that used to
+        // come from size now comes from weight, spacing and the hairlines between rows.
+        text = if (theme.isOverlay) title else title.uppercase()
+        textSize = if (theme.isOverlay) 16f else 12f
+        setTextColor(if (theme.isOverlay) theme.accent else theme.textSecondary)
+        if (Build.VERSION.SDK_INT >= 21) letterSpacing = if (theme.isOverlay) .06f else .2f
         applyTextStyle(context, theme, bold = true)
     }
 
@@ -91,8 +95,22 @@ object SettingsWidgets {
                     )
                 }
             } else {
-                minHeight = theme.dp(context, 56)
-                if (Build.VERSION.SDK_INT >= 21) buttonTintList = ColorStateList.valueOf(theme.accent)
+                minHeight = theme.dp(context, 52)
+                // The platform switch is tinted by the app theme's accent, which is the one coloured thing
+                // left on a settings page. Both states are tinted here, like the overlay's switch does, so
+                // "on" reads as the primary colour and nothing else (docs/_digest/60).
+                if (Build.VERSION.SDK_INT >= 23) {
+                    thumbTintList = ColorStateList(
+                        arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
+                        intArrayOf(theme.textPrimary, theme.textDisabled),
+                    )
+                    trackTintList = ColorStateList(
+                        arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
+                        intArrayOf(theme.accentTrack, theme.trackOff),
+                    )
+                } else if (Build.VERSION.SDK_INT >= 21) {
+                    buttonTintList = ColorStateList.valueOf(theme.accent)
+                }
             }
             setOnCheckedChangeListener { _, isChecked -> onChanged(isChecked) }
         }
@@ -107,21 +125,21 @@ object SettingsWidgets {
             row.addView(labelView, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
             row.addView(switch, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         } else {
-            row.setPadding(0, theme.dp(context, 12), 0, theme.dp(context, 12))
+            row.setPadding(0, theme.dp(context, 14), 0, theme.dp(context, 14))
             val textCol = LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
             }
             val labelView = TextView(context).apply {
                 text = label
-                textSize = labelSizeSp
+                textSize = 17f
                 setTextColor(theme.textPrimary)
                 applyTextStyle(context, theme, bold = true)
             }
             val descView = TextView(context).apply {
                 text = description
-                textSize = 14f
+                textSize = 13f
                 setTextColor(theme.textSecondary)
-                setPadding(0, theme.dp(context, 6), theme.dp(context, 16), 0)
+                setPadding(0, theme.dp(context, 5), theme.dp(context, 16), 0)
                 applyTextStyle(context, theme)
             }
             textCol.addView(labelView)
