@@ -510,6 +510,12 @@ class DiPlayActivity : ComponentActivity() {
      */
     private var settingsCategoryIndex = 0
 
+    /**
+     * An open detail inside the settings page, e.g. the connection setup. It renders into the content column
+     * next to the category index instead of replacing the whole screen, so the index stays usable.
+     */
+    private var settingsDetail: String? = null
+
     private fun settingsCategoryLabels(): List<String> = listOf(
         getString(R.string.connection),
         getString(R.string.display_and_performance),
@@ -566,11 +572,25 @@ class DiPlayActivity : ComponentActivity() {
      */
     private fun settingsPage(content: LinearLayout) {
         val sections = column()
+        // A category's detail is built into the same content column rather than taking over the screen: the
+        // index stays visible, which is the point of a two-column settings page (docs/_digest/60).
+        val detail = settingsDetail
+        val fillSections = {
+            if (detail == null) {
+                settings(sections)
+            } else {
+                sections.addView(
+                    button(getString(R.string.back), false) { settingsDetail = null; render() },
+                    LinearLayout.LayoutParams(dp(160), dp(44)).apply { bottomMargin = dp(18) },
+                )
+                if (detail == "connection") connectionSetup(sections)
+            }
+        }
         if (isCompactLayout) {
             // A narrow screen has no room for an index beside the content, so the sections run full width.
             content.addView(sections)
-            settings(sections)
-            content.post { applySettingsCategoryFilter(sections) }
+            fillSections()
+            if (detail == null) content.post { applySettingsCategoryFilter(sections) }
             return
         }
         val nav = column().apply { setPadding(0, 0, dp(34), 0) }
@@ -586,8 +606,10 @@ class DiPlayActivity : ComponentActivity() {
                 LinearLayout.LayoutParams(0, dp(44), 1f),
             )
             item.setOnClickListener {
-                if (settingsCategoryIndex != index) {
+                if (settingsCategoryIndex != index || settingsDetail != null) {
                     settingsCategoryIndex = index
+                    // Picking a category closes any open detail, otherwise the click looks like it did nothing.
+                    settingsDetail = null
                     render()
                 }
             }
@@ -608,9 +630,9 @@ class DiPlayActivity : ComponentActivity() {
             LinearLayout.LayoutParams(0, (resources.displayMetrics.heightPixels - dp(240)).coerceAtLeast(dp(360)), 1f),
         )
         content.addView(page)
-        settings(sections)
+        fillSections()
         // After the sections are attached, so the filter sees every child whatever the category order is.
-        sectionScroll.post { applySettingsCategoryFilter(sections) }
+        if (detail == null) sectionScroll.post { applySettingsCategoryFilter(sections) }
     }
 
     private fun settings(content: LinearLayout) {
@@ -630,7 +652,7 @@ class DiPlayActivity : ComponentActivity() {
         }
         section(content, getString(R.string.connection_setup), R.drawable.ic_dp_connection) { card ->
             card.addView(label(getString(R.string.choose_how_to_connect_follow_the_setup_steps_and_save_your), 16, MUTED))
-            card.addView(button(getString(R.string.open_connection_setup), false) { page = "connection"; render() }, matchButton(12, 60))
+            card.addView(button(getString(R.string.open_connection_setup), false) { settingsDetail = "connection"; render() }, matchButton(12, 60))
         }
         section(content, getString(R.string.diagnostics), R.drawable.ic_dp_diagnostics) { card ->
             exportButton = button(if (exportInProgress) getString(R.string.saving_report) else getString(R.string.save_diagnostic_report), false) {
