@@ -18,11 +18,12 @@ import com.shilapi.xcertplay.airplay.AirPlaySessionListener
 import com.shilapi.xcertplay.airplay.PairingStore
 import com.shilapi.xcertplay.mfi.MfiAuthenticator
 import com.shilapi.xcertplay.transport.NcmUsbBridge
+import com.shilapi.xcertplay.transport.DuplexServer
+import com.shilapi.xcertplay.transport.DuplexSocket
+import com.shilapi.xcertplay.transport.SessionNetwork
 import java.io.IOException
 import java.net.Inet6Address
 import java.net.InetAddress
-import java.net.ServerSocket
-import java.net.Socket
 import java.util.concurrent.atomic.AtomicBoolean
 import android.os.Build
 
@@ -60,8 +61,14 @@ class CarPlayVpnService : VpnService() {
     private val sessionsLock = Any()
     private val sessions = mutableSetOf<AirPlaySession>()
     @Volatile private var attachment: AirPlayAttachment? = null
-    private var serverSocket: ServerSocket? = null
-    private var additionalServers: List<ServerSocket> = emptyList()
+    private var serverSocket: DuplexServer? = null
+    private var additionalServers: List<DuplexServer> = emptyList()
+    /**
+     * Where the AirPlay listeners bind. A Service is created by the framework, so this cannot be a
+     * constructor parameter: the controller sets it before `attach`, and the kernel stack stays the
+     * default (docs/_digest/58 §6 step 7).
+     */
+    @Volatile internal var network: SessionNetwork = SessionNetwork.kernel
     private var bridge: Ipv6NcmBridge? = null
     private var tun: ParcelFileDescriptor? = null
     private var attachGeneration = 0
@@ -220,12 +227,19 @@ class CarPlayVpnService : VpnService() {
         replacement: AirPlayAttachment,
     ) {
         val servers = if (replacement.additionalAddresses.isEmpty()) {
-            listOf(AirPlayPortSelector.bind(replacement.address, replacement.config.port) { busy, bound ->
-                Log.w(TAG, "AirPlay port $busy is in use; listening on $bound instead")
-            })
+            listOf(
+                AirPlayPortSelector.bind(
+                    replacement.address, replacement.config.port, network = network,
+                ) { busy, bound ->
+                    Log.w(TAG, "AirPlay port $busy is in use; listening on $bound instead")
+                },
+            )
         } else {
-            AirPlayPortSelector.bindAll(listOf(replacement.address) + replacement.additionalAddresses,
-                replacement.config.port) { busy, bound ->
+            AirPlayPortSelector.bindAll(
+                listOf(replacement.address) + replacement.additionalAddresses,
+                replacement.config.port,
+                network = network,
+            ) { busy, bound ->
                 Log.w(TAG, "AirPlay port $busy is in use; listening on $bound instead")
             }
         }
@@ -235,7 +249,7 @@ class CarPlayVpnService : VpnService() {
         additionalServers = servers.drop(1)
         servers.forEach { bound ->
             runCatching { replacement.listener.onDebugLog(
-                "airplay listener ready family=${if (bound.inetAddress is Inet6Address) "IPv6" else "IPv4"} port=${bound.localPort}",
+                "airplay listener ready family=${if (bound.localSocketAddress?.address is Inet6Address) "IPv6" else "IPv4"} port=${bound.localPort}",
             ) }
             Thread(
                 { acceptLoop(generation, bound) },
@@ -249,11 +263,11 @@ class CarPlayVpnService : VpnService() {
 
     private fun acceptLoop(
         generation: Int,
-        server: ServerSocket,
+        server: DuplexServer,
     ) {
         try {
             while (active.get()) {
-                val socket: Socket = server.accept()
+                val socket: DuplexSocket = server.accept()
                 val acceptedAtNanos = System.nanoTime()
                 Log.i(TAG, "airplay connection accepted from ${socket.remoteSocketAddress}")
                 socket.tcpNoDelay = true
@@ -270,14 +284,20 @@ class CarPlayVpnService : VpnService() {
                         socket.close()
                         return
                     }
-                    val internalPeer = isInternalAirPlayPeer(socket.inetAddress, socket.localAddress)
+                    // Both ends are always known for an accepted connection; should a userspace stack
+                    // ever report neither, treat the peer as external - which is what the callbacks
+                    // assume when no listener identity owns the session.
+                    val peerAddress = socket.remoteSocketAddress?.address
+                    val localAddress = socket.localSocketAddress?.address
+                    val internalPeer = peerAddress != null && localAddress != null &&
+                        isInternalAirPlayPeer(peerAddress, localAddress)
                     current.listenerIdentity?.let { owner ->
                         current.listener.onTcpAccepted(AirPlayTcpAccepted(
                             owner, internalPeer, acceptedAtNanos,
                         ))
                     }
                     runCatching { current.listener.onDebugLog(
-                        "airplay TCP accepted family=${if (socket.inetAddress is Inet6Address) "IPv6" else "IPv4"}",
+                        "airplay TCP accepted family=${if (socket.remoteSocketAddress?.address is Inet6Address) "IPv6" else "IPv4"}",
                     ) }
                     AirPlaySession(
                         socket = socket,
@@ -308,6 +328,7 @@ class CarPlayVpnService : VpnService() {
                             }
                         },
                         media = current.media,
+                        network = network,
                     ).also(::addSession)
                 }
                 session.start()

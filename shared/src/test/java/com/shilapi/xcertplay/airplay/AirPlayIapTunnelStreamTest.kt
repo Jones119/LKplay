@@ -2,6 +2,7 @@ package com.shilapi.xcertplay.airplay
 
 import java.net.InetAddress
 import java.net.Socket
+import com.shilapi.xcertplay.transport.KernelSessionNetwork
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -55,7 +56,7 @@ class AirPlayIapTunnelStreamTest {
     }
 
     private fun testSession(): AirPlaySession = AirPlaySession(
-        socket = Socket(),
+        socket = KernelSessionNetwork.wrap(Socket()),
         config = AirPlayConfig(
             deviceName = "test",
             deviceId = "02:00:00:00:00:02",

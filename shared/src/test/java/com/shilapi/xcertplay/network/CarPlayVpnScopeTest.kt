@@ -14,6 +14,7 @@ import com.shilapi.xcertplay.airplay.AirPlaySessionListener
 import com.shilapi.xcertplay.airplay.PairingStore
 import com.shilapi.xcertplay.transport.NcmUsbBridge
 import java.net.InetAddress
+import com.shilapi.xcertplay.transport.DuplexServer
 import java.net.ServerSocket
 import java.util.concurrent.atomic.AtomicBoolean
 import org.junit.Assert.assertEquals
@@ -74,7 +75,7 @@ class CarPlayVpnScopeTest {
             assertTrue(service.isAttached())
             assertTrue(service.boundPort()!! > 0)
             assertTrue("Wireless must not establish a VPN", VpnScopeBoundary.calls.isEmpty())
-            val oldServer = ReflectionHelpers.getField<ServerSocket>(service, "serverSocket")
+            val oldServer = ReflectionHelpers.getField<DuplexServer>(service, "serverSocket")
 
             VpnScopeBoundary.allowFailure = PackageManager.NameNotFoundException("scope rejected")
             assertEquals(CarPlayVpnService.AttachResult.Failed("scope rejected"), attachWired(service))
@@ -84,7 +85,7 @@ class CarPlayVpnScopeTest {
 
             assertEquals(CarPlayVpnService.AttachResult.Started, attachWireless(service))
             assertTrue(service.isAttached())
-            val newServer = ReflectionHelpers.getField<ServerSocket>(service, "serverSocket")
+            val newServer = ReflectionHelpers.getField<DuplexServer>(service, "serverSocket")
             service.detach()
             service.detach()
             assertTrue(newServer.isClosed)

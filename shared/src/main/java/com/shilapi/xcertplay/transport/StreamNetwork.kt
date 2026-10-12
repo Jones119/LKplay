@@ -48,6 +48,12 @@ interface DuplexServer : Closeable {
     /** Logged verbatim by the iAP tunnel, so it stays one value. */
     val localSocketAddress: InetSocketAddress?
 
+    /** Whether the endpoint was released; a failed attachment must close the previous listener. */
+    val isClosed: Boolean
+
+    /** Bounds a blocking [accept]; a userspace stack may ignore it. */
+    var soTimeout: Int
+
     /** Blocks until the peer connects. Throws [IOException] once the endpoint is closed. */
     @Throws(IOException::class)
     fun accept(): DuplexSocket
@@ -81,6 +87,12 @@ interface SessionNetwork : DatagramNetwork, StreamNetwork {
 
 /** The shipped network: `java.net` sockets bound to the caller's address. */
 object KernelSessionNetwork : SessionNetwork {
+    /**
+     * Presents an existing kernel socket as a [DuplexSocket]. Sockets this network hands out are
+     * already wrapped; this is for code that holds a `java.net.Socket` of its own.
+     */
+    fun wrap(socket: Socket): DuplexSocket = KernelDuplexSocket(socket)
+
     override fun open(localAddress: InetAddress): DatagramTransport =
         KernelDatagramNetwork.open(localAddress)
 
@@ -95,6 +107,13 @@ object KernelSessionNetwork : SessionNetwork {
 private class KernelDuplexServer(private val server: ServerSocket) : DuplexServer {
     override val localPort: Int get() = server.localPort
     override val localSocketAddress: InetSocketAddress? get() = server.localSocketAddress as? InetSocketAddress
+    override val isClosed: Boolean get() = server.isClosed
+
+    override var soTimeout: Int
+        get() = server.soTimeout
+        set(value) {
+            server.soTimeout = value
+        }
 
     override fun accept(): DuplexSocket = KernelDuplexSocket(server.accept())
 
@@ -103,7 +122,7 @@ private class KernelDuplexServer(private val server: ServerSocket) : DuplexServe
     }
 }
 
-private class KernelDuplexSocket(private val socket: Socket) : DuplexSocket {
+private class KernelDuplexSocket(val socket: Socket) : DuplexSocket {
     override val inputStream: InputStream get() = socket.getInputStream()
     override val outputStream: OutputStream get() = socket.getOutputStream()
     override val remoteSocketAddress: InetSocketAddress? get() = socket.remoteSocketAddress as? InetSocketAddress
@@ -135,3 +154,12 @@ private class KernelDuplexSocket(private val socket: Socket) : DuplexSocket {
         socket.close()
     }
 }
+
+/**
+ * The kernel socket behind an endpoint, or null when it came from a userspace stack.
+ *
+ * Only the fd-based keepalive tuning needs it (`TcpLiveness` reaches for the file descriptor, which a
+ * userspace stack does not have); a userspace stack sets those options through lwIP instead, so the
+ * caller reads null as "nothing to tune here".
+ */
+internal fun DuplexSocket.kernelSocket(): Socket? = (this as? KernelDuplexSocket)?.socket

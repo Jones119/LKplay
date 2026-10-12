@@ -1,9 +1,11 @@
 package com.shilapi.xcertplay.network
 
+import com.shilapi.xcertplay.transport.DuplexServer
+import com.shilapi.xcertplay.transport.KernelSessionNetwork
+import com.shilapi.xcertplay.transport.StreamNetwork
+import java.io.Closeable
 import java.net.BindException
 import java.net.InetAddress
-import java.net.InetSocketAddress
-import java.net.ServerSocket
 
 /**
  * Binds the AirPlay control listener, falling back when the preferred port is already taken.
@@ -11,6 +13,10 @@ import java.net.ServerSocket
  * Some head units ship a factory CarPlay daemon that permanently listens on the default AirPlay
  * port (7000) on every interface, so binding DiPlay's listener fails with EADDRINUSE. The bound
  * port is advertised to the iPhone through Bonjour and iAP2, so any free port works.
+ *
+ * The listeners come from a [StreamNetwork] so the wired path can serve them from a userspace stack
+ * later (docs/_digest/58 §2). Every bind here is deliberately **non-reusable**: this class detects a
+ * busy port by failing to bind, and `reuseAddress = true` would report a busy port as free.
  */
 object AirPlayPortSelector {
     /** Ports tried, in order, after the preferred port; an ephemeral port is the last resort. */
@@ -21,15 +27,16 @@ object AirPlayPortSelector {
         addresses: List<InetAddress>,
         preferredPort: Int,
         fallbackPorts: Iterable<Int> = FALLBACK_PORTS,
+        network: StreamNetwork = KernelSessionNetwork,
         onFallback: (Int, Int) -> Unit = { _, _ -> },
-    ): List<ServerSocket> {
+    ): List<DuplexServer> {
         require(addresses.isNotEmpty()) { "At least one listener address is required" }
         val candidates = listOf(preferredPort) + fallbackPorts.filter { it != preferredPort } + List(4) { 0 }
         for (candidate in candidates) {
-            val servers = mutableListOf<ServerSocket>()
+            val servers = mutableListOf<DuplexServer>()
             try {
                 for (address in addresses.distinct()) {
-                    servers.add(bindPort(address, servers.firstOrNull()?.localPort ?: candidate))
+                    servers.add(bindPort(network, address, servers.firstOrNull()?.localPort ?: candidate))
                 }
             } catch (error: Throwable) {
                 servers.forEach { closeAfterFailure(it, error) }
@@ -52,40 +59,37 @@ object AirPlayPortSelector {
         address: InetAddress,
         preferredPort: Int,
         fallbackPorts: Iterable<Int> = FALLBACK_PORTS,
+        network: StreamNetwork = KernelSessionNetwork,
         onFallback: (busyPort: Int, boundPort: Int) -> Unit = { _, _ -> },
-    ): ServerSocket {
-        tryBind(address, preferredPort)?.let { return it }
+    ): DuplexServer {
+        tryBind(network, address, preferredPort)?.let { return it }
         for (port in fallbackPorts) {
             if (port == preferredPort) continue
-            tryBind(address, port)?.let { server ->
+            tryBind(network, address, port)?.let { server ->
                 return reportFallback(server, preferredPort, onFallback)
             }
         }
-        return reportFallback(bindPort(address, 0), preferredPort, onFallback)
+        return reportFallback(bindPort(network, address, 0), preferredPort, onFallback)
     }
 
-    private fun tryBind(address: InetAddress, port: Int): ServerSocket? = try {
-        bindPort(address, port)
+    private fun tryBind(network: StreamNetwork, address: InetAddress, port: Int): DuplexServer? = try {
+        bindPort(network, address, port)
     } catch (_: BindException) {
         null
     }
 
-    private fun bindPort(address: InetAddress, port: Int): ServerSocket {
-        val server = ServerSocket()
-        return try {
-            server.bind(InetSocketAddress(address, port))
-            server
-        } catch (error: Throwable) {
-            closeAfterFailure(server, error)
-            throw error
-        }
-    }
+    /**
+     * Unlike the old `ServerSocket` form there is no half-bound object to release: [StreamNetwork.listen]
+     * either returns a listening endpoint or throws, so a failure leaves nothing behind.
+     */
+    private fun bindPort(network: StreamNetwork, address: InetAddress, port: Int): DuplexServer =
+        network.listen(address, port = port, reuseAddress = false)
 
     private fun reportFallback(
-        server: ServerSocket,
+        server: DuplexServer,
         preferredPort: Int,
         onFallback: (Int, Int) -> Unit,
-    ): ServerSocket = try {
+    ): DuplexServer = try {
         onFallback(preferredPort, server.localPort)
         server
     } catch (error: Throwable) {
@@ -94,7 +98,7 @@ object AirPlayPortSelector {
         throw error
     }
 
-    private fun closeAfterFailure(server: ServerSocket, error: Throwable) {
+    private fun closeAfterFailure(server: Closeable, error: Throwable) {
         try {
             server.close()
         } catch (closeError: Throwable) {

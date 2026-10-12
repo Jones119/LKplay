@@ -2,6 +2,7 @@ package com.shilapi.xcertplay.airplay
 
 import java.io.Closeable
 import java.net.Socket
+import com.shilapi.xcertplay.transport.KernelSessionNetwork
 import java.math.BigInteger
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -85,7 +86,7 @@ class CarPlayMediaEngineTest {
     }
 
     private fun testSession(videoInCar: Boolean = false): AirPlaySession = AirPlaySession(
-        socket = Socket(),
+        socket = KernelSessionNetwork.wrap(Socket()),
         config = AirPlayConfig(
             deviceName = "test",
             deviceId = "02:00:00:00:00:02",

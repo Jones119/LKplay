@@ -76,6 +76,8 @@ class StreamChannelNetworkTest {
 
         override val localPort: Int get() = port
         override val localSocketAddress: InetSocketAddress? get() = null
+        override val isClosed: Boolean get() = closed.get()
+        override var soTimeout: Int = 0
 
         override fun accept(): DuplexSocket {
             while (!closed.get()) Thread.sleep(10)

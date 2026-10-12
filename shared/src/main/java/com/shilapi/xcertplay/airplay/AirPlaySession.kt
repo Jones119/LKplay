@@ -7,12 +7,13 @@ import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.io.Closeable
 import java.math.BigInteger
-import java.net.DatagramPacket
-import java.net.DatagramSocket
+import com.shilapi.xcertplay.transport.DatagramTransport
+import com.shilapi.xcertplay.transport.DuplexServer
+import com.shilapi.xcertplay.transport.DuplexSocket
+import com.shilapi.xcertplay.transport.SessionNetwork
+import com.shilapi.xcertplay.transport.kernelSocket
 import java.net.InetAddress
 import java.net.InetSocketAddress
-import java.net.ServerSocket
-import java.net.Socket
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -66,13 +67,15 @@ interface AirPlayMediaHandler {
  * input, stream SETUP/TEARDOWN routing, the NTP timing exchange, and the keep-alive socket.
  */
 class AirPlaySession(
-    private val socket: Socket,
+    private val socket: DuplexSocket,
     private val config: AirPlayConfig,
     private val identity: AirPlayIdentity,
     private val pairings: PairingStore,
     private val mfi: MfiAuthenticator?,
     private val listener: AirPlaySessionListener,
     private val media: AirPlayMediaHandler,
+    /** Endpoints for the keep-alive and event channels; the control socket arrives already accepted. */
+    private val network: SessionNetwork = SessionNetwork.kernel,
 ) : Closeable {
     internal val pairSetup = PairSetup(identity, pairings)
     internal val pairVerify = PairVerify(identity, pairings)
@@ -90,22 +93,22 @@ class AirPlaySession(
     private val closed = AtomicBoolean(false)
     internal val isClosed: Boolean get() = closed.get()
     private val notified = AtomicBoolean(false)
-    private var eventServer: ServerSocket? = null
-    private var eventSocket: Socket? = null
+    private var eventServer: DuplexServer? = null
+    private var eventSocket: DuplexSocket? = null
     private var eventCipher: ControlCipher? = null
     private var eventCseq = 0
     private var pendingNightMode: Boolean? = null
     private val firstTouchSendLogged = AtomicBoolean(false)
     private val touchSendFailureLogged = AtomicBoolean(false)
-    private val ntp = NtpClock()
-    private var keepAliveSocket: DatagramSocket? = null
+    private val ntp = NtpClock(network)
+    private var keepAliveSocket: DatagramTransport? = null
     private var keepAliveThread: Thread? = null
     private val eventWriteLock = Any()
     private val eventThreads = CopyOnWriteArrayList<Thread>()
 
-    val host: String = socket.inetAddress?.hostAddress ?: ""
-    val localAddress: InetAddress? = withLinkLocalScope(socket.localAddress)
-    private val peerAddress: InetAddress? = socket.inetAddress
+    val host: String = socket.remoteSocketAddress?.address?.hostAddress ?: ""
+    val localAddress: InetAddress? = withLinkLocalScope(socket.localSocketAddress?.address)
+    private val peerAddress: InetAddress? = socket.remoteSocketAddress?.address
     internal val remoteAddress: InetAddress?
         get() = (socket.remoteSocketAddress as? InetSocketAddress)?.address
     val controllerId: String? get() = pairVerify.verifiedControllerId
@@ -322,7 +325,7 @@ class AirPlaySession(
         trace { "airplay event tx headers=$head bodyHex=${body.toHex()}" }
         return try {
             val bytes = cipher.encrypt(head.toByteArray(Charsets.US_ASCII) + body)
-            val output = socket.getOutputStream()
+            val output = socket.outputStream
             output.write(bytes)
             output.flush()
             true
@@ -442,9 +445,13 @@ class AirPlaySession(
         )
 
     private fun runControl() {
-        com.shilapi.xcertplay.network.TcpLiveness.configure(socket) { debugLog(it) }
-        val input = BufferedInputStream(socket.getInputStream())
-        val output = BufferedOutputStream(socket.getOutputStream())
+        // TcpLiveness tunes keepalive through the socket's file descriptor, which only the kernel
+        // stack has; a userspace stack would set those options through lwIP instead.
+        socket.kernelSocket()?.let { kernel ->
+            com.shilapi.xcertplay.network.TcpLiveness.configure(kernel) { debugLog(it) }
+        }
+        val input = BufferedInputStream(socket.inputStream)
+        val output = BufferedOutputStream(socket.outputStream)
         var accumulated = ByteArray(0)
         val buffer = ByteArray(READ_CHUNK_BYTES)
         var closeReason = "session closed"
@@ -835,9 +842,7 @@ class AirPlaySession(
     }
 
     private fun openKeepAlive(): Int {
-        val socket = DatagramSocket(null)
-        socket.reuseAddress = true
-        socket.bind(InetSocketAddress(serverBindAddress(), 0))
+        val socket = network.open(serverBindAddress())
         keepAliveSocket = socket
         keepAliveThread = Thread({ runKeepAlive(socket) }, "airplay-keepalive").apply {
             isDaemon = true
@@ -846,11 +851,11 @@ class AirPlaySession(
         return socket.localPort
     }
 
-    private fun runKeepAlive(socket: DatagramSocket) {
+    private fun runKeepAlive(socket: DatagramTransport) {
         val buffer = ByteArray(512)
         while (!closed.get()) {
             try {
-                socket.receive(DatagramPacket(buffer, buffer.size))
+                socket.receive(buffer)
             } catch (_: Exception) {
                 if (closed.get()) return
             }
@@ -858,8 +863,7 @@ class AirPlaySession(
     }
 
     private fun openEvent(): Int {
-        val server = ServerSocket()
-        server.bind(InetSocketAddress(serverBindAddress(), 0), 50)
+        val server = network.listen(serverBindAddress(), port = 0, backlog = 50, reuseAddress = false)
         eventServer = server
         spawnEvent("airplay-event-accept") { acceptEvent(server) }
         return server.localPort
@@ -883,7 +887,7 @@ class AirPlaySession(
         eventThreads.clear()
     }
 
-    private fun acceptEvent(server: ServerSocket) {
+    private fun acceptEvent(server: DuplexServer) {
         try {
             val socket = server.accept()
             socket.setSoLinger(true, 0)
@@ -927,10 +931,10 @@ class AirPlaySession(
         }
     }
 
-    private fun runEventRead(socket: Socket) {
+    private fun runEventRead(socket: DuplexSocket) {
         try {
-            val input = BufferedInputStream(socket.getInputStream())
-            val output = BufferedOutputStream(socket.getOutputStream())
+            val input = BufferedInputStream(socket.inputStream)
+            val output = BufferedOutputStream(socket.outputStream)
             var encrypted = ByteArray(0)
             var plaintext = ByteArray(0)
             val buffer = ByteArray(READ_CHUNK_BYTES)

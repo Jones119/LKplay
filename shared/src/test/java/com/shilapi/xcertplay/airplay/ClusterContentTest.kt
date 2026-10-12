@@ -1,6 +1,7 @@
 package com.shilapi.xcertplay.airplay
 
 import java.net.Socket
+import com.shilapi.xcertplay.transport.KernelSessionNetwork
 import java.io.ByteArrayOutputStream
 import java.io.OutputStream
 import org.junit.Assert.*
@@ -14,7 +15,7 @@ import org.robolectric.annotation.Config
 @Config(sdk = [29], manifest = Config.NONE)
 class ClusterContentTest {
     private fun session(initialUrl: String, onTeardown: (AirPlaySession) -> Unit = {}): AirPlaySession = AirPlaySession(
-        socket = Socket(),
+        socket = KernelSessionNetwork.wrap(Socket()),
         config = AirPlayConfig(deviceName = "test", deviceId = "02:00:00:00:00:02", btMac = "02:00:00:00:00:01",
             sourceVersion = "1", main = AirPlayDisplayConfig(widthPixels = 800, heightPixels = 480),
             cluster = AirPlayDisplayConfig(widthPixels = 1600, heightPixels = 600, initialUrl = initialUrl)),
@@ -76,7 +77,7 @@ class ClusterContentTest {
     }
 
     private fun eventReady(session: AirPlaySession, event: EventSocket = EventSocket()): EventSocket {
-        for ((name, value) in listOf("eventSocket" to event, "eventCipher" to ControlCipher(ByteArray(32), ByteArray(32)))) {
+        for ((name, value) in listOf("eventSocket" to KernelSessionNetwork.wrap(event), "eventCipher" to ControlCipher(ByteArray(32), ByteArray(32)))) {
             session.javaClass.getDeclaredField(name).apply { isAccessible = true }.set(session, value)
         }
         return event

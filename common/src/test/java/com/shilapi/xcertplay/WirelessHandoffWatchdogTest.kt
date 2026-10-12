@@ -1,5 +1,6 @@
 package com.shilapi.xcertplay
 
+import com.shilapi.xcertplay.transport.KernelSessionNetwork
 import android.bluetooth.BluetoothSocket
 import android.content.Context
 import android.content.ContextWrapper
@@ -55,7 +56,7 @@ class WirelessHandoffWatchdogTest {
             identification = Iap2IdentificationConfig(name = "test", modelIdentifier = "test", manufacturer = "test",
                 serialNumber = "test", firmwareVersion = "1", hardwareVersion = "1", carPlayUsbInterfaceNumber = 3)),
             config, identity, PairingStore(), listener, object : AirPlayMediaHandler {}, statuses::add)
-        session = AirPlaySession(Socket(), config, identity, PairingStore(), null, listener, object : AirPlayMediaHandler {})
+        session = AirPlaySession(KernelSessionNetwork.wrap(Socket()), config, identity, PairingStore(), null, listener, object : AirPlayMediaHandler {})
         val phase = controller.javaClass.getDeclaredField("phase").apply { isAccessible = true }
         phase.set(controller, phase.type.enumConstants.first { it.toString() == "WIRELESS" })
         flag("wirelessHandoffRequested").set(true)

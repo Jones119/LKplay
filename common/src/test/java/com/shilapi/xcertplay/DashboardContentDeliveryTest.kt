@@ -1,5 +1,6 @@
 package com.shilapi.xcertplay
 
+import com.shilapi.xcertplay.transport.KernelSessionNetwork
 import com.shilapi.xcertplay.airplay.*
 import com.shilapi.xcertplay.orchestration.*
 import com.shilapi.xcertplay.transport.Iap2IdentificationConfig
@@ -32,7 +33,7 @@ class DashboardContentDeliveryTest {
             config, AirPlayIdentity(ByteArray(32), ByteArray(32), "test"), PairingStore(),
             object : AirPlaySessionListener {}, object : AirPlayMediaHandler {}, {})
         private val phones = mutableListOf<AirPlaySession>()
-        fun phone(setup: Boolean = true): AirPlaySession = AirPlaySession(Socket(), config,
+        fun phone(setup: Boolean = true): AirPlaySession = AirPlaySession(KernelSessionNetwork.wrap(Socket()), config,
             AirPlayIdentity(ByteArray(32), ByteArray(32), "test"), PairingStore(), null,
             object : AirPlaySessionListener {}, object : AirPlayMediaHandler {
                 override fun onScreen(session: AirPlaySession, type: Int, stream: Map<String, Any?>) = 1
@@ -83,7 +84,7 @@ class DashboardContentDeliveryTest {
     }
 
     private fun eventReady(phone: AirPlaySession, event: EventSocket = EventSocket()): EventSocket {
-        set(phone, "eventSocket", event)
+        set(phone, "eventSocket", KernelSessionNetwork.wrap(event))
         set(phone, "eventCipher", ControlCipher(ByteArray(32), ByteArray(32)))
         return event
     }

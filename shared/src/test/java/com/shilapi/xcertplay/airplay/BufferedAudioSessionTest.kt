@@ -1,6 +1,7 @@
 package com.shilapi.xcertplay.airplay
 
 import java.net.Socket
+import com.shilapi.xcertplay.transport.KernelSessionNetwork
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.SocketAddress
@@ -287,9 +288,9 @@ class BufferedAudioSessionTest {
             .invoke(session, RtspMessage.Request(method, "rtsp://test", "RTSP/1.0", emptyMap(), body)) as RtspMessage.Response
 
     private fun session(disabled: Boolean = false, media: AirPlayMediaHandler): AirPlaySession = AirPlaySession(
-        socket = object : Socket() {
+        socket = KernelSessionNetwork.wrap(object : Socket() {
             override fun getRemoteSocketAddress(): SocketAddress = InetSocketAddress(InetAddress.getLoopbackAddress(), 1234)
-        },
+        }),
         config = AirPlayConfig(
             deviceName = "test", deviceId = "02:00:00:00:00:02", btMac = "02:00:00:00:00:01", sourceVersion = "1.0",
             main = AirPlayDisplayConfig(widthPixels = 800, heightPixels = 480),

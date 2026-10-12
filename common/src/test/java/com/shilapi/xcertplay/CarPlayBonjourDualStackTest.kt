@@ -10,7 +10,7 @@ import com.shilapi.xcertplay.network.CarPlayVpnService
 import com.shilapi.xcertplay.airplay.AirPlaySessionListener
 import com.shilapi.xcertplay.airplay.AirPlayMediaHandler
 import com.shilapi.xcertplay.airplay.PairingStore
-import java.net.ServerSocket
+import com.shilapi.xcertplay.transport.DuplexServer
 import java.io.IOException
 import java.net.Inet6Address
 import java.net.InetAddress
@@ -171,8 +171,8 @@ class CarPlayBonjourDualStackTest {
                 InetAddress.getByName("::1"), config.copy(port = 0), identity, PairingStore(), null,
                 object : AirPlaySessionListener {}, object : AirPlayMediaHandler {},
                 listOf(InetAddress.getByName("127.0.0.1"))))
-            val primary = ReflectionHelpers.getField<ServerSocket>(service, "serverSocket")
-            val extra = ReflectionHelpers.getField<List<ServerSocket>>(service, "additionalServers").single()
+            val primary = ReflectionHelpers.getField<DuplexServer>(service, "serverSocket")
+            val extra = ReflectionHelpers.getField<List<DuplexServer>>(service, "additionalServers").single()
             assertEquals(primary.localPort, extra.localPort)
             service.detach()
             assertTrue(primary.isClosed)

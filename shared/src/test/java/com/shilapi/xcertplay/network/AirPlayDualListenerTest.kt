@@ -18,7 +18,7 @@ class AirPlayDualListenerTest {
                 server.soTimeout = 1000
                 Socket(addresses[index], port).use { client ->
                     server.accept().use { peer ->
-                        assertEquals(addresses[index], peer.inetAddress)
+                        assertEquals(addresses[index], peer.remoteSocketAddress?.address)
                         assertTrue(client.isConnected)
                     }
                 }
