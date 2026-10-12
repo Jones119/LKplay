@@ -4,10 +4,10 @@ import android.util.Log
 import java.io.Closeable
 import java.io.DataInputStream
 import java.math.BigInteger
-import java.net.ServerSocket
-import java.net.Socket
+import com.shilapi.xcertplay.transport.DuplexSocket
+import com.shilapi.xcertplay.transport.KernelSessionNetwork
+import com.shilapi.xcertplay.transport.StreamNetwork
 import java.net.InetAddress
-import java.net.InetSocketAddress
 import java.util.ArrayDeque
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -34,6 +34,8 @@ internal class BufferedAudioStream(
     /** Injectable so the paced fill can be driven deterministically in tests. */
     private val pause: (Long) -> Unit = { Thread.sleep(it) },
     private val expectedPeer: InetAddress = InetAddress.getLoopbackAddress(),
+    /** The listener comes from here so the wired path can run on a userspace stack. */
+    private val network: StreamNetwork = KernelSessionNetwork,
 ) : Closeable {
     internal class Frame(val sequence: Int, val timestamp: Long, val rtp: ByteArray)
 
@@ -43,12 +45,9 @@ internal class BufferedAudioStream(
     private var cleanupStarted = false // guarded by lock; permits reentrant close without recursion
     @Volatile internal var outputCleanupComplete = false
         private set
-    private val server = ServerSocket().apply {
-        reuseAddress = true
-        bind(InetSocketAddress(serverBindAddress(), 0))
-    }
+    private val server = network.listen(serverBindAddress(), port = 0, reuseAddress = true)
     private val boundPort = server.localPort
-    @Volatile private var client: Socket? = null
+    @Volatile private var client: DuplexSocket? = null
     private val lock = Object()
     private val queue = ArrayDeque<Frame>()
     // Retain the small renderer preload until its estimated audible position passes it. A pause
@@ -83,14 +82,14 @@ internal class BufferedAudioStream(
     }
 
     private fun receive() {
-        var accepted: Socket? = null
+        var accepted: DuplexSocket? = null
         try {
             val socket = acceptPeer() ?: return
             accepted = socket
             // One stream has one TCP sender. Release the listening socket after ownership is set.
             server.close()
             log("Buffered audio: connected")
-            val input = DataInputStream(socket.getInputStream().buffered())
+            val input = DataInputStream(socket.inputStream.buffered())
             var failures = 0
             var receivedBytes = 0L
             var windowStart = nanoTime()
@@ -151,7 +150,7 @@ internal class BufferedAudioStream(
         }
     }
 
-    private fun acceptPeer(): Socket? {
+    private fun acceptPeer(): DuplexSocket? {
         while (!closed.get()) {
             val socket = server.accept()
             val accepted = synchronized(lock) {
@@ -159,7 +158,7 @@ internal class BufferedAudioStream(
                     runCatching { socket.close() }
                     return null
                 }
-                if (socket.inetAddress != expectedPeer) {
+                if (socket.remoteSocketAddress?.address != expectedPeer) {
                     runCatching { socket.close() }
                     log("Buffered audio: rejected sender outside the control session")
                     false

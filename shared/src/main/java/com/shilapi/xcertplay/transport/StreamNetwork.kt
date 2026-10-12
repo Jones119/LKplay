@@ -33,11 +33,17 @@ interface DuplexSocket : Closeable {
     var receiveBufferSize: Int
     var tcpNoDelay: Boolean
     var keepAlive: Boolean
+
+    /** `Socket.setSoLinger`; the iAP tunnel uses it so a closed tunnel resets rather than lingers. */
+    fun setSoLinger(on: Boolean, seconds: Int)
 }
 
 /** One listening TCP endpoint. */
 interface DuplexServer : Closeable {
     val localPort: Int
+
+    /** Logged verbatim by the iAP tunnel, so it stays one value. */
+    val localSocketAddress: InetSocketAddress?
 
     /** Blocks until the peer connects. Throws [IOException] once the endpoint is closed. */
     @Throws(IOException::class)
@@ -85,6 +91,7 @@ object KernelSessionNetwork : SessionNetwork {
 
 private class KernelDuplexServer(private val server: ServerSocket) : DuplexServer {
     override val localPort: Int get() = server.localPort
+    override val localSocketAddress: InetSocketAddress? get() = server.localSocketAddress as? InetSocketAddress
 
     override fun accept(): DuplexSocket = KernelDuplexSocket(server.accept())
 
@@ -115,6 +122,10 @@ private class KernelDuplexSocket(private val socket: Socket) : DuplexSocket {
         set(value) {
             socket.keepAlive = value
         }
+
+    override fun setSoLinger(on: Boolean, seconds: Int) {
+        socket.setSoLinger(on, seconds)
+    }
 
     override fun close() {
         socket.close()

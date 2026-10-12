@@ -5,6 +5,7 @@ import com.shilapi.xcertplay.transport.DuplexSocket
 import com.shilapi.xcertplay.transport.StreamNetwork
 import java.io.IOException
 import java.net.InetAddress
+import java.net.InetSocketAddress
 import java.util.concurrent.atomic.AtomicBoolean
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -74,6 +75,7 @@ class StreamChannelNetworkTest {
         val closed = AtomicBoolean(false)
 
         override val localPort: Int get() = port
+        override val localSocketAddress: InetSocketAddress? get() = null
 
         override fun accept(): DuplexSocket {
             while (!closed.get()) Thread.sleep(10)

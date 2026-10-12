@@ -1,13 +1,14 @@
 package com.shilapi.xcertplay.airplay
 
+import com.shilapi.xcertplay.transport.DuplexServer
+import com.shilapi.xcertplay.transport.DuplexSocket
+import com.shilapi.xcertplay.transport.KernelSessionNetwork
+import com.shilapi.xcertplay.transport.StreamNetwork
 import java.io.Closeable
 import java.io.IOException
 import java.io.InputStream
 import java.net.Inet4Address
 import java.net.InetAddress
-import java.net.InetSocketAddress
-import java.net.ServerSocket
-import java.net.Socket
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
@@ -22,6 +23,8 @@ import java.util.concurrent.atomic.AtomicLong
 class IapTunnel(
     private val readKey: ByteArray,
     bindAddress: InetAddress = InetAddress.getByName("0.0.0.0"),
+    /** The listeners come from here so the wired path can run on a userspace stack. */
+    private val network: StreamNetwork = KernelSessionNetwork,
 ) : Closeable {
     interface Listener {
         fun onOpen(remoteAddress: String?) {}
@@ -34,8 +37,8 @@ class IapTunnel(
     private val readCounter = AtomicLong(0)
     private val bindAddress =
         if (bindAddress is Inet4Address) InetAddress.getByName("0.0.0.0") else bindAddress
-    private val servers = mutableListOf<ServerSocket>()
-    private var socket: Socket? = null
+    private val servers = mutableListOf<DuplexServer>()
+    private var socket: DuplexSocket? = null
     private val threads = mutableListOf<Thread>()
     private val peerConnected = CountDownLatch(1)
     @Volatile private var listener: Listener = object : Listener {}
@@ -61,12 +64,8 @@ class IapTunnel(
         } else {
             serverBindAddress()
         }
-        val secondary = ServerSocket()
         runCatching {
-            secondary.apply {
-                reuseAddress = true
-                bind(InetSocketAddress(secondaryAddress, bound.localPort))
-            }
+            network.listen(secondaryAddress, port = bound.localPort, reuseAddress = true)
         }.onSuccess { secondary ->
             servers += secondary
             listener.onDebug(
@@ -74,7 +73,6 @@ class IapTunnel(
                     "${secondary.localSocketAddress}",
             )
         }.onFailure { error ->
-            safeClose(secondary)
             listener.onDebug(
                 "AirPlay iAP tunnel secondary listener failed address=" +
                     "$secondaryAddress port=${bound.localPort}: ${error.message}",
@@ -89,11 +87,8 @@ class IapTunnel(
         return bound.localPort
     }
 
-    private fun bindAny(): ServerSocket =
-        ServerSocket().apply {
-            reuseAddress = true
-            bind(InetSocketAddress(bindAddress, 0))
-        }
+    private fun bindAny(): DuplexServer =
+        network.listen(bindAddress, port = 0, reuseAddress = true)
 
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
@@ -116,7 +111,7 @@ class IapTunnel(
         }
     }
 
-    private fun accept(bound: ServerSocket) {
+    private fun accept(bound: DuplexServer) {
         listener.onDebug(
             "AirPlay iAP tunnel accepting local=${bound.localSocketAddress}",
         )
@@ -140,13 +135,13 @@ class IapTunnel(
         }
     }
 
-    private fun run(sock: Socket) {
+    private fun run(sock: DuplexSocket) {
         var ciphertext = ByteArray(0)
         var plaintext = ByteArray(0)
         var failure: Throwable? = null
         var announcedData = false
         try {
-            val input = sock.getInputStream()
+            val input = sock.inputStream
             val buffer = ByteArray(READ_CHUNK_BYTES)
             while (!closed.get()) {
                 val read = input.read(buffer)
