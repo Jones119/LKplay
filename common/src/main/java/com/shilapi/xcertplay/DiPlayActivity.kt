@@ -2361,9 +2361,33 @@ class DiPlayActivity : ComponentActivity() {
     private fun button(title: String, primary: Boolean, click: () -> Unit) = Button(this).apply {
         text = title; isAllCaps = false; textSize = 18f; setTextColor(if (primary) BG else TEXT)
         typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-        background = ripple(rounded(if (primary) ACCENT else BUTTON, if (primary) ACCENT else BORDER))
-        setPadding(dp(16), 0, dp(16), 0); minHeight = dp(56); if (Build.VERSION.SDK_INT >= 21) stateListAnimator = null
+        // A secondary action is a row with a hairline under it, not a box inside the card's own box: boxes
+        // nested in boxes are what made this page read as a stack of buttons instead of a list (docs/_digest/60).
+        background = if (primary) {
+            ripple(rounded(ACCENT, ACCENT))
+        } else {
+            ripple(RowDivider(BORDER, dp(1)))
+        }
+        setPadding(dp(16), 0, dp(16), 0); minHeight = if (primary) dp(56) else dp(52)
+        if (Build.VERSION.SDK_INT >= 21) stateListAnimator = null
         setOnClickListener { click() }
+    }
+    /** A single bottom hairline: the separator this system uses instead of outlining every row. */
+    private class RowDivider(private val color: Int, private val thickness: Int) : android.graphics.drawable.Drawable() {
+        private val paint = android.graphics.Paint().apply { this.color = color }
+        override fun draw(canvas: android.graphics.Canvas) {
+            canvas.drawRect(
+                0f,
+                (bounds.height() - thickness).toFloat(),
+                bounds.width().toFloat(),
+                bounds.height().toFloat(),
+                paint,
+            )
+        }
+        override fun setAlpha(alpha: Int) { paint.alpha = alpha }
+        override fun setColorFilter(colorFilter: android.graphics.ColorFilter?) { paint.colorFilter = colorFilter }
+        @Deprecated("Deprecated in Java")
+        override fun getOpacity(): Int = android.graphics.PixelFormat.OPAQUE
     }
     // 4 dp: squared enough to read as technical, which is the register the brand's graphics live in.
     private fun rounded(color: Int, stroke: Int) = GradientDrawable().apply { setColor(color); cornerRadius = dp(4).toFloat(); setStroke(dp(1), stroke) }
