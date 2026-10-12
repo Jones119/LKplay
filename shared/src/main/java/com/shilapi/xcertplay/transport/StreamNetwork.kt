@@ -98,9 +98,16 @@ object KernelSessionNetwork : SessionNetwork {
 
     override fun listen(address: InetAddress, port: Int, backlog: Int, reuseAddress: Boolean): DuplexServer {
         val server = ServerSocket()
-        server.reuseAddress = reuseAddress
-        server.bind(InetSocketAddress(address, port), backlog)
-        return KernelDuplexServer(server)
+        return try {
+            server.reuseAddress = reuseAddress
+            server.bind(InetSocketAddress(address, port), backlog)
+            KernelDuplexServer(server)
+        } catch (error: Throwable) {
+            // AirPlayPortSelector walks through candidate ports, so a failed bind must not leave a
+            // half-bound endpoint behind - the old code released it here too.
+            runCatching { server.close() }
+            throw error
+        }
     }
 }
 
