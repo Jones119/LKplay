@@ -1,9 +1,10 @@
 package com.shilapi.xcertplay.airplay
 
+import com.shilapi.xcertplay.transport.DatagramNetwork
+import com.shilapi.xcertplay.transport.DatagramTransport
+import com.shilapi.xcertplay.transport.KernelDatagramNetwork
 import java.io.Closeable
 import java.math.BigInteger
-import java.net.DatagramPacket
-import java.net.DatagramSocket
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.util.concurrent.atomic.AtomicBoolean
@@ -15,13 +16,18 @@ import java.util.concurrent.atomic.AtomicBoolean
  * transmit timestamp and PT_RESPONSE (211) echoes it while adding the phone's receive and
  * transmit stamps. The resulting offset and round-trip time steer a local monotonic clock onto
  * the phone's media-clock domain, which /feedback reports.
+ *
+ * The endpoint comes from a [DatagramNetwork] so the wired path can run on a userspace stack later
+ * without touching this timing logic (docs/_digest/58 §2).
  */
-class NtpClock : Closeable {
+class NtpClock(
+    private val network: DatagramNetwork = KernelDatagramNetwork,
+) : Closeable {
     private val running = AtomicBoolean(false)
     private val socketLock = Any()
     private val clockLock = Any()
 
-    private var socket: DatagramSocket? = null
+    private var socket: DatagramTransport? = null
     private var receiver: Thread? = null
     private var sender: Thread? = null
     private var peer: InetSocketAddress? = null
@@ -37,10 +43,8 @@ class NtpClock : Closeable {
 
     fun listen(): Int {
         check(!running.getAndSet(true)) { "NtpClock is already running" }
-        val bound = DatagramSocket(null)
-        bound.reuseAddress = true
         // This ROM rejects unscoped IPv6 binds entirely; bind the netdev link-local instead.
-        bound.bind(InetSocketAddress(serverBindAddress(), 0))
+        val bound = network.open(serverBindAddress())
         synchronized(socketLock) { socket = bound }
         receiver = Thread(::runReceiver, "airplay-ntp-rx").apply { isDaemon = true; start() }
         return bound.localPort
@@ -93,23 +97,22 @@ class NtpClock : Closeable {
         val t1 = syncedNtp()
         synchronized(clockLock) { pendingT1 = t1 }
         ntpBytes(t1).copyInto(packet, NTP_TRANSMIT_OFFSET)
-        currentSocket()?.send(DatagramPacket(packet, packet.size, destination))
+        currentSocket()?.send(packet, packet.size, destination.address, destination.port)
     }
 
     private fun runReceiver() {
         val buffer = ByteArray(RECEIVE_BUFFER_BYTES)
         while (running.get()) {
             val sock = currentSocket() ?: return
-            val packet = DatagramPacket(buffer, buffer.size)
-            try {
-                sock.receive(packet)
+            val received = try {
+                sock.receive(buffer)
             } catch (_: Exception) {
                 if (running.get()) continue else return
             }
-            val message = packet.data.copyOf(packet.length)
-            val address = packet.address
+            val message = buffer.copyOf(received.size)
+            val address = received.address
             if (message.size >= NTP_PACKET_BYTES && address != null) {
-                handleMessage(message, InetSocketAddress(address, packet.port))
+                handleMessage(message, InetSocketAddress(address, received.port))
             }
         }
     }
@@ -129,7 +132,7 @@ class NtpClock : Closeable {
         request.copyInto(response, NTP_ORIGINATE_OFFSET, NTP_TRANSMIT_OFFSET, NTP_PACKET_BYTES)
         ntpBytes(syncedNtp()).copyInto(response, NTP_RECEIVE_OFFSET)
         ntpBytes(syncedNtp()).copyInto(response, NTP_TRANSMIT_OFFSET)
-        currentSocket()?.send(DatagramPacket(response, response.size, source))
+        currentSocket()?.send(response, response.size, source.address, source.port)
     }
 
     private fun handleResponse(response: ByteArray) {
@@ -179,7 +182,7 @@ class NtpClock : Closeable {
         }
     }
 
-    private fun currentSocket(): DatagramSocket? = synchronized(socketLock) { socket }
+    private fun currentSocket(): DatagramTransport? = synchronized(socketLock) { socket }
 
     private companion object {
         const val PT_REQUEST = 210
