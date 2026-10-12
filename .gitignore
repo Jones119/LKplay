@@ -39,3 +39,11 @@ release-signing.properties
 *.key
 *.apk
 *.aab
+# The one sanctioned exception: the offline MFi identity this app authenticates CarPlay with
+# (software-simulated accessory authentication - see mobile/src/main/auth-assets,
+# DiPlayBootstrap and LocalMfiAuthenticationClient). A clone cannot connect without it, and it is the
+# same identity upstream DiPlay already ships inside its public release APKs (DiPlay-0.2.12.apk
+# assets/offline-mfi/*, byte-identical). Every other credential container above stays excluded, and
+# DIPLAY_AUTH_ASSETS_DIR replaces this identity for a build.
+!mobile/src/main/auth-assets/offline-mfi/identity.pk8
+!mobile/src/main/auth-assets/offline-mfi/certificate.p7b
