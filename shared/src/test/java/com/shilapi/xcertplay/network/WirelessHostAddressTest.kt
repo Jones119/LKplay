@@ -46,5 +46,20 @@ class WirelessHostAddressTest {
         assertEquals(7, (existingWifiHostAddresses(listOf(ip("fe80::1")), 7).single() as Inet6Address).scopeId)
     }
 
+    @Test fun hotspotAdvertisingCoversBothFamiliesAndNeverGoesEmpty() {
+        val ipv4 = ip("192.168.43.1")
+        // The manual hotspot publishes IPv4 first and the scoped link-local beside it, so an iPhone
+        // that only tries the other family can still discover the service (upstream #253 / f2dab427).
+        val hosts = hotspotAdvertisedAddresses(listOf(ip("fe80::1234"), ipv4, ip("2001:db8::1")), 7, ipv4)
+        assertEquals(2, hosts.size)
+        assertEquals(ipv4, hosts.first())
+        assertTrue(hosts.last().isLinkLocalAddress)
+        assertEquals(7, (hosts.last() as Inet6Address).scopeId)
+        // A single-family access point still advertises its one address, and an enumeration that fails
+        // outright falls back to the address the reservation selected.
+        assertEquals(1, hotspotAdvertisedAddresses(listOf(ip("fe80::1234")), 7, ipv4).size)
+        assertEquals(listOf(ipv4), hotspotAdvertisedAddresses(emptyList(), 7, ipv4))
+    }
+
     private fun ip(value: String) = InetAddress.getByName(value)
 }

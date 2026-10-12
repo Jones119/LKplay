@@ -560,7 +560,7 @@ class CarPlayMediaEngine(
         format: AudioFormat,
     ): MicrophoneConfig? {
         if (!microphoneEnabled || type != STREAM_TYPE_MAIN_AUDIO) return null
-        if (format.audioType != "telephony" && format.audioType != "speechrecognition") return null
+        if (!wantsMicrophone(format.audioType, stream)) return null
         val port = (stream["dataPort"] as? Number)?.toInt() ?: return null
         if (port !in 1..65535) return null
         val host = session.remoteAddress ?: return null
@@ -612,8 +612,25 @@ class CarPlayMediaEngine(
     private fun isScreenStreamType(type: Int): Boolean =
         type == STREAM_TYPE_MAIN_SCREEN || type == STREAM_TYPE_ALT_SCREEN
 
-    private companion object {
-        const val TAG = "xcertplay-usb"
+    internal companion object {
+        /**
+         * Calls and Siri always record. App audio ("default", e.g. a WhatsApp voice note) also carries
+         * guidance prompts, so it records only when the iPhone asks for input: an explicit `input`
+         * flag, or, without one, the uplink port the iPhone sends for a recording stream. Without
+         * this, a voice note sent over CarPlay recorded silence unless a call had just ended
+         * (upstream c2afb171).
+         */
+        fun wantsMicrophone(audioType: String, stream: Map<String, Any?>): Boolean = when (audioType) {
+            "telephony", "speechrecognition" -> true
+            "default", "compatibility" -> when (val input = stream["input"]) {
+                is Boolean -> input
+                is Number -> input.toInt() != 0
+                else -> (stream["dataPort"] as? Number)?.toInt()?.let { it in 1..65535 } == true
+            }
+            else -> false
+        }
+
+        private const val TAG = "xcertplay-usb"
         const val STREAM_TYPE_MAIN_SCREEN = 110
         const val STREAM_TYPE_ALT_SCREEN = 111
         const val STREAM_TYPE_MAIN_AUDIO = 100

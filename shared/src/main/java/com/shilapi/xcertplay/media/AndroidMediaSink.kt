@@ -1520,7 +1520,13 @@ private class AudioRenderer(
         }
         val codec = codec ?: run { decoderUnavailablePackets++; return }
         diagnosticStage = "decoder-input"
-        val index = codec.dequeueInputBuffer(INPUT_TIMEOUT_US)
+        // A blocking track write holds this thread while decoded output fills the codec, so a single
+        // 10 ms wait would drop the packet (~21 ms of music each time; upstream #381 / daffd2de).
+        // Drain decoded output and keep waiting, exactly as the video decoder's input pump does.
+        val index = VideoInputPump.acquire(
+            running = { running }, drain = { drainCodec(codec) },
+            dequeue = { codec.dequeueInputBuffer(INPUT_TIMEOUT_US) },
+        )
         if (index < 0) {
             inputDropped++
             if (inputDropped == 1) {
@@ -1603,6 +1609,10 @@ private class AudioRenderer(
                             )
                         }
                     }
+                    // Release the output buffer before writing PCM to the track: the write can block
+                    // for a long time on this ROM (no hardware AAC decode), and a held buffer stops
+                    // the decoder from accepting input at all (upstream 21195488).
+                    var released = false
                     if (size > 0) {
                         val output = codec.outputBufferCompat(index)
                         if (output != null) {
@@ -1610,10 +1620,12 @@ private class AudioRenderer(
                             output.position(info.offset)
                             output.limit(info.offset + size)
                             output.get(pcm, 0, size)
+                            codec.releaseOutputBuffer(index, false)
+                            released = true
                             writePcm(pcm, 0, size)
                         }
                     }
-                    codec.releaseOutputBuffer(index, false)
+                    if (!released) codec.releaseOutputBuffer(index, false)
                     if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) return
                 }
                 else -> return

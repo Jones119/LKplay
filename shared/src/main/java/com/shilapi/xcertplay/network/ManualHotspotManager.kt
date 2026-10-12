@@ -104,6 +104,13 @@ class ManualHotspotManager(
             runCatching { network?.hardwareAddress?.toMacAddressString() }.getOrNull()
                 ?.takeUnless { it == "02:00:00:00:00:00" || it == "00:00:00:00:00:00" }
                 ?: HotspotInterfaceBssid.read(selected.name))
+        // Advertise every family the AP interface owns, as ExistingWifiManager already does. Only
+        // publishing link-local IPv6 leaves many iPhones unable to discover _carplay-ctrl._tcp at
+        // all: Bluetooth pairs, the phone joins the hotspot, and the hand-off then times out and
+        // retries forever ("stuck on Opening CarPlay", upstream #253 / f2dab427).
+        val hostAddresses = hotspotAdvertisedAddresses(
+            network?.inetAddresses?.toList().orEmpty(), selected.index, localInterface.hostAddress,
+        )
         val connectionFrequency = frequencyFromConnectionInfo()
         val scanFrequency = frequencyFromScanResult(localInterface)
         // The AP's own driver is the most direct evidence of the channel it runs on, but read-only
@@ -161,6 +168,7 @@ class ManualHotspotManager(
                     frequencyMHz?.let(::bandLabel) ?: observedBandLabel ?: "Auto"
             },
             backend = WirelessHotspotBackend.MANUAL_HOTSPOT,
+            hostAddresses = hostAddresses,
             accessPointBssid = apBssid,
         )
     }

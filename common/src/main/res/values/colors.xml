@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        Android 9 and below drop a colour literal written straight into a theme item such as
+        android:windowBackground, which leaves the window (and dialogs) transparent; referencing a
+        colour resource works on every level (upstream fix 817ff3fa). Values are unchanged.
+    -->
+    <color name="diplay_window_background">#0C111B</color>
+    <color name="diplay_navigation_bar">#0C111B</color>
+    <color name="diplay_status_bar">#0C111B</color>
+    <color name="diplay_color_accent">#A6C8FF</color>
+</resources>

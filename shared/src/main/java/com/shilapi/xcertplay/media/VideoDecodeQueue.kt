@@ -112,7 +112,12 @@ internal class VideoDecodeQueue(
     }
 }
 
-/** Drain output while waiting for input: full output buffers can otherwise starve input forever. */
+/**
+ * Drain output while waiting for input: full output buffers can otherwise starve input forever.
+ *
+ * Used by both the video decoder and the audio renderer (the audio path shares it so a blocking
+ * track write cannot make the decoder drop a packet after one short wait).
+ */
 internal object VideoInputPump {
     fun acquire(
         running: () -> Boolean,

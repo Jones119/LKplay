@@ -56,7 +56,9 @@ class MicrophonePacketizerTest {
         // captures 20 ms at 48 kHz, but each packet moves the RTP clock by 20 ms of the chosen rate.
         assertEquals(24_000, MicrophoneConfig.opusClockRate(0x20000000L))
         assertEquals(48_000, MicrophoneConfig.opusClockRate(0x40000000L))
-        assertEquals(48_000, MicrophoneConfig.opusClockRate(0x10000000L))
+        // App voice notes negotiate 0x10000000. Counting that at 48 kHz moved the timestamp three
+        // times faster than real time and made the recording come out slurred (upstream 6dbde48f).
+        assertEquals(16_000, MicrophoneConfig.opusClockRate(0x10000000L))
         assertEquals(48_000, MicrophoneConfig.opusClockRate(0L))
 
         val siri = config(AudioCodecKind.OPUS, opusClockRate = 24_000)
@@ -74,8 +76,12 @@ class MicrophonePacketizerTest {
     }
 
     @Test
-    fun callPacketsAndUnobservedFormatsKeepTheStandard960TickClock() {
-        for (format in listOf(0x40000000L, 0x10000000L, 0L, 0x60000000L)) {
+    fun callAndUnobservedPacketsKeepTheStandard960TickClockWhileVoiceNotesCount16kHz() {
+        // Calls (0x40000000) advance 960 ticks per 20 ms; the 16 kHz voice-note format advances 320;
+        // unobserved formats keep the standard 48 kHz Opus clock (upstream 6dbde48f).
+        assertPacketSequence(0x40000000L, 960)
+        assertPacketSequence(0x10000000L, 320)
+        for (format in listOf(0L, 0x60000000L)) {
             assertPacketSequence(format, 960)
         }
     }
