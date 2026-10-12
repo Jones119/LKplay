@@ -1,5 +1,24 @@
 # Building DiPlay
 
+> ## This fork (Lynk & Co CS11) — read first
+>
+> The guide below is **upstream's** (BYD / Android 9+ target) and is kept for reference. For this
+> fork the following is what actually applies:
+>
+> - Toolchain: **JDK 21** (not 25), Android SDK as configured by AGP 9.3.0, offline Gradle wrapper.
+> - The accessory identity is **committed** (`mobile/src/main/auth-assets/offline-mfi/`), so
+>   `:mobile:assembleStandaloneDebug` needs **no** environment variable:
+>   ```powershell
+>   .\gradlew.bat :mobile:clean :mobile:assembleStandaloneDebug --console=plain --offline
+>   ```
+>   `DIPLAY_AUTH_ASSETS_DIR` still works and **replaces** the committed identity (the committed pair
+>   is then not part of the APK). The credential scan allows exactly the identity that is active.
+> - The build fails, by name, when the active identity is missing or any *other*
+>   `.pk8/.p7b/.key/.pem/.p12/.pfx/.jks/.keystore` appears in the assets.
+> - `:mobile:clean` before assembling whenever the APK looks too large: incremental packaging once
+>   produced a 15.87 MB APK carrying ~5 MB of dead zip space (a clean build is ~10.89 MB).
+> - Built artifact: `mobile\build\outputs\apk\debug\mobile-debug.apk`.
+
 Requirements: JDK 25, Android SDK 37, NDK 28.2.13676358 and the included Gradle wrapper.
 
 ## Source and CI builds

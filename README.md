@@ -1,69 +1,126 @@
-# DiPlay
+# DiPlay · Lynk & Co CS11 (GKUI / Android 4.4.3) fork
 
-**CarPlay for compatible BYD Android head units.** Wired and wireless, with the familiar DiAuto interface. Independent app: `com.shihab.diplay`.
+**CarPlay receiver for one specific head unit: the Lynk & Co CS11** (`model=CS11`, ECARX/GKUI
+platform, **Android 4.4.3 / API 19 / Dalvik**, Freescale **i.MX6Q**, 1280×720 logical on a
+1920×1080 panel). Wired **and** wireless CarPlay, plus navigation/media cards on the instrument
+cluster through the vendor DIM interface.
 
-> **BYD support scope:** These projects focus on BYD cars. They may work on other brands, but other brands are unsupported and there are no plans to add support or fix brand-specific incompatibilities.
+This is a long-lived fork of [DiPlay](https://github.com/shihabal3amri/DiPlay) (GPL-3.0). Upstream
+targets modern BYD head units (Android 9+); **this fork removed the BYD/DiLink adaptation** and only
+claims support for the CS11. See [Scope](#scope) before installing it anywhere else.
 
-[Download & website](https://shihabal3amri.github.io/DiPlay/) · [Release](https://github.com/shihabal3amri/DiPlay/releases/tag/v0.2.13) · [Report a problem](https://github.com/shihabal3amri/DiPlay/issues/new/choose)
+> Not an Apple-certified product. CarPlay and its icon belong to Apple Inc. No Apple, Lynk & Co,
+> Geely or ECARX affiliation or endorsement is implied.
 
-![DiPlay home](site/assets/home.png)
+- Package: `com.shihab.diplay` (`com.shihab.diplay.hudtest` for the debug variant)
+- Version: `0.2.15-cs11.1` (`-hud-test`), versionCode 34
+- Engines: `minSdk 19`, `targetSdk 37`, `armeabi-v7a` only, core library desugaring on, multidex
 
-## 0.2.13 — public preview
+## Status (2026-10-12)
 
-Install on the **car**, not the iPhone. No jailbreak, dongle, Mac, account or authentication server is required for use. Core CarPlay does not require ADB; optional dashboard, battery, wheel-speed and parked-video features do. Your head unit must permit APK installation. The APK supports Android 9+ (API 28); wireless supports Wi-Fi Direct, the car’s existing hotspot or Existing Wi-Fi / Same LAN. Android 9 Wi-Fi Direct uses a firmware-dependent legacy path with generated group credentials and unverified requested frequency; see [Android 9 Wi-Fi Direct](docs/ANDROID9_WIFI_DIRECT.md). Android 10+ verifies its negotiated group frequency.
+| Area | State |
+|---|---|
+| Wireless CarPlay (car's own hotspot + Bluetooth iAP2 hand-off) | **Working** on the CS11 |
+| Wired CarPlay (USB + kernel `cdc_ncm` netdev) | **Working**, first on-screen 2026-10-10 |
+| Cluster navigation card (arrow / street / distance / ETA) | **Working**, verified in the car |
+| Cluster media card (title / artist / album / progress) | **Working**, verified in the car |
+| Cluster album artwork | **Not solved** — the vendor reader never draws our URI (HTTP tier added, verdict experiment pending) |
+| Touch latency / video smoothness | Tuned: receive window, aging threshold, allocation cuts, `TCP_NODELAY`, thread priority |
+| API-19 hardening | Compat sweep + source-scanning guard tests |
+| Wired/wireless stability gaps | Known, not fixed yet (first-frame watchdog, USB detach broadcast, visible failures, mode convergence) |
+| Unit tests | `:shared` **940 / 0 failures**, `:common` **590 / 0**, nothing skipped |
 
-- Wired USB and wireless CarPlay with local authentication.
-- BYD HUD navigation with arrows, distance and street names on verified firmware.
-- Car hotspot support, improved audio buffering and saved receive diagnostics.
-- Automatic address discovery, fixed-channel Wi-Fi fallbacks and successful-configuration memory.
-- Icon/text size, resolution and frame rate; applying a display change reconnects CarPlay.
-- Local diagnostic export. Reports are sent only if you choose to share them.
-- Separate installation alongside DiAuto. Run one projection app at a time.
+Detailed engineering notes (measurements, rejection lists, car-session evidence) are kept **outside**
+this repository by project convention — this README is the code-level entry point only.
 
-This is **not an Apple-certified product**. The APK bundles an experimental accessory identity recovered from public Carlinkit firmware, not a newly provisioned MFi identity for DiPlay. A bundled private key is extractable. Acceptance after future iOS updates, reliability across head units and suitability of that identity for general distribution are unresolved. This release invites community testing; it is not a guarantee of universal compatibility.
+## Build
 
-Earlier releases were tested on the development DiLink5.1 car: live windshield guidance and street names work, Car hotspot now starts CarPlay, and Wi-Fi Direct performance is substantially improved. Occasional audio cutouts remain and are deferred to a later update. The floating-map test build was installed on the development DiLink 5.1 car; feedback led to the pinch corrections in 0.2.9. Earlier wheel-speed and video contributions were tested on a BYD Tang with DiLink 5.0 and an iPhone 15 Pro on iOS 27; wheel-speed dead reckoning in tunnels remains unverified. Broader head-unit and iOS compatibility is not guaranteed. The HUD firmware scope and cleanup limits are documented in [BYD navigation](docs/BYD_NAVIGATION.md).
+Requirements: **JDK 21**, the Android SDK/NDK as configured by AGP 9.3.0, and **offline** Gradle
+(the wrapper points at a mirror; `--offline` is expected).
 
-## What’s new in 0.2.13
+```powershell
+cd CarPlay-CS11
+.\gradlew.bat :mobile:assembleStandaloneDebug --console=plain --offline
+# -> mobile\build\outputs\apk\debug\mobile-debug.apk  (~10.89 MB)
+```
 
-- Android 9 Wi-Fi Direct, IPv4-first hotspot endpoints, safer Auto channel ordering and wireless startup without unused NSD/USB services.
-- Guarded rendered-video handoff fallback, safe wireless-to-USB switching and checked, cancellable permission setup.
-- Narrow USBMUX trailer recovery that preserves valid payload replies.
-- Optional live dock/split-screen areas and square-canvas rotation, plus the selected-decoder capability check and default-off experimental side panel.
-- DiLink 4 casting/calibration and live cluster picture controls; checked DiLink 3 projection entry with compensation.
-- Recent turn-card retention across wireless replacement, a finer dashboard map choice, battery-protocol fallback and eligible wheel-service recovery.
-- The observed Siri microphone timestamp correction and TCP_NODELAY touch events, with device-specific performance limits.
-- **Off by default:** independent experimental DiLink 3 call keys/dashboard calls and AAC-LC buffered music. Read their firmware/audio/restoration limits before opting in. Eligible hotspot join repair is a separately confirmed Check/Apply/Restore action.
-- Clearer settings, saved-menu behavior, car-button customization and day/night-aware waiting screens.
-- Traditional Chinese (Taiwan), bringing both the app and release website to seven languages.
+- The **accessory identity is committed** (`mobile/src/main/auth-assets/offline-mfi/`, see
+  [Authentication](#authentication)), so a clone builds and connects without any extra input.
+  `DIPLAY_AUTH_ASSETS_DIR` still works and **replaces** that identity for a build.
+- ⚠️ Assemble with `:mobile:clean` when the APK is unexpectedly large: an incremental packaging step
+  left ~5 MB of dead space in a 15.87 MB APK once; a clean build is ~10.89 MB.
+- The repository also contains `:vpndialogs-stub`, the small stub module the VPN dialog dependency
+  needs; it is part of the build graph, not an optional extra.
 
-See [0.2.13 release notes](docs/RELEASE-NOTES-0.2.13.md) and [validation](docs/VALIDATION.md) for all reviewed contributions, hardware evidence and remaining physical tests. Higher resolution and large square canvases cost more decoder/GPU work. General stutter, calls/Siri, decoder, old-iOS startup and model-specific reports remain under investigation. [0.2.12 notes](docs/RELEASE-NOTES-0.2.12.md) remain available as historical guidance.
+## Test
 
-If a problem remains, reproduce it on **0.2.13**, then use **Settings → Diagnostics → Save diagnostic report**. Android 10+ normally saves to **Downloads/DiPlay**; Android 9 uses the document picker. If unavailable, use **View report** or **Share** from the confirmation, which identifies external/private fallback storage. Review the `.txt` and add it to a matching [existing issue](https://github.com/shihabal3amri/DiPlay/issues), or [create one](https://github.com/shihabal3amri/DiPlay/issues/new/choose). Include vehicle/head-unit model, exact firmware and Android/DiLink, phone/iOS, connection backend, relevant settings, steps and failure time. Reports are shared only when you choose; never post your hotspot password.
+```powershell
+.\gradlew.bat :shared:testDebugUnitTest :common:testDebugUnitTest --continue --offline
+# expected: :shared 940 / 0 failures, :common 590 / 0 failures, 0 skipped
+```
+
+The **failure set must stay empty**; new tests may increase the counts. Never run two Gradle builds
+at once (they contend on the same build outputs).
+
+## Scope
+
+- The **only** supported device is the CS11 described above. Everything here was tuned against its
+  Dalvik runtime, its vendor codecs and its kernel (`cdc_ncm`, MUSB) — behaviour elsewhere is not
+  claimed. A modern Android tablet is used as a smoke-test bench, not as a compatibility target.
+- **Wired** CarPlay needs the head unit's NCM netdev to be brought up before the session
+  (`ip -6 addr show usb1`); on this ROM that requires a root channel that must be re-established
+  after every ignition. Without it, only the wireless path is available.
+- The app does not modify `/system`, does not install patched third-party APKs, and does not require
+  root for the wireless path.
+
+## Authentication
+
+`DiPlayBootstrap` copies `assets/offline-mfi/{identity.pk8,certificate.p7b}` into the app's private
+directory on first start, and `LocalMfiAuthenticationClient` uses them to complete accessory
+authentication. The pair committed here is the **same identity upstream DiPlay already ships inside
+its public release APK** (`DiPlay-0.2.12.apk`, byte-identical), so the repository does not widen its
+exposure — but note that it is an Apple-issued accessory identity whose **private key anyone can
+extract**, and that publishing it may conflict with MFi terms and can lead to revocation.
+
+For anything beyond personal use, **replace it**: drop your own pair into
+`mobile/src/main/auth-assets/offline-mfi/` or point `DIPLAY_AUTH_ASSETS_DIR` at a directory with
+`offline-mfi/{identity.pk8,certificate.p7b}`. The build fails if the active identity is missing, and
+any *other* `.pk8/.p7b/.key/.pem/.p12/.pfx/.jks/.keystore` in the assets fails the build as well.
+
+## Layout
+
+```
+shared/   protocol + core: AirPlay (RTSP, H.264, AAC/LPCM, HID, NTP, crypto), iAP2, USB/NCM,
+          media pipeline, network/hotspot, cluster bridge, API-19 compat layer
+common/   Android host: activities, settings UI, persistence, notifications, permissions,
+          corner-mask overlay, artwork provider
+mobile/   the packaged application + the committed accessory identity
+vpndialogs-stub/  tiny stub module the VPN dialog dependency needs
+docs/     upstream documentation kept as-is (build, install, compatibility, release notes, licenses)
+site/ asset/ samples/ automotive/  upstream leftovers, unused on the CS11
+```
 
 ## Documentation
 
-[Existing Wi-Fi / Same LAN](docs/EXISTING_WIFI.md) keeps the iPhone and head unit
-on an external router. See the guide for setup, build requirements and the
-BYD DiLink 4.0 / Android 10 clean-install validation result.
-
-- [Install and connect](docs/INSTALL.md)
-- [Compatibility and troubleshooting](docs/COMPATIBILITY.md)
-- [Smooth wireless CarPlay](docs/SMOOTH_WIRELESS.md)
-- [Privacy and diagnostic reports](docs/PRIVACY.md)
-- [Build from source](docs/BUILD.md)
-- [Validation](docs/VALIDATION.md)
-- [Release notes](CHANGELOG.md)
-- [Credits and licenses](docs/THIRD_PARTY_NOTICES.md)
-
-The app and release website are available in English, Arabic, Russian, Ukrainian, Spanish, Simplified Chinese and Traditional Chinese (Taiwan). Traditional Chinese uses Taiwan wording; the app also recognizes Hong Kong/Macao and explicit Hant selections without claiming separate regional translations. Choose the app language in Settings; on Android 13+, it stays synchronized with Android’s per-app language setting.
+- [`docs/BUILD.md`](docs/BUILD.md) — upstream guide plus a "this fork" note at the top with the
+  commands that actually apply here; [`docs/INSTALL.md`](docs/INSTALL.md) and
+  [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md) describe the BYD target, not this fork.
+- [`docs/UPSTREAM-README.md`](docs/UPSTREAM-README.md) — upstream README as published.
+- [`docs/THIRD_PARTY_NOTICES.md`](docs/THIRD_PARTY_NOTICES.md), `docs/licenses/` — credits and
+  licenses.
 
 ## Source and credits
 
-Based on [xcertplay](https://github.com/shilapi/xcertplay), GPL-3.0. The home/settings UI and website adapt [DiAuto](https://github.com/shihabal3amri/DiAuto), AGPL-3.0; that license is included in `docs/licenses`. Preserve those notices when distributing modifications. CarPlay and its icon belong to Apple Inc.; no Apple or BYD affiliation or endorsement is implied.
+GPL-3.0 ([LICENSE](LICENSE)). Based on [DiPlay](https://github.com/shihabal3amri/DiPlay) by
+shihabal3amri, itself based on [xcertplay](https://github.com/shilapi/xcertplay); the home/settings
+UI and website adapt [DiAuto](https://github.com/shihabal3amri/DiAuto) (AGPL-3.0, licence text in
+`docs/licenses/`). The bundled Opus codec (`shared/src/main/jniLibs/armeabi-v7a/libdiplay_opus.so`)
+is Opus/libopus (BSD, see `docs/Opus-LICENSE.txt`).
 
-This repository starts with a clean public source snapshot. Local research, tester reports and release-signing secrets are excluded. The complete source corresponding to the APK is provided with every release; experimental runtime identity assets are described separately in the build instructions and notices.
+Ideas and mechanisms were also compared against the open-source **Geely H52 / Android 4.3** port
+[`xikai6282/DiPlay-Geely-Android43`](https://github.com/xikai6282/DiPlay-Geely-Android43) (same
+ECARX/GKUI generation): USB short-write resumption with one shared deadline, the persistent USBMUX
+read request, the video-thread priority value and the iAP2 `0x5703` BSSID field follow what that
+project reported. No code was copied; each change was reimplemented here with its own tests.
 
-## Local release packaging
-
-The release APK intentionally contains the experimental accessory identity. The Git repository and source archive exclude all accessory and Android signing keys; tests generate synthetic identities at runtime. Source/CI builds omit runtime identity assets by default. Local release builds explicitly select an external asset directory. Publishing the APK makes its bundled identity extractable; building locally does not preserve that identity's confidentiality.
+Preserve the upstream and DiAuto notices when redistributing modifications.

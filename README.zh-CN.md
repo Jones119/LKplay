@@ -1,39 +1,120 @@
-# DiPlay
+# DiPlay · 领克 CS11（GKUI / Android 4.4.3）适配分支
 
-为兼容的比亚迪安卓车机提供有线及无线 CarPlay，采用 DiAuto 风格界面。
+**只为一台车机服务的 CarPlay 接收端：领克 CS11**（`model=CS11`，ECARX/GKUI 平台，
+**Android 4.4.3 / API 19 / Dalvik**，Freescale **i.MX6Q**，系统按 1280×720 逻辑运行、面板
+1920×1080）。支持**有线与无线** CarPlay，并通过厂商 DIM 接口把导航/媒体信息投到**液晶仪表**。
 
-> 这些项目专注于比亚迪汽车。它们可能在其他品牌上运行，但其他品牌不在支持范围内，也没有增加支持或修复其品牌特定兼容性问题的计划。
+本仓库是 [DiPlay](https://github.com/shihabal3amri/DiPlay)（GPL-3.0）的长期分支。上游面向现代比亚迪
+车机（Android 9+）；**本分支已移除 BYD/DiLink 适配**，只对 CS11 做承诺。装到别的车机之前请先看
+[适用范围](#适用范围)。
 
-[下载与中文网站](https://shihabal3amri.github.io/DiPlay/zh-Hans/) · [0.2.13 版本](https://github.com/shihabal3amri/DiPlay/releases/tag/v0.2.13) · [完整说明](README.md) · [报告问题](https://github.com/shihabal3amri/DiPlay/issues/new/choose)
+> 非 Apple 认证产品。CarPlay 及其图标归 Apple Inc. 所有；本项目与 Apple、领克、吉利、亿咖通
+> （ECARX）均无隶属或背书关系。
 
-## 0.2.13 — 公开预览版
+- 包名：`com.shihab.diplay`（debug 变体为 `com.shihab.diplay.hudtest`）
+- 版本：`0.2.15-cs11.1`（`-hud-test`），versionCode 34
+- 引擎参数：`minSdk 19`、`targetSdk 37`、仅 `armeabi-v7a`、开启 core library desugaring、multidex
 
-请安装在允许 APK 安装的 Android 9+（API 28+）车机上。无需越狱、转接盒、账户或认证服务器。有线及无线核心连接不要求 ADB；可选车辆数据及车辆控制需要支持的固件和已授权网络 ADB。
+## 当前状态（2026-10-12）
 
-Wi-Fi Direct 现支持 Android 9 的旧版建组路径，使用系统返回的真实凭据。首选信道依赖固件 API；Android 9 无法读回协商频率，所以请求信道在诊断中标为未经验证，系统默认为信道 0。Android 10+ 保留频率验证。也可使用车机内置热点、USB 或[现有 Wi-Fi／同一局域网](docs/EXISTING_WIFI.md)；同一局域网模式由车机和 iPhone 自行连接外部路由器，DiPlay 不替你修改默认路由。[Android 9 Wi-Fi Direct 限制](docs/ANDROID9_WIFI_DIRECT.md)说明清理及持久配置边界。
+| 模块 | 状态 |
+|---|---|
+| 无线 CarPlay（车机自开热点 + 蓝牙 iAP2 交接） | **可用**（实车验证） |
+| 有线 CarPlay（USB + 内核 `cdc_ncm` 网卡） | **可用**（2026-10-10 首次上屏） |
+| 仪表导航卡片（箭头/路名/距离/剩余时间） | **可用**（实车验收） |
+| 仪表媒体卡片（曲名/歌手/专辑/进度） | **可用**（实车验收） |
+| 仪表专辑封面 | **未闭环**：厂商取图方始终不画我们给的 URI（已加回环 HTTP 档，判决实验待做） |
+| 触控延迟 / 视频流畅度 | 已调优：视频接收窗、迟到丢帧老化阈值、降分配、`TCP_NODELAY`、线程优先级 |
+| API-19 兼容加固 | 兼容层清扫 + 源码扫描守卫测试 |
+| 有线/无线稳定性缺口 | 已定位未修（首帧看门狗、USB 拔出广播、失败可见性、模式收敛） |
+| 单元测试 | `:shared` **940 / 0 失败**、`:common` **590 / 0**，0 skipped |
 
-### 新增与修正
+详细的工程笔记（实测数据、被否证的方案、实车日志证据）按项目约定**放在仓库之外**；本 README 只作为
+代码层的入口。
 
-- **连接与恢复**：热点优先公布当前 IPv4，保留带作用域的 IPv6 回退；5 GHz Wi-Fi 客户端旁的自动信道优先顺序更保守，但不保证固定频段或消除卡顿。无线启动不再依赖未使用的 NSD／USB 服务；蓝牙交接回退仅保留已渲染视频的会话。
-- **USB 与权限**：在原活动内安全切换无线与 USB，检查 VPN 等有线前提；逐项核实 ADB 权限配置、保留其他无障碍服务，并取消过期请求。USBMUX 四字节尾部恢复只接受已验证的 TCP 帧并保留有效载荷。
-- **布局与画面**：可选固定 Dock／分屏视区及方形画布旋转；只有选中的解码器可通过能力探测。侧边面板为实验选项，默认关闭。DiLink 4 保留原生投射模式、支持连接前校准及实时仪表画面调整。
-- **仪表与车辆**：无线会话替换时在过期窗口内保留最近转向卡片，真实到达、手动结束及有线断开仍清除。新增 125% 流尺寸以显示更细的地图；DiLink 3 按已检查的完整／半屏顺序进入，失败立即尝试恢复。增加电池协议备用属性及符合条件的方向盘服务恢复。
-- **音频与触摸**：针对已捕获的 24 kHz Siri 流修正 RTP 时间戳；通话及未经验证的 Opus 格式继续使用 48 kHz。触摸事件通道启用 TCP_NODELAY。相关效果仍依赖实际车机、网络和 iOS。
-- **默认关闭的实验功能**：DiLink 3 通话键及仪表通话卡片为两个独立开关；车机写入必须先获得已初始化观察进程的就绪确认，并保留失败恢复所有权。AAC-LC 缓冲音乐需要主动启用并重连，不是无损音频。它们仍需实际通话、麦克风、恢复及音乐中断测试反馈。
-- **热点自动加入修复**：只在符合要求的 Android 13+、用户配置的 5 GHz 热点上提供明确的检查／应用／恢复操作；要求热点关闭、无活动会话、支持的 API 和已授权本地 ADB，并保留完整私有备份。打开设置或启动 CarPlay 不会自动修改热点。
-- **界面与语言**：修正全尺寸多窗口主页、设置可见性及预览保存；主设置页面可修改 CarPlay 返回车辆按钮，等待画面跟随 CarPlay 昼夜模式。应用及发布网站新增繁体中文（台湾），共七种语言。
+## 构建
 
-[0.2.13 完整说明](docs/RELEASE-NOTES-0.2.13.md)包含全部 35 项贡献及验证边界；[验证记录](docs/VALIDATION.md)将在最终发布检查后填写。可选功能请停车后测试。不宣称所有秦／海豹／汉／唐固件、一般卡顿、Siri 或旧版 iOS 问题均已解决。覆盖更新需要相同包名和签名，最终 APK 签名验证完成前不宣称更新兼容性已确认。
+需要 **JDK 21**、AGP 9.3.0 所用的 Android SDK/NDK，以及**离线** Gradle（wrapper 指向镜像，构建默认
+带 `--offline`）。
 
-### 请提供 0.2.13 的新诊断报告
+```powershell
+cd CarPlay-CS11
+.\gradlew.bat :mobile:assembleStandaloneDebug --console=plain --offline
+# 产物：mobile\build\outputs\apk\debug\mobile-debug.apk（约 10.89 MB）
+```
 
-1. 更新到 **0.2.13**，复现问题并记录发生时间。开机／自动启动问题发生后，可手动打开 DiPlay 导出。
-2. 打开“**设置 → 诊断 → 保存诊断报告**”。Android 10+ 通常保存到 **Downloads/DiPlay**；Android 9 使用文件选择器，也可点“选择保存位置”。如选择器或公共存储不可用，应用会使用专用外部或私有目录，并在确认中说明目的地。
-3. 使用确认中的**查看报告／分享**；没有分享应用时，可在报告视图中选择并复制文本。检查 `.txt` 并删除隐私信息，再附到匹配的[现有问题](https://github.com/shihabal3amri/DiPlay/issues)，或[新建问题](https://github.com/shihabal3amri/DiPlay/issues/new/choose)。报告不会自动上传，请勿公开热点密码或私有认证文件。
-4. 注明车型／车机、DiLink/Android/完整固件版本、iPhone/iOS、USB／车机热点／Wi-Fi Direct／同一局域网、相关设置、复现步骤、预期与实际结果及故障时间。
+- **认证身份已随仓库提供**（`mobile/src/main/auth-assets/offline-mfi/`，见[认证](#认证)），因此
+  clone 下来即可构建、即可连上 iPhone，**不需要**再设环境变量。想换一套身份时才用
+  `DIPLAY_AUTH_ASSETS_DIR`（此时仓库自带的那套**不会**进 APK）。
+- ⚠️ 若 APK 明显偏大，请先 `:mobile:clean` 再打包：增量打包曾留下约 5 MB 死空间，产出过 15.87 MB 的
+  假包；干净构建是约 10.89 MB。
+- 仓库里还有 `:vpndialogs-stub`：VPN 对话框依赖所需的小桩模块，属于构建图的一部分（不是可选项）。
 
-历史记录：[0.2.12](docs/RELEASE-NOTES-0.2.12.md)、[0.2.11](docs/RELEASE-NOTES-0.2.11.md)、[安装与连接](docs/INSTALL.md)。
+## 测试
 
-这是公开预览版，**未经 Apple 认证**。APK 使用从公开 Carlinkit 固件中提取的既有实验性配件身份，并非为 DiPlay 新签发的 MFi 身份；其中的私钥可被提取，未来 iOS 是否继续接受及其公开分发适用性尚未确定。Android 签名密钥和配件身份不进入 Git 或源代码压缩包；普通源代码/CI 构建默认不配置身份。部分车机仍可能卡顿或无法应用图标大小设置。
+```powershell
+.\gradlew.bat :shared:testDebugUnitTest :common:testDebugUnitTest --continue --offline
+# 期望：:shared 940 / 0 失败、:common 590 / 0 失败、0 skipped
+```
 
-标准导航小组件需要支持 Android 小组件的启动器；比亚迪内置主页不接受任意小组件。悬浮地图和嵌入地图需要启用“CarPlay 仪表地图”。应用及发布网站支持英语、简体中文、繁体中文（台湾）、阿拉伯语、俄语、乌克兰语和西班牙语。应用的香港／澳门及 Hant 选择使用台湾译文，不宣称提供独立地区翻译。源代码、构建说明及许可证随版本提供。
+**失败集必须保持为空**（新增用例让数字变大是允许的）。任何时候不要同时跑两个 Gradle（会争抢同一份
+构建产物）。
+
+## 适用范围
+
+- **唯一支持目标**是上述 CS11。所有取舍都针对它的 Dalvik 运行时、厂商编解码器与内核
+  （`cdc_ncm`、MUSB）做过实测；换车机不承诺可用。现代 Android 平板只作为"没有车机时的冒烟测试台"，
+  **不是兼容目标**。
+- **有线** CarPlay 需要先让车机的 NCM 网卡就绪（`ip -6 addr show usb1`）；在本 ROM 上这一步需要
+  一次 root 通道引导，且**每次点火都要重建**。没有它只能用无线。
+- 本应用**不改 `/system`**、**不安装被篡改的第三方 APK**；无线路径**不需要 root**。
+
+## 认证
+
+`DiPlayBootstrap` 首次启动时把 APK 里的 `assets/offline-mfi/{identity.pk8,certificate.p7b}` 复制到应用
+私有目录，`LocalMfiAuthenticationClient` 再用它们完成附件认证（即"软模拟认证"）。
+
+本仓库提交的这一对，与**上游公开发行 APK** 中自带的那一份**逐字节相同**（`DiPlay-0.2.12.apk`），
+因此放进仓库**没有扩大它的暴露面**。但它确实是一张 **Apple 签发的附件身份**，**私钥任何人都能提取**，
+公开分发可能与 MFi 条款冲突，极端情况下会被**吊销**（那样本车机的 CarPlay 会直接失效）。
+
+除自用以外，请**替换成你自己的身份**：把新的两个文件放进
+`mobile/src/main/auth-assets/offline-mfi/`，或用 `DIPLAY_AUTH_ASSETS_DIR` 指向含
+`offline-mfi/{identity.pk8,certificate.p7b}` 的目录。生效身份缺失会**构建失败**；assets 里出现任何
+**其它** `.pk8/.p7b/.key/.pem/.p12/.pfx/.jks/.keystore` 同样会构建失败。
+
+## 目录结构
+
+```
+shared/   协议与核心：AirPlay（RTSP / H.264 / AAC·LPCM / HID / NTP / 加密）、iAP2、USB·NCM、
+          媒体管线、网络与热点、仪表桥、API-19 兼容层
+common/   Android 宿主：Activity、设置界面、持久化、通知、权限、圆角遮罩、封面 Provider
+mobile/   打包成 APK 的 application 模块 + 随仓库提供的认证身份
+vpndialogs-stub/  VPN 对话框依赖所需的小桩模块
+docs/     上游文档原样保留（构建、安装、兼容性、版本说明、许可证）
+site/ asset/ samples/ automotive/  上游遗留内容，在 CS11 上不用
+```
+
+## 文档
+
+- [`docs/BUILD.md`](docs/BUILD.md)：上游指南，**顶部已加本分支说明**（实际可用的命令与工具链）；
+  [`docs/INSTALL.md`](docs/INSTALL.md)、[`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md) 面向比亚迪
+  目标，不是本分支。
+- [`docs/UPSTREAM-README.md`](docs/UPSTREAM-README.md)：上游 README 原文。
+- [`docs/THIRD_PARTY_NOTICES.md`](docs/THIRD_PARTY_NOTICES.md)、`docs/licenses/`：来源与许可证。
+
+## 来源与致谢
+
+GPL-3.0（[LICENSE](LICENSE)）。基于 shihabal3amri 的
+[DiPlay](https://github.com/shihabal3amri/DiPlay)，后者又基于
+[xcertplay](https://github.com/shilapi/xcertplay)；主页/设置界面与网站改自
+[DiAuto](https://github.com/shihabal3amri/DiAuto)（AGPL-3.0，许可证文本见 `docs/licenses/`）。
+随包的 Opus 编解码（`shared/src/main/jniLibs/armeabi-v7a/libdiplay_opus.so`）来自 Opus/libopus
+（BSD，见 `docs/Opus-LICENSE.txt`）。
+
+部分机制还与同代 ECARX/GKUI 平台的开源项目 **吉利 H52 / Android 4.3** 分支
+[`xikai6282/DiPlay-Geely-Android43`](https://github.com/xikai6282/DiPlay-Geely-Android43) 做过对比：
+USB 短写续写与共享截止时间、USBMUX 持久读请求、视频线程优先级取值、iAP2 `0x5703` 的 BSSID 字段，
+均参考了该项目的结论。**没有复制其代码**，每项都在本仓库重新实现并配套了自己的测试。
+
+分发修改版时请保留上游与 DiAuto 的许可证与声明。
