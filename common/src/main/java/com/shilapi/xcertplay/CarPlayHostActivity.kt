@@ -4764,6 +4764,10 @@ class CarPlayHostActivity : ComponentActivity() {
         message == getString(R.string.waiting_for_mfi_coprocessor) ||
             message == getString(R.string.requesting_mfi_usb_permission) -> message
         message.contains("Turn on Wi-Fi", true) -> getString(R.string.turn_on_wi_fi_in_the_head_unit_s_settings_to_connect)
+        // Ported from upstream 5fbd7171: the radio-off message asks the driver to act, and this turns it into
+        // the head unit's own wording. Fully qualified because this file has no transport import for it.
+        message.contains(com.shilapi.xcertplay.transport.BluetoothRadioCheck.RADIO_OFF_MARK, true) ->
+            getString(R.string.turn_on_bluetooth_in_the_head_unit_s_settings_to_connect)
         message.contains("Allow precise Location", true) -> getString(R.string.allow_precise_location_for_diplay_in_the_head_unit_s_app_p)
         message.contains("Allow Nearby devices", true) -> getString(R.string.allow_nearby_devices_for_diplay_in_the_head_unit_s_app_per)
         message.contains("createGroup failed", true) -> getString(R.string.the_head_unit_couldn_t_start_carplay_wi_fi_check_wi_fi_and)

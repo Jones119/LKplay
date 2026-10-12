@@ -88,6 +88,7 @@ import com.shilapi.xcertplay.transport.NcmLegacyMode
 import com.shilapi.xcertplay.transport.NcmLegacyPolicy
 import com.shilapi.xcertplay.transport.UserspaceNcmTransport
 import com.shilapi.xcertplay.transport.UserSpaceNcmLink
+import com.shilapi.xcertplay.transport.BluetoothRadioCheck
 import com.shilapi.xcertplay.transport.wiredTransportDecision
 import com.shilapi.xcertplay.transport.NcmUsbBridge
 import java.io.Closeable
@@ -944,6 +945,14 @@ class CarPlayController(
             firstTcpWatchdog = watchdog
             val mfi = mfiSession?.client
                 ?: throw IOException("MFi coprocessor client is unavailable")
+            // Wireless CarPlay begins over Bluetooth: a radio that is off is found before the Wi-Fi is changed.
+            // Ported from upstream 5fbd7171. Our tree has no BYD Bluetooth-suspend feature, so a radio that
+            // DiPlay paused itself cannot be the case here and `pausedByDiPlay` is always false.
+            BluetoothRadioCheck.blocker(
+                adapterPresent = bluetoothAdapter != null,
+                enabled = bluetoothAdapter?.isEnabled == true,
+                pausedByDiPlay = false,
+            )?.let { throw IOException(it) }
             val hotspotInfo = startWirelessHotspot(generation)
             if (isStaleWirelessRun(generation)) {
                 return
@@ -1003,7 +1012,7 @@ class CarPlayController(
             onStatus(CarPlayStatus.WaitingForPairedIphone)
 
             val adapter = bluetoothAdapter
-                ?: throw IOException("Bluetooth adapter is unavailable")
+                ?: throw IOException(BluetoothRadioCheck.NO_ADAPTER)
             if (!adapter.isEnabled && !requestWirelessBluetoothOn(adapter)) {
                 throw IOException("Bluetooth is not enabled")
             }
