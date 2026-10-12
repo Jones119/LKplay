@@ -2161,13 +2161,19 @@ class DiPlayActivity : ComponentActivity() {
 
     private fun section(parent: LinearLayout, title: String, icon: Int? = null, build: (LinearLayout) -> Unit) {
         val card = card()
-        val heading = row().apply { gravity = Gravity.CENTER_VERTICAL; setPadding(0, 0, 0, dp(16)) }
-        if (icon != null) heading.addView(ImageView(this).apply {
-            setImageResource(icon)
-            if (Build.VERSION.SDK_INT >= 21) imageTintList = ColorStateList.valueOf(ACCENT)
-            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-        }, LinearLayout.LayoutParams(dp(28), dp(28)).apply { marginEnd = dp(12) })
-        heading.addView(label(title, 22, TEXT, true), LinearLayout.LayoutParams(0, -2, 1f))
+        // A section is a micro-label in this system rather than a headline with an icon: 12 sp, letterspaced,
+        // secondary colour and uppercased where the script has a case, with a hairline under it. The icon
+        // parameter stays because every call site passes one, but the mark is a rule now (docs/_digest/60).
+        val heading = column().apply { setPadding(0, 0, 0, dp(14)) }
+        heading.addView(
+            label(title.uppercase(), 12, MUTED, true).apply {
+                if (Build.VERSION.SDK_INT >= 21) letterSpacing = .2f
+            },
+        )
+        heading.addView(
+            View(this).apply { setBackgroundColor(BORDER) },
+            LinearLayout.LayoutParams(-1, dp(1)).apply { topMargin = dp(10) },
+        )
         card.addView(heading)
         build(card)
         parent.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(18) })
