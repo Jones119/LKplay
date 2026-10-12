@@ -1,0 +1,143 @@
+package com.shilapi.xcertplay.transport
+
+import java.io.Closeable
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
+
+/**
+ * The userspace NCM link: lwIP's TCP/IP stack carried over the USB bridge (docs/_digest/58 §7).
+ *
+ * It owns the two directions between the netif and [NcmUsbBridge]:
+ *
+ * - RX: a reader thread takes one Ethernet frame at a time from the bridge and injects it into lwIP. That
+ *   thread is the USB reader, so it must never block on a full mailbox for long - lwIP applies backpressure
+ *   by making `tcpip_input` wait, which is exactly the pacing the video stream needs.
+ * - TX: a poller thread drains the netif's ring and writes each frame through the bridge's NTB framer.
+ *   Polling instead of a JNI upcall keeps lwIP's thread out of JNI (bridge/cs11_netif.c).
+ *
+ * [SessionNetwork] is delegated to [UserSpaceSessionNetwork], so this object is what the wired channels bind
+ * on. Close stops the pump; the bridge itself belongs to the caller.
+ */
+internal class UserSpaceNcmLink(
+    private val bridge: NcmUsbBridge,
+    private val jni: UserSpaceNetworkJni = UserSpaceNetworkNative,
+    private val onDiagnostic: (String) -> Unit = {},
+) : SessionNetwork by UserSpaceSessionNetwork(jni), Closeable {
+    private val running = AtomicBoolean(false)
+    private val injectedFrames = AtomicLong(0)
+    private val injectedBytes = AtomicLong(0)
+    private val writtenFrames = AtomicLong(0)
+    private val writtenBytes = AtomicLong(0)
+    private val transmitFailures = AtomicInteger(0)
+    private var receiveThread: Thread? = null
+    private var transmitThread: Thread? = null
+    private var statisticsThread: Thread? = null
+
+    /**
+     * Brings lwIP up and pins the netif's address. Returns the native result (0 when the netif exists), so
+     * the caller can decide to fall back to the kernel netdev instead of pretending the link is ready.
+     */
+    fun start(mtu: Int = NCM_MTU): Int {
+        val result = jni.start(bridge.hostMac, mtu)
+        onDiagnostic(
+            "userspace NCM network started mtu=$mtu hostMac=" +
+                (bridge.hostMac?.joinToString(":") { "%02x".format(it) } ?: "descriptor-none") +
+                " result=$result",
+        )
+        return result
+    }
+
+    /** Starts both directions and the periodic statistics line. Safe to call once, after [start]. */
+    fun startPump() {
+        if (!running.compareAndSet(false, true)) return
+        receiveThread = Thread(::pumpReceive, "ncm-us-rx").apply { isDaemon = true; start() }
+        transmitThread = Thread(::pumpTransmit, "ncm-us-tx").apply { isDaemon = true; start() }
+        statisticsThread = Thread(::reportStatistics, "ncm-us-stats").apply { isDaemon = true; start() }
+    }
+
+    private fun pumpReceive() {
+        val timeout = RECEIVE_TIMEOUT_MILLIS
+        while (running.get()) {
+            val frame = try {
+                bridge.recv(timeout)
+            } catch (error: Throwable) {
+                if (running.get()) onDiagnostic("userspace NCM receive ended: ${error.javaClass.simpleName}")
+                return
+            } ?: continue
+            if (frame.isEmpty()) continue
+            val result = jni.injectFrame(frame, frame.size)
+            if (result == 0) {
+                injectedFrames.incrementAndGet()
+                injectedBytes.addAndGet(frame.size.toLong())
+            }
+        }
+    }
+
+    private fun pumpTransmit() {
+        val frame = ByteArray(TRANSMIT_BUFFER_BYTES)
+        while (running.get()) {
+            if (jni.txPending() <= 0) {
+                // Short enough for the audio path (12 ms frames) and cheap enough on this SoC.
+                Thread.sleep(TRANSMIT_POLL_MILLIS)
+                continue
+            }
+            val length = jni.pollTxFrame(frame)
+            if (length <= 0) continue
+            try {
+                bridge.send(frame.copyOf(length), TRANSMIT_TIMEOUT_MILLIS)
+                writtenFrames.incrementAndGet()
+                writtenBytes.addAndGet(length.toLong())
+            } catch (error: Throwable) {
+                transmitFailures.incrementAndGet()
+                if (running.get()) {
+                    onDiagnostic("userspace NCM transmit failed: ${error.javaClass.simpleName}")
+                }
+                return
+            }
+        }
+    }
+
+    private fun reportStatistics() {
+        while (running.get()) {
+            try {
+                Thread.sleep(STATISTICS_INTERVAL_MILLIS)
+            } catch (_: InterruptedException) {
+                return
+            }
+            if (!running.get()) return
+            val native = runCatching { jni.stats() }.getOrNull() ?: IntArray(5)
+            onDiagnostic(
+                "userspace NCM link rxFrames=${native.getOrElse(0) { 0 }} rxBytes=${native.getOrElse(1) { 0 }} " +
+                    "txFrames=${native.getOrElse(2) { 0 }} txBytes=${native.getOrElse(3) { 0 }} " +
+                    "txDropped=${native.getOrElse(4) { 0 }} injected=$injectedFrames/$injectedBytes " +
+                    "written=$writtenFrames/$writtenBytes writeFailures=$transmitFailures " +
+                    "pending=${runCatching { jni.txPending() }.getOrDefault(0)}",
+            )
+        }
+    }
+
+    override fun close() {
+        if (!running.compareAndSet(true, false)) return
+        receiveThread?.interrupt()
+        transmitThread?.interrupt()
+        statisticsThread?.interrupt()
+        receiveThread = null
+        transmitThread = null
+        statisticsThread = null
+    }
+
+    internal companion object {
+        /** NCM's segment size on this link; lwIP's netif MTU. */
+        const val NCM_MTU = 1500
+
+        /** How long the RX thread waits for a frame before re-checking whether it should stop. */
+        const val RECEIVE_TIMEOUT_MILLIS = 100L
+        private const val TRANSMIT_POLL_MILLIS = 1L
+        private const val TRANSMIT_TIMEOUT_MILLIS = 200
+        private const val STATISTICS_INTERVAL_MILLIS = 5_000L
+
+        /** One Ethernet frame plus room for a VLAN tag; lwIP caps frames at the MTU anyway. */
+        private const val TRANSMIT_BUFFER_BYTES = 1600
+    }
+}

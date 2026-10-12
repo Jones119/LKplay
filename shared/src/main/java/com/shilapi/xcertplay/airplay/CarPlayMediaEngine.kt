@@ -2,6 +2,8 @@ package com.shilapi.xcertplay.airplay
 
 import android.util.Log
 import com.shilapi.xcertplay.transport.BlockingDuplexByteStream
+import com.shilapi.xcertplay.transport.KernelSessionNetwork
+import com.shilapi.xcertplay.transport.SessionNetwork
 import java.io.Closeable
 import java.io.File
 import java.net.Inet4Address
@@ -55,6 +57,14 @@ class CarPlayMediaEngine(
     private val microphoneEnabled: Boolean = false,
     private val audioCaptureDirectory: File? = null,
 ) : AirPlayMediaHandler {
+    /**
+     * The network the channels run on: the kernel stack by default, lwIP when the wired session is carried
+     * by the userspace NCM bridge. The Activity creates this engine while the transport is chosen at attach
+     * time, so it is settable rather than a constructor parameter; the controller sets it before the wired
+     * session starts (docs/_digest/58 §6 step 7).
+     */
+    @Volatile internal var network: SessionNetwork = KernelSessionNetwork
+
     internal data class StreamKey(
         val session: AirPlaySession,
         val type: Int,
@@ -114,7 +124,7 @@ class CarPlayMediaEngine(
         val key = outputKey(session, stream) ?: return null
         val streamKey = StreamKey(session, type)
         Log.i(TAG, "airplay screen key connectionID=${unsignedPlistDecimal(stream["streamConnectionID"])}")
-        val screen = ScreenStream(key, session::logDebug)
+        val screen = ScreenStream(key, session::logDebug, network = network)
         sink.setVideoDiagnosticHandler(type) {
             if (it == "first frame rendered") session.videoFrameRendered()
             session.logDebug("Video: $it")
@@ -191,7 +201,7 @@ class CarPlayMediaEngine(
 
         val capture = audioCaptureDirectory?.let { AudioPacketCapture(it, type) }
         if (capture != null) audioCaptures[streamKey] = capture
-        val audio = AudioStream(key, type, session::logDebug)
+        val audio = AudioStream(key, type, session::logDebug, network = network)
         val (dataPort, controlPort) = audio.listen(
             object : AudioStream.Listener {
                 override fun onStarted(firstSample: Int) {
@@ -245,7 +255,7 @@ class CarPlayMediaEngine(
         }
         val peer = session.remoteAddress ?: return null
         val buffered = try {
-            BufferedAudioStream(key, format, sink, session::logDebug, expectedPeer = peer)
+            BufferedAudioStream(key, format, sink, session::logDebug, expectedPeer = peer, network = network)
         } catch (error: Exception) {
             Log.w(TAG, "buffered audio listener failed", error)
             return null
@@ -348,6 +358,7 @@ class CarPlayMediaEngine(
                     is Inet4Address -> InetAddress.getByName("0.0.0.0")
                     else -> InetAddress.getByName("0.0.0.0")
                 },
+            network = network,
         )
         val bridge = AirPlayIapTunnelStream(session, tunnel)
         val handler = iapTunnelHandler
@@ -404,7 +415,7 @@ class CarPlayMediaEngine(
         fun key(label: String) = AirPlayCrypto.hkdfSha512(
             shared, "DataStream-Salt$seed".toByteArray(Charsets.US_ASCII), label.toByteArray(Charsets.US_ASCII), 32,
         )
-        val channel = VideoSettingsChannel(key(DATASTREAM_OUTPUT_KEY), key(DATASTREAM_INPUT_KEY)) { session.logDebug(it) }
+        val channel = VideoSettingsChannel(key(DATASTREAM_OUTPUT_KEY), key(DATASTREAM_INPUT_KEY), network) { session.logDebug(it) }
         val port = channel.listen(session.localAddress ?: InetAddress.getByName("::"))
         videoSettingsChannels.put(session, channel)?.close()
         session.logTrace("video settings stream listening port=$port")
