@@ -46,13 +46,32 @@ class DiPlayConnectVisual @JvmOverloads constructor(
     private val cable = Path()
     private val rect = RectF()
 
+    /**
+     * Height follows the drawing's own aspect rather than whatever the row happens to be: giving this view a
+     * fixed height inside a stretched column made it taller than the row, and centring an oversized child
+     * clipped the top of the composition off the screen.
+     */
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        val width = MeasureSpec.getSize(widthMeasureSpec)
+        val natural = if (width > 0) (width * DESIGN_HEIGHT / DESIGN_WIDTH).toInt() else 0
+        // The parent's bound is respected: the panel column is stretched to the state row, and an artwork
+        // that always took its full aspect height pushed the caption row out of view (and, when it had a
+        // fixed height instead, was clipped at the top).
+        val height = when (MeasureSpec.getMode(heightMeasureSpec)) {
+            MeasureSpec.EXACTLY -> MeasureSpec.getSize(heightMeasureSpec)
+            MeasureSpec.AT_MOST -> minOf(natural, MeasureSpec.getSize(heightMeasureSpec))
+            else -> natural
+        }
+        setMeasuredDimension(width, height)
+    }
+
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         val scale = minOf(width / DESIGN_WIDTH, height / DESIGN_HEIGHT)
         if (scale <= 0f) return
         canvas.save()
-        // Anchored bottom-left, the way the composition was drawn.
-        canvas.translate((width - DESIGN_WIDTH * scale) / 2f, height - DESIGN_HEIGHT * scale)
+        // Centred on both axes: the drawing fits by construction, so nothing can be cut off.
+        canvas.translate((width - DESIGN_WIDTH * scale) / 2f, (height - DESIGN_HEIGHT * scale) / 2f)
         canvas.scale(scale, scale)
 
         drawGrid(canvas)

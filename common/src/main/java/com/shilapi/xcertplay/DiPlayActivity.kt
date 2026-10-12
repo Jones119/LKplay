@@ -311,24 +311,26 @@ class DiPlayActivity : ComponentActivity() {
         }
         scroll.addView(content)
         val header = row().apply { gravity = Gravity.CENTER_VERTICAL }
+        // The brand lockup the way the brand itself signs things: a block, a widely letterspaced wordmark,
+        // and the product as a micro-label. The launcher icon's green is gone with it (docs/_digest/60).
         header.addView(
-            ImageView(this).apply {
-                setImageResource(R.drawable.ic_carplay)
-                contentDescription = getString(R.string.carplay)
-                // Monochrome, like the brand's own mark: the launcher icon's green would be the only colour
-                // on the page and would fight the token set (docs/_digest/60).
-                colorFilter = android.graphics.ColorMatrixColorFilter(
-                    android.graphics.ColorMatrix().apply { setSaturation(0f) },
-                )
-            },
-            LinearLayout.LayoutParams(if (compact) dp(24) else dp(36), if (compact) dp(24) else dp(36)),
+            View(this).apply { setBackgroundColor(TEXT) },
+            LinearLayout.LayoutParams(if (compact) dp(8) else dp(10), if (compact) dp(8) else dp(10)),
         )
         header.addView(
-            label(getString(R.string.diplay), if (compact) 18 else 26, TEXT, true).apply {
-                setPadding(if (compact) dp(8) else dp(12), 0, 0, 0)
+            label(getString(R.string.diplay), if (compact) 18 else 24, TEXT, true).apply {
+                if (Build.VERSION.SDK_INT >= 21) letterSpacing = .34f
+                setPadding(if (compact) dp(10) else dp(14), 0, 0, 0)
             },
             LinearLayout.LayoutParams(0, if (compact) dp(36) else dp(56), 1f),
         )
+        if (!compact) {
+            header.addView(
+                label("CARPLAY · CS11", 13, MUTED).apply {
+                    if (Build.VERSION.SDK_INT >= 21) letterSpacing = .16f
+                },
+            )
+        }
         if (page != "home" || !compact) {
             header.addView(
                 button(if (page == "home") getString(R.string.car_home) else getString(R.string.back), false) {
@@ -339,6 +341,12 @@ class DiPlayActivity : ComponentActivity() {
             )
         }
         content.addView(header)
+        // The rule under the header, which is what divides a page in this system instead of a shadow.
+        content.addView(space(if (compact) 10 else 18))
+        content.addView(
+            View(this).apply { setBackgroundColor(BORDER) },
+            LinearLayout.LayoutParams(-1, dp(1)),
+        )
         content.addView(space(if (compact) 8 else 24))
         when (page) {
             "connection" -> connectionSetup(content)
@@ -401,18 +409,24 @@ class DiPlayActivity : ComponentActivity() {
         val wide = resources.configuration.screenWidthDp >= 850
         val body = column()
         val left = column()
-        left.addView(label(getString(R.string.your_phone_your_drive), 12, ACCENT, true).apply { if (Build.VERSION.SDK_INT >= 21) letterSpacing = .16f })
-        left.addView(label(getString(R.string.a_familiar_drive), if (wide) 42 else 36, TEXT, true).apply { setPadding(0, dp(12), 0, dp(10)) })
-        left.addView(label(getString(R.string.your_maps_music_and_conversations_carplay_right_here_on_yo), 19, MUTED))
-        val card = card()
-        card.addView(label(getString(R.string.wireless_carplay), 12, ACCENT, true).apply { if (Build.VERSION.SDK_INT >= 21) letterSpacing = .12f })
-        status = label(getString(R.string.ready_when_you_are), 24, TEXT, true).apply { setPadding(0, dp(10), 0, dp(16)) }
-        card.addView(status)
+        left.addView(label(getString(R.string.your_phone_your_drive), 12, MUTED, true).apply { if (Build.VERSION.SDK_INT >= 21) letterSpacing = .18f })
+        // The state line is the page's headline now rather than a card title: it is what the driver reads
+        // first, and it is the sentence the whole screen is about.
+        status = label(getString(R.string.ready_when_you_are), if (wide) 40 else 34, TEXT, true).apply { setPadding(0, dp(14), 0, dp(12)) }
+        left.addView(status)
+        left.addView(label(getString(R.string.plug_your_iphone_into_a_usb_data_port_allow_carplay_when_y), 18, MUTED))
         connectButton = button(getString(R.string.connect_phone), true) {
             if (CarPlayBackgroundSession.hasSession()) openProjection()
             else connect(true)
         }
-        card.addView(connectButton, matchButton())
+        left.addView(connectButton, matchButton(26, 56))
+        disconnectButton = button(getString(R.string.disconnect), false) {
+            disconnectButton?.isEnabled = false
+            CarPlayBackgroundSession.stop { runOnUiThread { refreshStatus() } }
+        }.apply { visibility = View.GONE }
+        left.addView(disconnectButton, matchButton(12, 56))
+        val card = card()
+        card.addView(label(getString(R.string.wireless_carplay), 12, MUTED, true).apply { if (Build.VERSION.SDK_INT >= 21) letterSpacing = .12f })
         val connectionHint = when (AirPlayPersistence.loadWirelessHotspotMode(this)) {
             WirelessHotspotMode.EXISTING_WIFI -> getString(R.string.existing_wifi_hint)
             WirelessHotspotMode.MANUAL -> getString(R.string.hotspot_hint_manual)
@@ -432,20 +446,30 @@ class DiPlayActivity : ComponentActivity() {
             card.addView(button(getString(R.string.open_car_hotspot_settings), false) { openCarWifiSettings() }, matchButton(10, 56))
         }
         card.addView(button(getString(R.string.choose_iphone), false) { choosePhone() }, matchButton(16, 56))
-        disconnectButton = button(getString(R.string.disconnect), false) {
-            disconnectButton?.isEnabled = false
-            CarPlayBackgroundSession.stop { runOnUiThread { refreshStatus() } }
-        }.apply { visibility = View.GONE }
-        card.addView(disconnectButton, matchButton(10, 56))
         val right = column().apply { gravity = Gravity.CENTER_HORIZONTAL }
-        // The waiting screen's artwork: drawn in code rather than shipped as a photograph, so it carries the
-        // same monochrome register as the rest of the system (docs/_digest/60).
-        val artwork = DiPlayConnectVisual(this).apply {
-            contentDescription = getString(R.string.carplay_icon)
-        }
+        // The artwork panel: its own near-black gradient, the drawn composition, and a hairline caption row
+        // carrying the address the phone is told. Drawn in code rather than shipped as a photograph, so it
+        // stays in the same monochrome register as the tokens (docs/_digest/60).
         val branding = column().apply {
-            gravity = Gravity.CENTER
-            addView(artwork, LinearLayout.LayoutParams(-1, dp(340)))
+            background = GradientDrawable(
+                GradientDrawable.Orientation.TOP_BOTTOM,
+                intArrayOf(Color.rgb(0x0E, 0x0D, 0x0C), Color.rgb(0x08, 0x08, 0x07)),
+            ).apply { cornerRadius = dp(4).toFloat(); setStroke(dp(1), BORDER) }
+            addView(
+                DiPlayConnectVisual(this@DiPlayActivity).apply { contentDescription = getString(R.string.carplay_icon) },
+                LinearLayout.LayoutParams(-1, -2),
+            )
+            addView(
+                View(this@DiPlayActivity).apply { setBackgroundColor(BORDER) },
+                LinearLayout.LayoutParams(-1, dp(1)),
+            )
+            val caption = row().apply { setPadding(dp(18), dp(14), dp(18), dp(14)) }
+            caption.addView(
+                label("CONNECT TO CARPLAY", 12, MUTED).apply { if (Build.VERSION.SDK_INT >= 21) letterSpacing = .16f },
+                LinearLayout.LayoutParams(0, -2, 1f),
+            )
+            caption.addView(label("fe80::2", 12, MUTED))
+            addView(caption)
         }
         right.addView(button(getString(R.string.connect_with_usb), false) { connect(false) }, matchButton())
         right.addView(label(getString(R.string.plug_your_iphone_into_a_usb_data_port_allow_carplay_when_y), 14, MUTED).apply { gravity = Gravity.CENTER; setPadding(dp(8), dp(10), dp(8), dp(24)) })
