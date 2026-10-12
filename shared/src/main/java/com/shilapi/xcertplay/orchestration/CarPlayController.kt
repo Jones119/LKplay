@@ -21,6 +21,7 @@ import android.os.IBinder
 import android.os.Looper
 import android.provider.Settings
 import android.util.Log
+import com.shilapi.xcertplay.diagnostics.DiagnosticLog
 import com.shilapi.xcertplay.airplay.AirPlayListenerIdentity
 import com.shilapi.xcertplay.airplay.AirPlayTcpAccepted
 import com.shilapi.xcertplay.airplay.AirPlayConfig
@@ -180,6 +181,13 @@ class CarPlayController(
     private val diagnosticAttempt = diagnosticAttempts.incrementAndGet()
     private val diagnosticRun = AtomicInteger()
     private val usbManager: UsbManager? = context.systemServiceOrNull(UsbManager::class.java)
+
+    init {
+        // The file log starts here rather than from an Application subclass, which this app does not have.
+        // With USB debugging off there is no `adb logcat` on this car, so this file is the only record a
+        // normal-use session leaves behind (docs/_digest/59). It is one file per app run and it never throws.
+        DiagnosticLog.start(appContext, "transport=${config.transport}")
+    }
     private val bluetoothAdapter =
         appContext.systemServiceOrNull(BluetoothManager::class.java)?.adapter
     private val iphoneHost by lazy {
@@ -1470,7 +1478,11 @@ class CarPlayController(
         } else {
             debugLog(
                 "wired iPhone discovered vid=0x${device.vendorId.toString(16)} " +
-                    "pid=0x${device.productId.toString(16)}",
+                    "pid=0x${device.productId.toString(16)} " +
+                    // deviceName is /dev/bus/usb/<bus>/<address>: the only port signal API 19 exposes, and
+                    // the line that says afterwards whether this was the car's own port or the debug one.
+                    "device=${device.deviceName} bus=${device.deviceName.substringBeforeLast('/').substringAfterLast('/')} " +
+                    "interfaces=${device.interfaceCount}",
             )
             availabilityPollGeneration.incrementAndGet()
             requestIphonePermission(device)
@@ -2582,6 +2594,7 @@ class CarPlayController(
 
     private fun debugLog(message: String) {
         Log.i(IphoneCarPlayConfiguration.TAG, message)
+        DiagnosticLog.line(message)
         try {
             uiListener?.onDebugLog(message)
         } catch (error: Exception) {
@@ -2607,6 +2620,7 @@ class CarPlayController(
 
     private fun debugLog(message: String, error: Throwable) {
         Log.w(IphoneCarPlayConfiguration.TAG, message, error)
+        DiagnosticLog.error(message, error)
         try {
             uiListener?.onDebugLog("$message: ${describeThrowable(error)}")
         } catch (callbackError: Exception) {
