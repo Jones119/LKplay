@@ -35,7 +35,9 @@ class HomeCompactLayoutTest {
         val activity = Robolectric.buildActivity(DiPlayActivity::class.java).setup().get()
         shadowOf(activity).setInMultiWindowMode(multiWindow)
         ReflectionHelpers.callInstanceMethod<Unit>(activity, "render")
-        val hero = activity.getString(R.string.a_familiar_drive)
+        // Probes the full home by a line only it carries. It used to probe a_familiar_drive, which the
+        // waiting screen no longer has after it was rebuilt around the state headline (docs/_digest/60).
+        val hero = activity.getString(R.string.your_phone_your_drive)
         return descendants(activity.window.decorView).filterIsInstance<TextView>().none { it.text == hero }
     }
 

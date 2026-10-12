@@ -1014,7 +1014,7 @@ class CarPlayController(
             val adapter = bluetoothAdapter
                 ?: throw IOException(BluetoothRadioCheck.NO_ADAPTER)
             if (!adapter.isEnabled && !requestWirelessBluetoothOn(adapter)) {
-                throw IOException("Bluetooth is not enabled")
+                throw IOException(BluetoothRadioCheck.RADIO_OFF)
             }
             val device = selectWirelessBluetoothDevice(adapter)
             val hostBluetoothMac = accessoryBluetoothMac(adapter)
