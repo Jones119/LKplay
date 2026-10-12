@@ -20,7 +20,19 @@ import java.net.Socket
 interface DuplexSocket : Closeable {
     val inputStream: InputStream
     val outputStream: OutputStream
-    val remoteAddress: InetAddress?
+
+    /** Peer address and port. The control channel logs this verbatim, so it stays one value. */
+    val remoteSocketAddress: InetSocketAddress?
+
+    /**
+     * Socket options the channels actually set (measured, not guessed): the video stream raises its
+     * receive buffer and turns Nagle off, the buffered audio stream raises the buffer too, and the
+     * control and liveness paths enable keep-alive. A userspace stack maps these onto lwIP's
+     * `SO_RCVBUF`, `TCP_NODELAY` and `SO_KEEPALIVE`, and may ignore them.
+     */
+    var receiveBufferSize: Int
+    var tcpNoDelay: Boolean
+    var keepAlive: Boolean
 }
 
 /** One listening TCP endpoint. */
@@ -84,7 +96,25 @@ private class KernelDuplexServer(private val server: ServerSocket) : DuplexServe
 private class KernelDuplexSocket(private val socket: Socket) : DuplexSocket {
     override val inputStream: InputStream get() = socket.getInputStream()
     override val outputStream: OutputStream get() = socket.getOutputStream()
-    override val remoteAddress: InetAddress? get() = socket.inetAddress
+    override val remoteSocketAddress: InetSocketAddress? get() = socket.remoteSocketAddress as? InetSocketAddress
+
+    override var receiveBufferSize: Int
+        get() = socket.receiveBufferSize
+        set(value) {
+            socket.receiveBufferSize = value
+        }
+
+    override var tcpNoDelay: Boolean
+        get() = socket.tcpNoDelay
+        set(value) {
+            socket.tcpNoDelay = value
+        }
+
+    override var keepAlive: Boolean
+        get() = socket.keepAlive
+        set(value) {
+            socket.keepAlive = value
+        }
 
     override fun close() {
         socket.close()

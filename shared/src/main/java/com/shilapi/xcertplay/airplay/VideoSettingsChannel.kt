@@ -1,11 +1,12 @@
 package com.shilapi.xcertplay.airplay
 
+import com.shilapi.xcertplay.transport.DuplexServer
+import com.shilapi.xcertplay.transport.DuplexSocket
+import com.shilapi.xcertplay.transport.KernelSessionNetwork
+import com.shilapi.xcertplay.transport.StreamNetwork
 import java.io.Closeable
 import java.io.OutputStream
 import java.net.InetAddress
-import java.net.InetSocketAddress
-import java.net.ServerSocket
-import java.net.Socket
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -19,25 +20,24 @@ import java.util.concurrent.atomic.AtomicBoolean
 class VideoSettingsChannel(
     private val readKey: ByteArray,
     private val writeKey: ByteArray,
+    /** The listener comes from here so the wired path can run on a userspace stack. */
+    private val network: StreamNetwork = KernelSessionNetwork,
     private val log: (String) -> Unit,
 ) : Closeable {
     private val closed = AtomicBoolean(false)
-    private var server: ServerSocket? = null
-    private var socket: Socket? = null
+    private var server: DuplexServer? = null
+    private var socket: DuplexSocket? = null
     private var readCounter = 0L
     private var writeCounter = 0L
 
     fun listen(bindAddress: InetAddress): Int {
-        val bound = ServerSocket().apply {
-            reuseAddress = true
-            bind(InetSocketAddress(bindAddress, 0))
-        }
+        val bound = network.listen(bindAddress, port = 0, reuseAddress = true)
         server = bound
         Thread({ accept(bound) }, "diplay-video-settings").apply { isDaemon = true }.start()
         return bound.localPort
     }
 
-    private fun accept(bound: ServerSocket) {
+    private fun accept(bound: DuplexServer) {
         try {
             val accepted = bound.accept()
             socket = accepted
@@ -50,9 +50,9 @@ class VideoSettingsChannel(
         }
     }
 
-    private fun run(sock: Socket) {
-        val input = sock.getInputStream()
-        val output = sock.getOutputStream()
+    private fun run(sock: DuplexSocket) {
+        val input = sock.inputStream
+        val output = sock.outputStream
         val buffer = ByteArray(16 * 1024)
         var ciphertext = ByteArray(0)
         var plaintext = ByteArray(0)

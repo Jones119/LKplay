@@ -1,12 +1,13 @@
 package com.shilapi.xcertplay.airplay
 
 import android.util.Log
+import com.shilapi.xcertplay.transport.DuplexServer
+import com.shilapi.xcertplay.transport.DuplexSocket
+import com.shilapi.xcertplay.transport.KernelSessionNetwork
+import com.shilapi.xcertplay.transport.StreamNetwork
 import java.io.Closeable
 import java.io.InputStream
 import java.net.InetAddress
-import java.net.InetSocketAddress
-import java.net.ServerSocket
-import java.net.Socket
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
@@ -19,7 +20,12 @@ enum class VideoCodec { H264, H265 }
  * (avcC/hvcC) or a ChaCha20-Poly1305 sealed VideoFrame. The key is the DataStream output key
  * and the per-frame nonce is an 8-byte little-endian counter.
  */
-class ScreenStream(private val key: ByteArray, private val onDiagnostic: (String) -> Unit = {}) : Closeable {
+class ScreenStream(
+    private val key: ByteArray,
+    private val onDiagnostic: (String) -> Unit = {},
+    /** The listener comes from here so the wired path can run on a userspace stack. */
+    private val network: StreamNetwork = KernelSessionNetwork,
+) : Closeable {
     interface Listener {
         fun onCodec(codec: VideoCodec) {}
         fun onConfig(codecData: ByteArray) {}
@@ -47,16 +53,14 @@ class ScreenStream(private val key: ByteArray, private val onDiagnostic: (String
 
     /** One report per stream for a short AEAD write, which is a bug rather than a wire condition. */
     private val plaintextMismatchLogged = AtomicBoolean(false)
-    private var server: ServerSocket? = null
-    private var socket: Socket? = null
+    private var server: DuplexServer? = null
+    private var socket: DuplexSocket? = null
     private var thread: Thread? = null
     @Volatile private var listener: Listener = object : Listener {}
 
     fun listen(listener: Listener): Int {
         this.listener = listener
-        val bound = ServerSocket()
-        bound.reuseAddress = true
-        bound.bind(InetSocketAddress(serverBindAddress(), 0))
+        val bound = network.listen(serverBindAddress(), port = 0, reuseAddress = true)
         server = bound
         thread = Thread({
             // Geely H52's Android 4.3 port runs its video receive/decode threads at -8 rather than
@@ -75,7 +79,7 @@ class ScreenStream(private val key: ByteArray, private val onDiagnostic: (String
         thread?.interrupt()
     }
 
-    private fun accept(bound: ServerSocket) {
+    private fun accept(bound: DuplexServer) {
         try {
             val accepted = bound.accept()
             socket = accepted
@@ -97,7 +101,7 @@ class ScreenStream(private val key: ByteArray, private val onDiagnostic: (String
         }
     }
 
-    private fun run(sock: Socket) {
+    private fun run(sock: DuplexSocket) {
         var failure: Throwable? = null
         val stats = StreamReceiveStats("video", onDiagnostic)
         // CS11: one receive thread, so one header buffer and one body buffer are reused; the plaintext
@@ -105,7 +109,7 @@ class ScreenStream(private val key: ByteArray, private val onDiagnostic: (String
         // (see docs/_digest/41 §9 - this replaced two multi-kilobyte allocations per frame).
         val frames = VideoFramePool()
         try {
-            val input = sock.getInputStream()
+            val input = sock.inputStream
             val header = ByteArray(HEADER_LEN)
             var body = ByteArray(0)
             while (!closed.get()) {

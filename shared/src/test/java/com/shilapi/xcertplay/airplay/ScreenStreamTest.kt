@@ -77,7 +77,7 @@ class ScreenStreamTest {
         val diagnostics = CopyOnWriteArrayList<String>()
         val received = CopyOnWriteArrayList<ByteArray>()
         val delivered = CountDownLatch(1)
-        val stream = ScreenStream(key) { diagnostics += it }
+        val stream = ScreenStream(key, onDiagnostic = { diagnostics += it })
         val port = stream.listen(object : ScreenStream.Listener {
             override fun onFrame(naluBytes: ByteArray) {
                 received += naluBytes
