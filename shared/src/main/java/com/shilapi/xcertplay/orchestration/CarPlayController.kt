@@ -79,6 +79,10 @@ import com.shilapi.xcertplay.transport.LockdownCarKitClient
 import com.shilapi.xcertplay.transport.LockdownPairingClient
 import com.shilapi.xcertplay.transport.LockdownPairRecord
 import com.shilapi.xcertplay.transport.NcmFunctionDiscovery
+import com.shilapi.xcertplay.transport.LegacyNcmDescriptors
+import com.shilapi.xcertplay.transport.LegacyUsbNative
+import com.shilapi.xcertplay.transport.NcmLegacyMode
+import com.shilapi.xcertplay.transport.NcmLegacyPolicy
 import com.shilapi.xcertplay.transport.NcmUsbBridge
 import java.io.Closeable
 import java.io.IOException
@@ -1618,7 +1622,13 @@ class CarPlayController(
                         // branch below that suppressed the diagnostic. The raw-USB NCM path was
                         // superseded by the kernel netdev in 5b0f5774, so the API-19 half of `openNcm`
                         // is gone and this is now the single explicit decision; see docs/_digest/49.
-                        val decision = rawNcmDecision(Build.VERSION.SDK_INT)
+                        val mode = NcmLegacyPolicy.current()
+                        val decision = rawNcmDecision(
+                            Build.VERSION.SDK_INT, mode, LegacyUsbNative.available,
+                        )
+                        if (mode == NcmLegacyMode.FORCE && Build.VERSION.SDK_INT < 21) {
+                            probeUserspaceNcm(device)
+                        }
                         val ncm = if (decision.usesKernelNetdevOnly) {
                             debugLog(decision.reason)
                             null
@@ -1646,11 +1656,63 @@ class CarPlayController(
      * `ObsoleteSdkInt`.
      */
     internal fun rawNcmDecision(sdkInt: Int): RawNcmDecision =
-        if (sdkInt < 21) {
-            RawNcmDecision(true, "CS11: kernel netdev transport selected; skipping raw NCM bridge")
-        } else {
-            RawNcmDecision(false, "wired opening raw-USB NCM bridge")
+        rawNcmDecision(sdkInt, NcmLegacyMode.AUTO, nativeAvailable = true)
+
+    /**
+     * The same decision with the userspace route's two extra inputs: the `debug.diplay.ncm_legacy`
+     * mode and whether the native altsetting library is in this APK.
+     *
+     * On API 19 the kernel netdev still carries the traffic even in [NcmLegacyMode.FORCE], because the
+     * userspace bridge cannot move AirPlay until it owns a TCP/IP stack of its own (this ROM has no TUN,
+     * docs/_digest/58 §1); what FORCE adds today is the USB-side probe below.
+     */
+    internal fun rawNcmDecision(
+        sdkInt: Int,
+        mode: NcmLegacyMode,
+        nativeAvailable: Boolean,
+    ): RawNcmDecision = when {
+        sdkInt >= 21 -> RawNcmDecision(false, "wired opening raw-USB NCM bridge")
+        mode == NcmLegacyMode.FORCE && nativeAvailable -> RawNcmDecision(
+            true,
+            "CS11: userspace NCM probe enabled; the kernel netdev still carries traffic",
+        )
+        else -> RawNcmDecision(true, "CS11: kernel netdev transport selected; skipping raw NCM bridge")
+    }
+
+    /**
+     * Exercises the API-19 userspace bring-up end to end - descriptor parse, claims, native altsetting,
+     * NCM negotiation - and releases it again. It is deliberately **not** the transport yet: AirPlay
+     * needs a TCP/IP stack that does not exist on this ROM (no TUN), and holding the NCM interfaces
+     * would take them away from the kernel driver that currently works. Opt in with
+     * `debug.diplay.ncm_legacy=force` for one ignition window (docs/_digest/58 §3 stage 1).
+     */
+    private fun probeUserspaceNcm(device: UsbDevice) {
+        val connection = requireUsbManager().openDevice(device)
+        if (connection == null) {
+            debugLog("userspace NCM probe skipped: the iPhone connection could not be opened")
+            return
         }
+        var bridge: NcmUsbBridge? = null
+        try {
+            val raw = connection.rawDescriptors
+                ?: throw IphoneUsbException.Protocol("the iPhone exposes no raw USB descriptors")
+            val configurationId = LegacyNcmDescriptors.parse(raw)
+                .singleOrNull { it.hasUsbMux && it.hasNcm }?.id
+                ?: throw IphoneUsbException.Protocol(
+                    "no iPhone USB configuration carries USBMUX and NCM together",
+                )
+            bridge = NcmUsbBridge.openLegacy(connection, device, raw, configurationId, ::debugLog)
+            debugLog("userspace NCM probe ok configuration=$configurationId: parsed, claimed, switched, negotiated")
+        } catch (error: Throwable) {
+            debugLog("userspace NCM probe failed: ${error.javaClass.simpleName}: ${error.message}")
+        } finally {
+            if (bridge != null) {
+                runCatching { bridge.close() }
+            } else {
+                runCatching { connection.close() }
+            }
+        }
+    }
 
     /**
      * The raw-USB NCM bridge over an enumerated `UsbConfiguration`. CS11: **API 21+ only** — the

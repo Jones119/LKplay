@@ -1,5 +1,6 @@
 package com.shilapi.xcertplay.transport
 
+import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbDeviceConnection
 import android.hardware.usb.UsbEndpoint
 import android.hardware.usb.UsbInterface
@@ -28,6 +29,11 @@ class NcmUsbBridge internal constructor(
     private val claimedInterfaces: List<UsbInterface>,
     descriptorHostMac: ByteArray?,
     private val onDiagnostic: (String) -> Unit = {},
+    /**
+     * Bulk-IN read size. The API-21+ path uses [READ_CHUNK_BYTES]; the API-19 userspace path reads the
+     * negotiated NTB input size instead (16 KiB for this iPhone, docs/_digest/58 §5 item 7).
+     */
+    private val readChunkBytes: Int = READ_CHUNK_BYTES,
 ) : Closeable {
     private val descriptorMac = descriptorHostMac?.copyOf()
     val hostMac: ByteArray? get() = descriptorMac?.copyOf()
@@ -43,12 +49,12 @@ class NcmUsbBridge internal constructor(
     private var buffered = ByteArray(0)
     private var bufferedSize = 0
     private var optionalShortPacketPad = false
-    private val readBuffer = ByteArray(READ_CHUNK_BYTES)
+    private val readBuffer = ByteArray(readChunkBytes)
     // Bulk IN uses one persistent async request: bulkTransfer() pins its byte[] in a JNI critical
     // section for the whole wait, which blocks ART's GC thread flip and, with it, every other USB
     // transfer (seen as ~0.8 s stalls of video and audio). A timed-out request stays queued, so no
     // data is lost between calls. This is the only requestWait() user on this connection.
-    private val directReadBuffer = ByteBuffer.allocateDirect(READ_CHUNK_BYTES)
+    private val directReadBuffer = ByteBuffer.allocateDirect(readChunkBytes)
     private var readRequest: UsbRequest? = null
     private var readQueued = false
     private val readQueuePolicy = UsbReadQueuePolicy.forCurrentPlatform()
@@ -217,7 +223,7 @@ class NcmUsbBridge internal constructor(
     private fun appendBuffered(source: ByteArray, length: Int) {
         val required = bufferedSize + length
         if (required > buffered.size) {
-            val capacity = maxOf(required, maxOf(READ_CHUNK_BYTES, buffered.size * 2))
+            val capacity = maxOf(required, maxOf(readChunkBytes, buffered.size * 2))
             val grown = ByteArray(capacity)
             buffered.copyInto(grown, 0, 0, bufferedSize)
             buffered = grown
@@ -439,8 +445,146 @@ class NcmUsbBridge internal constructor(
             }
         }
 
-        private fun readNcmHostMac(connection: UsbDeviceConnection, controlInterfaceId: Int): ByteArray? {
-            val index = ethernetMacStringIndex(connection.rawDescriptors, controlInterfaceId) ?: return null
+        /**
+         * API-19 userspace NCM open: claim the interfaces the raw descriptors describe, park the data
+         * interface on its idle alternate, negotiate NTB16, then select the active alternate.
+         *
+         * The kernel's `cdc_ncm` driver normally does all of this, but binding it needs the root
+         * channel that disappears on every reboot (docs/_digest/57 §7) - which is why this path exists.
+         * Nothing in the API-19 Java surface performs the alternate-setting ioctl, so it goes through
+         * [LegacyUsbNative]; the kernel-netdev path stays available as the caller's fallback.
+         */
+        fun openLegacy(
+            connection: UsbDeviceConnection,
+            device: UsbDevice,
+            rawDescriptors: ByteArray,
+            configurationId: Int,
+            onDiagnostic: (String) -> Unit = {},
+        ): NcmUsbBridge {
+            if (!LegacyUsbNative.available) {
+                throw IphoneUsbException.DeviceUnavailable(
+                    "the userspace NCM bridge needs the legacy_usb native library",
+                )
+            }
+            val layout = LegacyNcmDescriptors.ncm(rawDescriptors, configurationId)
+            val order = interfaceOrder(rawDescriptors, configurationId)
+            val controlIndex = order.indexOf(layout.control.id to 0)
+            val dataIndex = order.indexOf(layout.data.id to layout.data.alternate)
+            if (controlIndex < 0 || dataIndex < 0 ||
+                controlIndex >= device.interfaceCount || dataIndex >= device.interfaceCount
+            ) {
+                throw IphoneUsbException.Protocol(
+                    "The active iPhone USB configuration does not expose the parsed NCM interfaces",
+                )
+            }
+            val claimed = ArrayList<UsbInterface>(2)
+            try {
+                val control = device.getInterface(controlIndex)
+                val data = device.getInterface(dataIndex)
+                if (!connection.claimInterface(control, true)) {
+                    throw IphoneUsbException.DeviceUnavailable(
+                        "Android could not claim the NCM control interface ${layout.control.id}",
+                    )
+                }
+                claimed.add(control)
+                if (data !== control) {
+                    if (!connection.claimInterface(data, true)) {
+                        throw IphoneUsbException.DeviceUnavailable(
+                            "Android could not claim the NCM data interface ${layout.data.id}",
+                        )
+                    }
+                    claimed.add(data)
+                }
+                val descriptor = connection.fileDescriptor
+                // The legacy build's order: idle alternate, negotiate, active alternate
+                // (V74/NcmUsbBridge.java:1349-1352).
+                if (LegacyUsbNative.setInterface(descriptor, layout.idle.id, layout.idle.alternate) != 0) {
+                    throw IphoneUsbException.DeviceUnavailable(
+                        "could not park the NCM data interface ${layout.idle.id} on alternate ${layout.idle.alternate}",
+                    )
+                }
+                val parameters = NcmNegotiation.configure(
+                    connection, layout.control.id, layout.capabilities, onDiagnostic,
+                )
+                NcmNegotiation.enablePacketFilter(
+                    connection, layout.control.id, layout.capabilities, onDiagnostic,
+                )
+                if (LegacyUsbNative.setInterface(descriptor, layout.data.id, layout.data.alternate) != 0) {
+                    throw IphoneUsbException.DeviceUnavailable(
+                        "could not select the NCM data alternate ${layout.data.id}/${layout.data.alternate}",
+                    )
+                }
+                val inEndpoint = bulkEndpoint(data, UsbConstants.USB_DIR_IN)
+                    ?: throw IphoneUsbException.Protocol("NCM data interface exposes no bulk IN endpoint")
+                val outEndpoint = bulkEndpoint(data, UsbConstants.USB_DIR_OUT)
+                    ?: throw IphoneUsbException.Protocol("NCM data interface exposes no bulk OUT endpoint")
+                val statusEndpoint = interruptInEndpoint(control)
+                onDiagnostic(
+                    "NCM legacy stage=ready iface=${layout.data.id}/${layout.data.alternate} " +
+                        "input=${parameters.inputSize} output=${parameters.outputSize} " +
+                        "status=${statusEndpoint?.address?.let { "0x${it.toString(16)}" } ?: "none"}",
+                )
+                return NcmUsbBridge(
+                    connection,
+                    outEndpoint,
+                    inEndpoint,
+                    statusEndpoint,
+                    claimed,
+                    readNcmHostMac(connection, layout.control.id),
+                    onDiagnostic,
+                    parameters.inputSize,
+                )
+            } catch (error: Throwable) {
+                for (usbInterface in claimed.asReversed()) {
+                    try {
+                        connection.releaseInterface(usbInterface)
+                    } catch (_: RuntimeException) {
+                        // The connection close below is authoritative.
+                    }
+                }
+                connection.close()
+                if (error is IphoneUsbException) throw error
+                throw IphoneUsbException.DeviceUnavailable("userspace NCM open failed", error)
+            }
+        }
+
+        /** Interface (number, alternate) pairs of [configurationId], in descriptor order. */
+        private fun interfaceOrder(raw: ByteArray, configurationId: Int): List<Pair<Int, Int>> {
+            val order = ArrayList<Pair<Int, Int>>(4)
+            var offset = 0
+            var inConfiguration = false
+            while (offset + 2 <= raw.size) {
+                val length = raw[offset].toInt() and 0xff
+                val type = raw[offset + 1].toInt() and 0xff
+                if (length < 2 || offset + length > raw.size) break
+                when {
+                    type == USB_CONFIGURATION_DESCRIPTOR_TYPE && length >= 9 ->
+                        inConfiguration = (raw[offset + 5].toInt() and 0xff) == configurationId
+                    inConfiguration && type == USB_INTERFACE_DESCRIPTOR_TYPE && length >= 9 ->
+                        order.add((raw[offset + 2].toInt() and 0xff) to (raw[offset + 3].toInt() and 0xff))
+                }
+                offset += length
+            }
+            return order
+        }
+
+        private fun bulkEndpoint(usbInterface: UsbInterface, direction: Int): UsbEndpoint? =
+            (0 until usbInterface.endpointCount)
+                .map(usbInterface::getEndpoint)
+                .firstOrNull {
+                    it.type == UsbConstants.USB_ENDPOINT_XFER_BULK &&
+                        (it.address and UsbConstants.USB_DIR_IN) == direction
+                }
+
+        private fun interruptInEndpoint(usbInterface: UsbInterface): UsbEndpoint? =
+            (0 until usbInterface.endpointCount)
+                .map(usbInterface::getEndpoint)
+                .firstOrNull {
+                    it.type == UsbConstants.USB_ENDPOINT_XFER_INT &&
+                        (it.address and UsbConstants.USB_DIR_IN) == UsbConstants.USB_DIR_IN
+                }
+
+        private fun readNcmHostMac(connection: UsbDeviceConnection, controlInterfaceId: Int): ByteArray? {            val index = ethernetMacStringIndex(connection.rawDescriptors, controlInterfaceId) ?: return null
             val buffer = ByteArray(256)
             val length = connection.controlTransfer(
                 UsbConstants.USB_DIR_IN or UsbConstants.USB_TYPE_STANDARD,
@@ -486,6 +630,7 @@ class NcmUsbBridge internal constructor(
             joinToString(":") { byte -> "%02x".format(byte.toInt() and 0xff) }
 
         private const val USB_INTERFACE_DESCRIPTOR_TYPE = 0x04
+        private const val USB_CONFIGURATION_DESCRIPTOR_TYPE = 0x02
         private const val USB_REQUEST_GET_DESCRIPTOR = 0x06
         private const val DATA_ALTERNATE_SETTING_HINT = 1
         private const val USB_REQUEST_TYPE_SET_INTERFACE = 0x01
