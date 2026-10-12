@@ -189,8 +189,10 @@ class CarPlayController(
         // normal-use session leaves behind (docs/_digest/59). It is one file per app run and it never throws.
         DiagnosticLog.start(appContext, "transport=${config.transport}")
     }
+    // Ported from upstream d379f036: on older Androids BluetoothManager.getAdapter() can answer null even
+    // though a radio exists, so the deprecated static is the fallback (relevant on this API 19 car).
     private val bluetoothAdapter =
-        appContext.systemServiceOrNull(BluetoothManager::class.java)?.adapter
+        appContext.systemServiceOrNull(BluetoothManager::class.java)?.adapter ?: android.bluetooth.BluetoothAdapter.getDefaultAdapter()
     private val iphoneHost by lazy {
         IphoneUsbHost(
             appContext,

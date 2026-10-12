@@ -7,7 +7,7 @@ import com.shilapi.xcertplay.compat.systemServiceOrNull
 
 internal object DiPlayBluetooth {
     fun localAddress(context: Context): String? {
-        val adapter = runCatching { context.systemServiceOrNull(BluetoothManager::class.java)?.adapter?.address }.getOrNull()
+        val adapter = runCatching { (context.systemServiceOrNull(BluetoothManager::class.java)?.adapter ?: android.bluetooth.BluetoothAdapter.getDefaultAdapter())?.address }.getOrNull()
         val setting = runCatching { Settings.Secure.getString(context.contentResolver, "bluetooth_address") }.getOrNull()
         return listOfNotNull(adapter, setting).firstOrNull {
             Regex("(?i)([0-9a-f]{2}:){5}[0-9a-f]{2}").matches(it) &&

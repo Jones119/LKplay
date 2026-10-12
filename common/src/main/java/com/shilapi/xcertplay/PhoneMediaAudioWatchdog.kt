@@ -76,7 +76,7 @@ internal class PhoneMediaAudioWatchdog(private val context: Context) {
     fun start() {
         if (running) return
         val address = DiPlayPreferences.phoneAddress(context)
-        val adapter = runCatching { context.systemServiceOrNull(BluetoothManager::class.java)?.adapter }.getOrNull()
+        val adapter = runCatching { context.systemServiceOrNull(BluetoothManager::class.java)?.adapter ?: android.bluetooth.BluetoothAdapter.getDefaultAdapter() }.getOrNull()
         if (adapter == null || address.isNullOrBlank()) {
             log("phone media watchdog not started (adapter=${adapter != null} address=${!address.isNullOrBlank()})")
             return
@@ -111,7 +111,7 @@ internal class PhoneMediaAudioWatchdog(private val context: Context) {
         handler = null
         watcher?.restore()
         watcher = null
-        val adapter = runCatching { context.systemServiceOrNull(BluetoothManager::class.java)?.adapter }.getOrNull()
+        val adapter = runCatching { context.systemServiceOrNull(BluetoothManager::class.java)?.adapter ?: android.bluetooth.BluetoothAdapter.getDefaultAdapter() }.getOrNull()
         proxy?.let { runCatching { adapter?.closeProfileProxy(BluetoothProfile.A2DP, it) } }
         proxy = null
         device = null
