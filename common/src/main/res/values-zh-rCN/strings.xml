@@ -672,4 +672,5 @@
     <string name="microphone_status_hint">若被占用，请在车机设置里关闭语音唤醒（嗨领克 / 小度小度），CarPlay 即可独占麦克风。</string>
     <string name="screen_corner_mask">屏幕四角圆角遮罩</string>
     <string name="screen_corner_mask_description">车机可视屏幕的开口是圆角的，满屏的 CarPlay 画面在四角会被车身边框裁掉。开启后在屏幕四角按相同弧度涂黑，让 CarPlay 画面正好贴合影屏开口。默认关闭；只有车机确实裁掉画面四角时才需要打开。</string>
+    <string name="settings_category_other">其他</string>
 </resources>

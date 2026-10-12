@@ -350,7 +350,7 @@ class DiPlayActivity : ComponentActivity() {
         content.addView(space(if (compact) 8 else 24))
         when (page) {
             "connection" -> connectionSetup(content)
-            "settings" -> settings(content)
+            "settings" -> settingsPage(content)
             "about" -> about(content)
             else -> home(content)
         }
@@ -499,6 +499,92 @@ class DiPlayActivity : ComponentActivity() {
         }
         setupError?.let { body.addView(label(it, 16, WARNING).apply { setPadding(0, dp(16), 0, 0) }) }
         content.addView(body)
+    }
+
+    /**
+     * Which settings category the left index has selected, and the section indices each category shows.
+     *
+     * The indices are the order `settings()` adds its sections in. Filtering by index - rather than gating
+     * the calls - cannot silently drop a section: every section is still built, and the filter only decides
+     * what is visible. Reordering the sections in `settings()` means updating these sets (docs/_digest/60).
+     */
+    private var settingsCategoryIndex = 0
+
+    private fun settingsCategoryLabels(): List<String> = listOf(
+        getString(R.string.connection),
+        getString(R.string.display_and_performance),
+        getString(R.string.audio_routing),
+        getString(R.string.carplay_controls),
+        getString(R.string.diagnostics),
+        getString(R.string.settings_category_other),
+        getString(R.string.about),
+    )
+
+    private fun settingsCategorySections(): List<Set<Int>> = listOf(
+        // connection: connection setup, automatic connection.
+        setOf(1, 3),
+        // display: display and performance, and the map on the instrument cluster.
+        setOf(4, 8),
+        // audio: audio routing.
+        setOf(6),
+        // controls: CarPlay controls (the gesture), and the car button inside CarPlay.
+        setOf(0, 5),
+        // diagnostics: diagnostics, permissions and connection help.
+        setOf(2, 9),
+        // other: everything the categories above do not name, e.g. location.
+        setOf(7),
+        // about: about, the public preview note, and the open-source credits.
+        setOf(10, 11, 12),
+    )
+
+    private fun applySettingsCategoryFilter(sections: LinearLayout) {
+        val categories = settingsCategorySections()
+        val visible = categories.getOrNull(settingsCategoryIndex) ?: return
+        // A section no category names stays visible everywhere: a new section can never be lost by forgetting
+        // to list it here, which is the failure mode an index-based filter would otherwise have.
+        val named = categories.flatten().toSet()
+        for (index in 0 until sections.childCount) {
+            val shown = index in visible || index !in named
+            sections.getChildAt(index).visibility = if (shown) View.VISIBLE else View.GONE
+        }
+    }
+
+    /**
+     * The settings page as the brand lays one out: the categories as an index on the left with a 3 dp bar on
+     * the selected entry, and the sections in one column on the right.
+     *
+     * The sections themselves are built by `settings()`, which is handed the right column as its container -
+     * so no call site inside it had to change, and the filter runs after it returns.
+     */
+    private fun settingsPage(content: LinearLayout) {
+        val nav = column().apply { setPadding(0, 0, dp(34), 0) }
+        val sections = column()
+        settingsCategoryLabels().forEachIndexed { index, title ->
+            val selected = index == settingsCategoryIndex
+            val item = row().apply { gravity = Gravity.CENTER_VERTICAL }
+            item.addView(
+                View(this).apply { setBackgroundColor(if (selected) TEXT else Color.TRANSPARENT) },
+                LinearLayout.LayoutParams(dp(3), dp(44)),
+            )
+            item.addView(
+                label(title, 16, if (selected) TEXT else MUTED, selected).apply { setPadding(dp(14), 0, 0, 0) },
+                LinearLayout.LayoutParams(0, dp(44), 1f),
+            )
+            item.setOnClickListener {
+                if (settingsCategoryIndex != index) {
+                    settingsCategoryIndex = index
+                    render()
+                }
+            }
+            nav.addView(item, LinearLayout.LayoutParams(-1, -2))
+        }
+        val page = row().apply { gravity = Gravity.TOP }
+        page.addView(nav, LinearLayout.LayoutParams(dp(300), -2))
+        page.addView(sections, LinearLayout.LayoutParams(0, -2, 1f))
+        content.addView(page)
+        settings(sections)
+        // After the sections are attached, so the filter sees every child whatever the category order is.
+        page.post { applySettingsCategoryFilter(sections) }
     }
 
     private fun settings(content: LinearLayout) {
