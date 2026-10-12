@@ -467,20 +467,21 @@ class NcmUsbBridge internal constructor(
                 )
             }
             val layout = LegacyNcmDescriptors.ncm(rawDescriptors, configurationId)
-            val order = interfaceOrder(rawDescriptors, configurationId)
-            val controlIndex = order.indexOf(layout.control.id to 0)
-            val dataIndex = order.indexOf(layout.data.id to layout.data.alternate)
-            if (controlIndex < 0 || dataIndex < 0 ||
-                controlIndex >= device.interfaceCount || dataIndex >= device.interfaceCount
-            ) {
+            val indices = LegacyNcmSelection.locate(
+                LegacyNcmSelection.interfaceOrder(rawDescriptors, configurationId),
+                layout,
+            ) ?: throw IphoneUsbException.Protocol(
+                "The active iPhone USB configuration does not expose the parsed NCM interfaces",
+            )
+            if (indices.control >= device.interfaceCount || indices.data >= device.interfaceCount) {
                 throw IphoneUsbException.Protocol(
                     "The active iPhone USB configuration does not expose the parsed NCM interfaces",
                 )
             }
             val claimed = ArrayList<UsbInterface>(2)
             try {
-                val control = device.getInterface(controlIndex)
-                val data = device.getInterface(dataIndex)
+                val control = device.getInterface(indices.control)
+                val data = device.getInterface(indices.data)
                 if (!connection.claimInterface(control, true)) {
                     throw IphoneUsbException.DeviceUnavailable(
                         "Android could not claim the NCM control interface ${layout.control.id}",
@@ -546,26 +547,6 @@ class NcmUsbBridge internal constructor(
                 if (error is IphoneUsbException) throw error
                 throw IphoneUsbException.DeviceUnavailable("userspace NCM open failed", error)
             }
-        }
-
-        /** Interface (number, alternate) pairs of [configurationId], in descriptor order. */
-        private fun interfaceOrder(raw: ByteArray, configurationId: Int): List<Pair<Int, Int>> {
-            val order = ArrayList<Pair<Int, Int>>(4)
-            var offset = 0
-            var inConfiguration = false
-            while (offset + 2 <= raw.size) {
-                val length = raw[offset].toInt() and 0xff
-                val type = raw[offset + 1].toInt() and 0xff
-                if (length < 2 || offset + length > raw.size) break
-                when {
-                    type == USB_CONFIGURATION_DESCRIPTOR_TYPE && length >= 9 ->
-                        inConfiguration = (raw[offset + 5].toInt() and 0xff) == configurationId
-                    inConfiguration && type == USB_INTERFACE_DESCRIPTOR_TYPE && length >= 9 ->
-                        order.add((raw[offset + 2].toInt() and 0xff) to (raw[offset + 3].toInt() and 0xff))
-                }
-                offset += length
-            }
-            return order
         }
 
         private fun bulkEndpoint(usbInterface: UsbInterface, direction: Int): UsbEndpoint? =
