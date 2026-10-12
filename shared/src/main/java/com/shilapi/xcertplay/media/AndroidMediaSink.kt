@@ -519,7 +519,7 @@ private class VideoDecoder(
     // The main screen keeps the historical log format; other screens are labelled.
     private val stats = VideoStats(statsLabel ?: if (streamType == 110) "" else " stream=$streamType")
     private val thread = Thread({
-        android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_DISPLAY)
+        android.os.Process.setThreadPriority(com.shilapi.xcertplay.airplay.VideoThreadPriority.current())
         run()
     }, "carplay-video").apply { isDaemon = true; start() }
 

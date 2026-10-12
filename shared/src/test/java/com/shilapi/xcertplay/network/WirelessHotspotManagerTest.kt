@@ -76,4 +76,41 @@ class WirelessHotspotManagerTest {
             ),
         )
     }
+
+    @Test
+    fun theDriverReadingOnlyFillsInAChannelTheAndroidApisCouldNotObserve() {
+        // Nothing else knows the channel: the AP's own driver does.
+        assertEquals(
+            149,
+            observedManualHotspotChannel(
+                apChannel = 0,
+                connectionFrequencyMHz = null,
+                scanFrequencyMHz = null,
+                apFrequencyMHz = null,
+                driverFrequencyMHz = 5745,
+            ),
+        )
+        // An Android observation still wins, so wiring the driver in cannot change today's value.
+        assertEquals(
+            36,
+            observedManualHotspotChannel(
+                apChannel = 36,
+                connectionFrequencyMHz = null,
+                scanFrequencyMHz = null,
+                apFrequencyMHz = null,
+                driverFrequencyMHz = 5745,
+            ),
+        )
+        // An unusable driver reading still reports "unknown" rather than a guessed channel.
+        assertEquals(
+            0,
+            observedManualHotspotChannel(
+                apChannel = 0,
+                connectionFrequencyMHz = null,
+                scanFrequencyMHz = null,
+                apFrequencyMHz = null,
+                driverFrequencyMHz = 1234,
+            ),
+        )
+    }
 }

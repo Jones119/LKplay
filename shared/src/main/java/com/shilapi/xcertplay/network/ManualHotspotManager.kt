@@ -106,23 +106,32 @@ class ManualHotspotManager(
                 ?: HotspotInterfaceBssid.read(selected.name))
         val connectionFrequency = frequencyFromConnectionInfo()
         val scanFrequency = frequencyFromScanResult(localInterface)
+        // The AP's own driver is the most direct evidence of the channel it runs on, but read-only
+        // and last: the reader is inert until the native module is built (shared/build.gradle), and
+        // an unknown channel must stay unknown (never echo the requested one back to the iPhone).
+        val driverReading = LegacyHotspotRadio.read(localInterface.name, bandLabelFor(expectedBand))
         val channel = observedManualHotspotChannel(
             apChannel = apConfiguration?.channel ?: 0,
             connectionFrequencyMHz = connectionFrequency,
             scanFrequencyMHz = scanFrequency,
             apFrequencyMHz = apConfiguration?.frequencyMHz,
+            driverFrequencyMHz = driverReading.frequencyMHz,
         )
         val frequencyMHz = when {
             apConfiguration?.frequencyMHz != null -> apConfiguration.frequencyMHz
             connectionFrequency != null -> connectionFrequency
             scanFrequency != null -> scanFrequency
+            driverReading.frequencyMHz != null -> driverReading.frequencyMHz
             else -> null
         }
         val security = apConfiguration?.security ?: expectedSecurity
+        val apBssid = accessPointAddress(localInterface.hardwareAddress)
         onDiagnostic("Manual hotspot configReadable=${apConfiguration != null} " +
             "security=$security channelKnown=${channel > 0} " +
             "hardwareAddressKnown=${localInterface.hardwareAddress != null} iface=${localInterface.name} " +
-            "family=${if (localInterface.hostAddress is Inet6Address) "IPv6" else "IPv4"}")
+            "family=${if (localInterface.hostAddress is Inet6Address) "IPv6" else "IPv4"} " +
+            "apBssidKnown=${apBssid != null} driverFrequencyMHz=${driverReading.frequencyMHz ?: "unknown"} " +
+            "driverError=${driverReading.error ?: "none"}")
         if (security != Iap2WirelessSecurity.NONE && passphrase.isEmpty()) {
             throw WirelessStartupException(WirelessStartupFailure.HOTSPOT_CONFIGURATION, "Manual hotspot is secured but no passphrase was provided")
         }
@@ -152,7 +161,20 @@ class ManualHotspotManager(
                     frequencyMHz?.let(::bandLabel) ?: observedBandLabel ?: "Auto"
             },
             backend = WirelessHotspotBackend.MANUAL_HOTSPOT,
+            accessPointBssid = apBssid,
         )
+    }
+
+    /**
+     * The band the reservation asked for, or null when it left the choice to the firmware.
+     *
+     * The legacy driver reader reports a bare channel number on some drivers, which is ambiguous
+     * between bands, so it is only allowed to name a channel when the reservation pinned the band.
+     */
+    private fun bandLabelFor(expectedBand: ManualHotspotBand): String? = when (expectedBand) {
+        ManualHotspotBand.GHZ_2_4 -> "2.4 GHz"
+        ManualHotspotBand.GHZ_5 -> "5 GHz"
+        ManualHotspotBand.AUTO -> null
     }
 
     override fun validateReady() {

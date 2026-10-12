@@ -11,10 +11,20 @@ internal object P2pOwnership {
         return "DIRECT-dp" + digest.take(6).joinToString("") { "%02x".format(it.toInt() and 255) } + "-"
     }
 
-    fun canReclaim(isOwner: Boolean, ssid: String?, recorded: String?, prefix: String): Boolean =
+    /**
+     * Whether an existing group is ours to reclaim.
+     *
+     * [legacyGroupRequested] covers the Android 4.x path: the two-argument `createGroup` names the
+     * group itself, so the SSID we asked for is not the SSID that exists, and this firmware leaves
+     * the resulting group behind. Recording the request before creating it means a group that
+     * outlives a crash mid-create is still recognised as ours instead of forcing a reset (the Geely
+     * H52 firmware review documents the persistent-group behaviour).
+     */
+    fun canReclaim(isOwner: Boolean, ssid: String?, recorded: String?, prefix: String,
+        legacyGroupRequested: Boolean = false): Boolean =
         isOwner && !ssid.isNullOrBlank() &&
-            (ssid == recorded || (ssid.startsWith(prefix) &&
-                ssid.removePrefix(prefix).matches(Regex("[A-Za-z0-9]{4}"))))
+            (ssid == recorded || legacyGroupRequested ||
+                (ssid.startsWith(prefix) && ssid.removePrefix(prefix).matches(Regex("[A-Za-z0-9]{4}"))))
 }
 
 class P2pResetRequiredException : IOException("An existing Wi-Fi Direct connection needs a reset")

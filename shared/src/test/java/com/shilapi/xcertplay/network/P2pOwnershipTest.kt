@@ -22,4 +22,17 @@ class P2pOwnershipTest {
         assertFalse(P2pOwnership.canReclaim(true, prefix + "", null, prefix))
         assertFalse(P2pOwnership.canReclaim(true, prefix + "aB23-extra", null, prefix))
     }
+
+    @Test fun aGroupWeAskedTheFrameworkToNameIsStillOursAfterACrashMiddleCreate() {
+        val prefix = P2pOwnership.prefix("app", "id")
+        // Android 4.x createGroup names the group itself, so "owned_ssid" cannot name it before the
+        // call returns; the recorded request is what makes the leftover group recognisable.
+        assertTrue(P2pOwnership.canReclaim(true, "DIRECT-8f-Android_1234", null, prefix,
+            legacyGroupRequested = true))
+        // Still never a foreign group, and never a nameless one.
+        assertFalse(P2pOwnership.canReclaim(false, "DIRECT-8f-Android_1234", null, prefix,
+            legacyGroupRequested = true))
+        assertFalse(P2pOwnership.canReclaim(true, null, null, prefix, legacyGroupRequested = true))
+        assertFalse(P2pOwnership.canReclaim(true, "  ", null, prefix, legacyGroupRequested = true))
+    }
 }

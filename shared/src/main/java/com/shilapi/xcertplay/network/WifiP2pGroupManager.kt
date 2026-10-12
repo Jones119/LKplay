@@ -166,9 +166,13 @@ class WifiP2pGroupManager(
             diagnostic("Wi-Fi P2P existingGroup=${existing != null}")
             if (existing != null) {
                 if (!P2pOwnership.canReclaim(existing.isGroupOwner, existing.networkName,
-                        ownership.getString("owned_ssid", null), ssidPrefix)) {
+                        ownership.getString("owned_ssid", null), ssidPrefix,
+                        ownership.getBoolean("owned_legacy_request", false))) {
                     throw P2pResetRequiredException()
                 }
+                // The group is ours again; the request marker is only for a group we created and
+                // never named (crash or detach between createGroup and the record below).
+                ownership.edit().remove("owned_legacy_request").apply()
                 diagnostic("Wi-Fi P2P reclaiming retained owned group")
                 removeGroupBlocking(p2pChannel, existing.networkName)
                 val removalDeadline = minOf(deadlineNanos, deadlineAfter(REMOVE_GROUP_TIMEOUT_MILLIS))
@@ -208,6 +212,14 @@ class WifiP2pGroupManager(
                     }
                     if (config != null && !ownership.edit().putString("owned_ssid", credentials.ssid).commit()) {
                         throw IOException("Could not record Wi-Fi P2P group ownership")
+                    }
+                    // The legacy two-argument createGroup lets the framework name the group, so the
+                    // record above cannot name it. Mark the request instead: this firmware keeps the
+                    // group after the app dies, and without the marker the next start would refuse to
+                    // reclaim a group we made (P2pOwnership.canReclaim).
+                    if (legacyChannels &&
+                        !ownership.edit().putBoolean("owned_legacy_request", true).commit()) {
+                        throw IOException("Could not record the legacy Wi-Fi P2P group request")
                     }
                     val request = CreateRequest()
                     // Keep the requested SSID from the value we supplied. Some Android 10
@@ -250,7 +262,8 @@ class WifiP2pGroupManager(
                     timeoutMillis = timeoutMillis,
                 )
             }
-            if (!ownership.edit().putString("owned_ssid", group.ssid).commit()) {
+            if (!ownership.edit().putString("owned_ssid", group.ssid)
+                    .remove("owned_legacy_request").commit()) {
                 throw IOException("Could not record Wi-Fi P2P group ownership")
             }
             diagnostic("Wi-Fi P2P ready mode=${creation.mode} band=${group.bandLabel} channel=${group.channel} " +

@@ -97,18 +97,24 @@ internal fun legacyHotspotBandToSoftApBand(band: Int?): Int? = when (band) {
 }
 
 /**
- * Returns only a channel observed from Android. An unknown channel must stay unknown instead of
- * echoing the user's desired channel back to the iPhone in 0x5703.
+ * Returns only a channel observed from Android or from the AP's own driver. An unknown channel must
+ * stay unknown instead of echoing the user's desired channel back to the iPhone in 0x5703.
+ *
+ * [driverFrequencyMHz] is the read-only Wireless Extensions reading (`LegacyHotspotRadio`). It is
+ * consulted last so that every channel the Android APIs already produce keeps its current value, and
+ * it can only add information where the code would otherwise report "unknown" (0).
  */
 internal fun observedManualHotspotChannel(
     apChannel: Int,
     connectionFrequencyMHz: Int?,
     scanFrequencyMHz: Int?,
     apFrequencyMHz: Int?,
+    driverFrequencyMHz: Int? = null,
 ): Int {
     if (apChannel > 0) return apChannel
     connectionFrequencyMHz?.let(::wifiFrequencyMhzToChannel)?.let { return it }
     scanFrequencyMHz?.let(::wifiFrequencyMhzToChannel)?.let { return it }
     apFrequencyMHz?.let(::wifiFrequencyMhzToChannel)?.let { return it }
+    driverFrequencyMHz?.let(::wifiFrequencyMhzToChannel)?.let { return it }
     return 0
 }

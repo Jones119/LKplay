@@ -59,7 +59,10 @@ class ScreenStream(private val key: ByteArray, private val onDiagnostic: (String
         bound.bind(InetSocketAddress(serverBindAddress(), 0))
         server = bound
         thread = Thread({
-            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_DISPLAY)
+            // Geely H52's Android 4.3 port runs its video receive/decode threads at -8 rather than
+            // the -4 used here; the car session A/Bs whether the extra step helps on this SoC
+            // (diplay.video_priority below reverts it without a rebuild). Audio stays at -19.
+            android.os.Process.setThreadPriority(VideoThreadPriority.current())
             accept(bound)
         }, "airplay-screen").apply { isDaemon = true; start() }
         return bound.localPort
