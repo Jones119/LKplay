@@ -315,6 +315,11 @@ class DiPlayActivity : ComponentActivity() {
             ImageView(this).apply {
                 setImageResource(R.drawable.ic_carplay)
                 contentDescription = getString(R.string.carplay)
+                // Monochrome, like the brand's own mark: the launcher icon's green would be the only colour
+                // on the page and would fight the token set (docs/_digest/60).
+                colorFilter = android.graphics.ColorMatrixColorFilter(
+                    android.graphics.ColorMatrix().apply { setSaturation(0f) },
+                )
             },
             LinearLayout.LayoutParams(if (compact) dp(24) else dp(36), if (compact) dp(24) else dp(36)),
         )
@@ -433,14 +438,14 @@ class DiPlayActivity : ComponentActivity() {
         }.apply { visibility = View.GONE }
         card.addView(disconnectButton, matchButton(10, 56))
         val right = column().apply { gravity = Gravity.CENTER_HORIZONTAL }
-        val logo = ImageView(this).apply {
-            setImageResource(R.drawable.ic_carplay)
+        // The waiting screen's artwork: drawn in code rather than shipped as a photograph, so it carries the
+        // same monochrome register as the rest of the system (docs/_digest/60).
+        val artwork = DiPlayConnectVisual(this).apply {
             contentDescription = getString(R.string.carplay_icon)
-            scaleType = ImageView.ScaleType.FIT_CENTER
         }
         val branding = column().apply {
             gravity = Gravity.CENTER
-            addView(logo, LinearLayout.LayoutParams(dp(96), dp(96)))
+            addView(artwork, LinearLayout.LayoutParams(-1, dp(340)))
         }
         right.addView(button(getString(R.string.connect_with_usb), false) { connect(false) }, matchButton())
         right.addView(label(getString(R.string.plug_your_iphone_into_a_usb_data_port_allow_carplay_when_y), 14, MUTED).apply { gravity = Gravity.CENTER; setPadding(dp(8), dp(10), dp(8), dp(24)) })
@@ -2194,7 +2199,8 @@ class DiPlayActivity : ComponentActivity() {
         setPadding(dp(16), 0, dp(16), 0); minHeight = dp(56); if (Build.VERSION.SDK_INT >= 21) stateListAnimator = null
         setOnClickListener { click() }
     }
-    private fun rounded(color: Int, stroke: Int) = GradientDrawable().apply { setColor(color); cornerRadius = dp(20).toFloat(); setStroke(dp(1), stroke) }
+    // 4 dp: squared enough to read as technical, which is the register the brand's graphics live in.
+    private fun rounded(color: Int, stroke: Int) = GradientDrawable().apply { setColor(color); cornerRadius = dp(4).toFloat(); setStroke(dp(1), stroke) }
     // CS11: RippleDrawable 是 API21+；4.4 回退为静态圆角底
     private fun ripple(content: android.graphics.drawable.Drawable): android.graphics.drawable.Drawable =
         if (Build.VERSION.SDK_INT >= 21) android.graphics.drawable.RippleDrawable(ColorStateList.valueOf(0x336F9FD9), content, null) else content
@@ -2205,14 +2211,17 @@ class DiPlayActivity : ComponentActivity() {
     companion object {
         private const val VEHICLE_VALIDATION_RETRY_MILLIS = 500L
         private const val ADB_KEY_SAVE_WAIT_MILLIS = 500L
-        private val BG = Color.rgb(12, 17, 27)
-        private val SURFACE = Color.rgb(21, 30, 44)
+        // Lynk & Co tokens (docs/_digest/60): pure black page, warm near-black surfaces, 1 px hairlines and a
+        // white inverted primary button. Sampled from the brand's own wordmark (pure #000000) and site
+        // imagery (#10100E, #141311); colour carries no meaning here, weight and spacing do.
+        private val BG = Color.rgb(0x00, 0x00, 0x00)
+        private val SURFACE = Color.rgb(0x10, 0x10, 0x10)
         // One step lighter than a card, so a button reads as a button even where its 1 px border is faint.
-        private val BUTTON = Color.rgb(31, 43, 61)
-        private val BORDER = Color.rgb(42, 56, 75)
-        private val ACCENT = Color.rgb(166, 200, 255)
-        private val TEXT = Color.rgb(241, 245, 252)
-        private val MUTED = Color.rgb(168, 182, 202)
-        private val WARNING = Color.rgb(255, 196, 128)
+        private val BUTTON = Color.rgb(0x1A, 0x19, 0x17)
+        private val BORDER = Color.rgb(0x2A, 0x29, 0x26)
+        private val ACCENT = Color.rgb(0xFF, 0xFF, 0xFF)
+        private val TEXT = Color.rgb(0xFF, 0xFF, 0xFF)
+        private val MUTED = Color.rgb(0x9A, 0x9A, 0x96)
+        private val WARNING = Color.rgb(0xE0, 0xA6, 0x4A)
     }
 }
