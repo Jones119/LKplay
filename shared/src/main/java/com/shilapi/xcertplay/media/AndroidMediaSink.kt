@@ -496,7 +496,11 @@ private class VideoDecoder(
     private val report: (String) -> Unit,
     statsLabel: String? = null,
 ) : Closeable {
-    private val queue = VideoDecodeQueue()
+    private val backlogMode = VideoBacklogPolicy.current()
+    private val stallRecoveryNs = VideoBacklogPolicy.stallRecoveryNs(backlogMode)
+    private val queue = VideoDecodeQueue(
+        VideoBacklogPolicy.maxFrames(backlogMode), VideoBacklogPolicy.maxBytes(backlogMode),
+    )
     @Volatile private var running = true
     @Volatile private var decoder: MediaCodec? = null
     private var outputSurface: Surface? = surface
@@ -568,10 +572,10 @@ private class VideoDecoder(
                             // CS11: at 50 fps the old discard+recreate recovery fired every ~1.5 s and
                             // visibly stuttered. Feed every frame and let drainOutput drop stale displays
                             // instead; only a real one-second stall recreates the decoder.
-                            if (System.nanoTime() - job.receivedNs > STALL_RECOVERY_NS) {
+                            if (System.nanoTime() - job.receivedNs > stallRecoveryNs) {
                                 job.release()
                                 queue.discardFrames()
-                                recover("video backlog exceeded 1 s")
+                                recover("video backlog exceeded ${stallRecoveryNs / 1_000_000} ms")
                             } else feed(job)
                         }
                         is VideoJob.SurfaceChanged -> changeSurface(job.surface)
@@ -953,7 +957,8 @@ private class VideoDecoder(
         const val TAG = "xcertplay-usb"
         const val MAX_INPUT_SIZE = 8 * 1024 * 1024
         const val INPUT_TIMEOUT_US = 10_000L
-        const val STALL_RECOVERY_NS = 1_000_000_000L
+        // The stall threshold moved to VideoBacklogPolicy.AUTO_STALL_RECOVERY_NS, so the shipped
+        // value and the `debug.diplay.video_backlog` experiment cannot drift apart.
         const val RENDER_MAX_AGE_US = 250_000L
         /** How long a freshly configured decoder may render nothing before it is rebuilt (CS11). */
         const val NO_OUTPUT_GRACE_NS = 700_000_000L
