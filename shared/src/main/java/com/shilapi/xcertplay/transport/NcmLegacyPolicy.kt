@@ -4,33 +4,78 @@ import android.util.Log
 
 /** Which wired data path this head unit may use. */
 enum class NcmLegacyMode {
-    /** Try the API-19 userspace bridge first and fall back to the kernel netdev when it cannot. */
+    /**
+     * Use the userspace NCM bridge; while it cannot carry a session yet, the legacy kernel netdev does
+     * (a **temporary** fallback - see the deprecation note on [NcmLegacyPolicy]).
+     */
     AUTO,
 
-    /** Never use the kernel netdev: the userspace bridge must work or the wired link fails. */
+    /** Userspace bridge only - no kernel fallback. A diagnostic mode: it fails loudly instead. */
     FORCE,
 
-    /** Never attempt the userspace bridge - the shipped behaviour before this route existed. */
+    /** Legacy kernel netdev + root channel. Hidden debug fallback only; no product surface. */
     KERNEL,
 }
 
+/** Whether the userspace NCM bridge can carry a session at all, and what it would be missing. */
+enum class UserspaceNcmReadiness {
+    READY,
+
+    /** The native altsetting call is not in this APK (needs an NDK build, docs/_digest/58 §5 item 4). */
+    MISSING_NATIVE,
+
+    /** The userspace TCP/IP stack does not exist yet (docs/_digest/58 §7: lwIP). */
+    MISSING_STACK,
+}
+
+/** What the wired bring-up should drive, and the line to log when it is not the userspace bridge. */
+internal data class WiredTransportDecision(val userspace: Boolean, val reason: String)
+
 /**
- * `debug.diplay.ncm_legacy` - whether the wired link may be carried by the userspace NCM bridge.
+ * The userspace NCM route's two prerequisites, kept in one place so the selection logic reads from a
+ * single verdict instead of guessing.
+ */
+internal object UserspaceNcmTransport {
+    /**
+     * This ROM has no TUN (docs/_digest/58 §1), so the userspace bridge can only carry AirPlay once it
+     * owns a TCP/IP stack. Stage 1 vendors lwIP for that (docs/_digest/58 §7) and is **in progress**
+     * (the NDK install was approved 2026-10-13); flipping this to true starts preferring the userspace
+     * transport for real and retires the kernel fallback.
+     */
+    const val stackImplemented = false
+
+    fun readiness(nativeAvailable: Boolean): UserspaceNcmReadiness = when {
+        !stackImplemented -> UserspaceNcmReadiness.MISSING_STACK
+        !nativeAvailable -> UserspaceNcmReadiness.MISSING_NATIVE
+        else -> UserspaceNcmReadiness.READY
+    }
+
+    fun describe(readiness: UserspaceNcmReadiness): String = when (readiness) {
+        UserspaceNcmReadiness.READY -> "userspace NCM bridge ready"
+        UserspaceNcmReadiness.MISSING_NATIVE ->
+            "the userspace NCM bridge needs the legacy_usb native library (NDK build)"
+        UserspaceNcmReadiness.MISSING_STACK ->
+            "the userspace NCM bridge has no TCP/IP stack yet (this ROM has no TUN; docs/_digest/58 §7)"
+    }
+}
+
+/**
+ * Which wired transport this head unit uses.
  *
- * The userspace bridge exists because the kernel path needs a root channel that evaporates on every
- * reboot (`tools/cs11_root_fire.sh`, docs/_digest/57 §7), while a userspace bridge claims the NCM
- * interfaces at app level and therefore survives a restart. It cannot carry traffic until it also
- * brings its own TCP/IP stack, so during the port the kernel netdev stays the default: [AUTO] tries
- * the userspace bridge and falls back, [KERNEL] reproduces the shipped behaviour for an A/B, and
- * [FORCE] is for the car session where the userspace path must stand or fall on its own.
+ * **Product decision (2026-10-13)**: the kernel `cdc_ncm` netdev needs a root channel, and that channel
+ * needs adb (the fire is `adb-ec ... ppp`, and without adbd on TCP it fails with "device not found" -
+ * measured on the car, see docs/_digest/58 §9). A transport that needs adb and root is not shippable, so
+ * the userspace NCM bridge is the product path and the kernel netdev is kept **only as a hidden debug
+ * fallback** (`debug.diplay.ncm_legacy=kernel`) for car debugging and A/B while the userspace stack is
+ * built. It is deleted with the first build that can carry traffic through the userspace bridge.
+ *
+ * There is deliberately no Settings switch: one shipping transport needs no choice.
  *
  * ```
- * adb shell setprop debug.diplay.ncm_legacy force   # userspace bridge only
- * adb shell setprop debug.diplay.ncm_legacy kernel  # kernel netdev only (shipped)
- * adb shell setprop debug.diplay.ncm_legacy ''      # AUTO
+ * adb shell setprop debug.diplay.ncm_legacy force   # userspace only (diagnostic)
+ * adb shell setprop debug.diplay.ncm_legacy kernel  # legacy kernel netdev (debug fallback)
+ * adb shell setprop debug.diplay.ncm_legacy ''      # userspace preferred (default)
  * ```
- *
- * Read once per wired bring-up, so it takes effect on the next session.
  */
 internal object NcmLegacyPolicy {
     private const val TAG = "xcertplay-usb"
@@ -60,4 +105,37 @@ internal object NcmLegacyPolicy {
         val get = Class.forName("android.os.SystemProperties").getMethod("get", String::class.java)
         get.invoke(null, PROPERTY) as? String
     }.getOrNull()
+}
+
+/**
+ * Which transport the wired bring-up should drive.
+ *
+ * API 21+ already runs the userspace NCM bridge (raw USB + the platform's own network stack through
+ * the VpnService TUN), so it is userspace there for the same reason it is preferred here. On API 19
+ * the preference is honoured as soon as [UserspaceNcmTransport.readiness] says READY; until then the
+ * kernel netdev carries the link, and the reason is logged rather than guessed.
+ */
+internal fun wiredTransportDecision(
+    sdkInt: Int,
+    mode: NcmLegacyMode,
+    readiness: UserspaceNcmReadiness,
+): WiredTransportDecision = when {
+    sdkInt >= 21 -> WiredTransportDecision(true, "wired opening raw-USB NCM bridge")
+    !NcmLegacyPolicy.allowsUserspace(mode) -> WiredTransportDecision(
+        false,
+        "CS11: legacy kernel netdev selected by the debug switch (docs/_digest/58 §9 deprecation note)",
+    )
+    readiness == UserspaceNcmReadiness.READY -> WiredTransportDecision(
+        true,
+        "wired opening the API-19 userspace NCM bridge",
+    )
+    mode == NcmLegacyMode.FORCE -> WiredTransportDecision(
+        false,
+        "CS11: userspace NCM bridge forced but unavailable: ${UserspaceNcmTransport.describe(readiness)}",
+    )
+    else -> WiredTransportDecision(
+        false,
+        "CS11: userspace NCM bridge preferred but unavailable (${UserspaceNcmTransport.describe(readiness)}); " +
+            "using the kernel netdev instead",
+    )
 }

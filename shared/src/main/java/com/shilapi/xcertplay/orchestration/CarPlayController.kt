@@ -83,6 +83,8 @@ import com.shilapi.xcertplay.transport.LegacyNcmDescriptors
 import com.shilapi.xcertplay.transport.LegacyUsbNative
 import com.shilapi.xcertplay.transport.NcmLegacyMode
 import com.shilapi.xcertplay.transport.NcmLegacyPolicy
+import com.shilapi.xcertplay.transport.UserspaceNcmTransport
+import com.shilapi.xcertplay.transport.wiredTransportDecision
 import com.shilapi.xcertplay.transport.NcmUsbBridge
 import java.io.Closeable
 import java.io.IOException
@@ -1623,17 +1625,21 @@ class CarPlayController(
                         // superseded by the kernel netdev in 5b0f5774, so the API-19 half of `openNcm`
                         // is gone and this is now the single explicit decision; see docs/_digest/49.
                         val mode = NcmLegacyPolicy.current()
-                        val decision = rawNcmDecision(
-                            Build.VERSION.SDK_INT, mode, LegacyUsbNative.available,
+                        val decision = wiredTransportDecision(
+                            Build.VERSION.SDK_INT,
+                            mode,
+                            UserspaceNcmTransport.readiness(LegacyUsbNative.available),
                         )
                         if (mode == NcmLegacyMode.FORCE && Build.VERSION.SDK_INT < 21) {
+                            // FORCE is the diagnostic mode: say exactly what is missing instead of
+                            // quietly falling back to the kernel netdev.
                             probeUserspaceNcm(device)
                         }
-                        val ncm = if (decision.usesKernelNetdevOnly) {
+                        val ncm = if (decision.userspace && Build.VERSION.SDK_INT >= 21) {
+                            openNcm(device)
+                        } else {
                             debugLog(decision.reason)
                             null
-                        } else {
-                            openNcm(device)
                         }
                         runStack(result.session, ncm)
                     } catch (error: Throwable) {
@@ -1646,45 +1652,12 @@ class CarPlayController(
         }
     }
 
-    /** Whether the raw-USB NCM bridge may be attempted, plus the diagnostic to log when it is not. */
-    internal data class RawNcmDecision(val usesKernelNetdevOnly: Boolean, val reason: String)
-
-    /**
-     * CS11: split out of [openDataPaths] so a JVM test can prove the API-19 path is decided by the
-     * level alone — the old form (`SDK_INT < 21 && Cs11NetdevBootstrap.supported`, whose right-hand
-     * side is itself `SDK_INT < 21`) is what hid the dead branch that lint reported as
-     * `ObsoleteSdkInt`.
-     */
-    internal fun rawNcmDecision(sdkInt: Int): RawNcmDecision =
-        rawNcmDecision(sdkInt, NcmLegacyMode.AUTO, nativeAvailable = true)
-
-    /**
-     * The same decision with the userspace route's two extra inputs: the `debug.diplay.ncm_legacy`
-     * mode and whether the native altsetting library is in this APK.
-     *
-     * On API 19 the kernel netdev still carries the traffic even in [NcmLegacyMode.FORCE], because the
-     * userspace bridge cannot move AirPlay until it owns a TCP/IP stack of its own (this ROM has no TUN,
-     * docs/_digest/58 §1); what FORCE adds today is the USB-side probe below.
-     */
-    internal fun rawNcmDecision(
-        sdkInt: Int,
-        mode: NcmLegacyMode,
-        nativeAvailable: Boolean,
-    ): RawNcmDecision = when {
-        sdkInt >= 21 -> RawNcmDecision(false, "wired opening raw-USB NCM bridge")
-        mode == NcmLegacyMode.FORCE && nativeAvailable -> RawNcmDecision(
-            true,
-            "CS11: userspace NCM probe enabled; the kernel netdev still carries traffic",
-        )
-        else -> RawNcmDecision(true, "CS11: kernel netdev transport selected; skipping raw NCM bridge")
-    }
-
     /**
      * Exercises the API-19 userspace bring-up end to end - descriptor parse, claims, native altsetting,
      * NCM negotiation - and releases it again. It is deliberately **not** the transport yet: AirPlay
      * needs a TCP/IP stack that does not exist on this ROM (no TUN), and holding the NCM interfaces
-     * would take them away from the kernel driver that currently works. Opt in with
-     * `debug.diplay.ncm_legacy=force` for one ignition window (docs/_digest/58 §3 stage 1).
+     * would take them away from the kernel driver that currently works. `debug.diplay.ncm_legacy=force`
+     * (or the "userspace only" setting) runs it for one ignition window (docs/_digest/58 §3 stage 1).
      */
     private fun probeUserspaceNcm(device: UsbDevice) {
         val connection = requireUsbManager().openDevice(device)

@@ -44,4 +44,13 @@ class NcmLegacyPolicyTest {
         assertFalse(NcmLegacyPolicy.allowsKernelFallback(NcmLegacyMode.FORCE))
         assertTrue(NcmLegacyPolicy.allowsKernelFallback(NcmLegacyMode.KERNEL))
     }
+
+    @Test
+    fun anUnsetOrBlankPropertyMeansUserspacePreferred() {
+        // There is no user setting to consult: the product has one transport, and the property is a
+        // debug override only (docs/_digest/58 §9).
+        for (value in listOf(null, "", "   ", "auto", "true")) {
+            assertEquals(NcmLegacyMode.AUTO, NcmLegacyPolicy.parse(value))
+        }
+    }
 }
