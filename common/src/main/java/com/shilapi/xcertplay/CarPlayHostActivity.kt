@@ -267,6 +267,10 @@ class CarPlayHostActivity : ComponentActivity() {
     private var statusView: TextView? = null
     private var statusScrollView: ScrollView? = null
     private var stageStatusView: TextView? = null
+    /** The connecting screen's stage list, newest last, so bring-up progress is visible and loggable. */
+    private val recentStages = java.util.ArrayDeque<String>()
+    private var stageListView: LinearLayout? = null
+    private val recentStageLimit = 5
     private var resolutionValueView: TextView? = null
     private var resolutionPreviewView: TextView? = null
     private var hotspotStatusView: TextView? = null
@@ -1064,28 +1068,58 @@ class CarPlayHostActivity : ComponentActivity() {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
         }
+        // Kept so paintWaitingScreen and the callers below keep their references, but no longer shown: the
+        // screen is signed with a block and a wordmark rather than a coloured app icon (docs/_digest/60).
         val icon = ImageView(this).apply {
             setImageResource(R.drawable.ic_carplay)
             contentDescription = getString(R.string.carplay)
         }
-        panel.addView(icon, LinearLayout.LayoutParams(dp(88), dp(88)))
+        val lockup = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        lockup.addView(
+            View(this).apply { setBackgroundColor(WaitingScreenColors.of(darkMode).text) },
+            LinearLayout.LayoutParams(dp(10), dp(10)),
+        )
         val title = TextView(this).apply {
             text = getString(R.string.diplay)
-            gravity = Gravity.CENTER
             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            if (Build.VERSION.SDK_INT >= 21) letterSpacing = .34f
         }
-        panel.addView(title)
+        lockup.addView(title, LinearLayout.LayoutParams(-2, -2).apply { leftMargin = dp(14) })
+        lockup.addView(
+            TextView(this).apply {
+                text = "CARPLAY · CS11"
+                textSize = 13f
+                setTextColor(WaitingScreenColors.of(darkMode).secondary)
+                if (Build.VERSION.SDK_INT >= 21) letterSpacing = .16f
+            },
+            LinearLayout.LayoutParams(-2, -2).apply { leftMargin = dp(16) },
+        )
+        panel.addView(lockup)
+        panel.addView(
+            View(this).apply { setBackgroundColor(Color.rgb(0x2A, 0x29, 0x26)) },
+            LinearLayout.LayoutParams(-1, dp(1)).apply { topMargin = dp(18) },
+        )
+        // The stage as the page's headline, then the progress line, then the recent stages.
         val stage = TextView(this).apply {
             text = getString(R.string.getting_carplay_ready)
-            gravity = Gravity.CENTER
+            textSize = 34f
         }
-        panel.addView(stage)
+        panel.addView(stage, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(26) })
+        panel.addView(
+            DiPlayProgressBar(this),
+            LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(20) },
+        )
+        val stageList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        stageListView = stageList
+        panel.addView(stageList, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(18) })
         val instructions = TextView(this).apply {
             text = if (wirelessEnabled) getString(R.string.keep_your_iphone_nearby_with_bluetooth_and_wi_fi_on_allow)
                 else getString(R.string.use_a_usb_data_cable_and_unlock_your_iphone_allow_trust_an)
-            gravity = Gravity.CENTER
         }
-        panel.addView(instructions)
+        panel.addView(instructions, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(16) })
         val recovery = Button(this).apply {
             text = getString(R.string.reset_carplay_wi_fi)
             isAllCaps = false
@@ -1113,19 +1147,20 @@ class CarPlayHostActivity : ComponentActivity() {
         val back = Button(this).apply {
             text = getString(R.string.back_to_diplay)
             isAllCaps = false
-            setTextColor(Color.rgb(12, 17, 27))
+            // The same inverted primary the rest of the system uses, with the system's 4 dp corner.
+            setTextColor(Color.rgb(0x0A, 0x0A, 0x0A))
+            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
             background = GradientDrawable().apply {
-                setColor(Color.rgb(166, 200, 255))
-                cornerRadius = dp(20).toFloat()
+                setColor(Color.WHITE)
+                cornerRadius = dp(4).toFloat()
             }
             setOnClickListener { showDiPlayHome() }
         }
         panel.addView(back, LinearLayout.LayoutParams(dp(300), dp(64)))
         val gestureHint = TextView(this).apply {
             text = getString(R.string.open_diplay_settings_hint, gestureFingerCount)
-            gravity = Gravity.CENTER
         }
-        panel.addView(gestureHint)
+        panel.addView(gestureHint, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(14) })
         paintWaitingScreen = {
             val colors = WaitingScreenColors.of(darkMode)
             viewport.setBackgroundColor(colors.background)
@@ -4653,8 +4688,58 @@ class CarPlayHostActivity : ComponentActivity() {
 
     private fun setConnectionStage(message: String) {
         latestStage = message
-        stageStatusView?.text = friendlyStage(message)
+        val friendly = friendlyStage(message)
+        stageStatusView?.text = friendly
+        // The recent stages are the connecting screen's own list: it says how far the bring-up got, which is
+        // what a driver waiting at the screen - and a log read afterwards - needs (docs/_digest/60).
+        if (recentStages.isEmpty() || recentStages.last() != friendly) {
+            recentStages.addLast(friendly)
+            while (recentStages.size > recentStageLimit) recentStages.removeFirst()
+            renderRecentStages()
+        }
         updateDebugOverlays()
+    }
+
+    /** Draws [recentStages] the way the system lists things: an index, the text, and a hairline under it. */
+    private fun renderRecentStages() {
+        val list = stageListView ?: return
+        val colors = WaitingScreenColors.of(darkMode)
+        list.removeAllViews()
+        val entries = recentStages.toList()
+        entries.forEachIndexed { index, text ->
+            val current = index == entries.lastIndex
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(0, dp(12), 0, dp(12))
+            }
+            row.addView(
+                TextView(this).apply {
+                    this.text = "%02d".format(index + 1)
+                    textSize = 12f
+                    setTextColor(colors.secondary)
+                    if (Build.VERSION.SDK_INT >= 21) letterSpacing = .1f
+                },
+                LinearLayout.LayoutParams(dp(34), -2),
+            )
+            row.addView(
+                TextView(this).apply {
+                    this.text = text
+                    textSize = 17f
+                    setTextColor(if (current) colors.text else colors.secondary)
+                    typeface = Typeface.create(
+                        if (current) "sans-serif-medium" else "sans-serif",
+                        Typeface.NORMAL,
+                    )
+                },
+                LinearLayout.LayoutParams(0, -2, 1f),
+            )
+            list.addView(row, LinearLayout.LayoutParams(-1, -2))
+            list.addView(
+                View(this).apply { setBackgroundColor(Color.rgb(0x2A, 0x29, 0x26)) },
+                LinearLayout.LayoutParams(-1, dp(1)),
+            )
+        }
     }
 
     private fun updateDebugOverlays() {
