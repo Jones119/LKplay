@@ -1108,8 +1108,9 @@ class CarPlayHostActivity : ComponentActivity() {
             textSize = 34f
         }
         panel.addView(stage, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(26) })
+        val progress = DiPlayProgressBar(this)
         panel.addView(
-            DiPlayProgressBar(this),
+            progress,
             LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(20) },
         )
         val stageList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -1168,6 +1169,18 @@ class CarPlayHostActivity : ComponentActivity() {
             stage.setTextColor(colors.text)
             instructions.setTextColor(colors.secondary)
             gestureHint.setTextColor(colors.secondary)
+            // The progress line and the inverted primary follow the day/night palette as well; on the day side
+            // the white sweep was invisible and the button was white on light (docs/_digest/60).
+            progress.setBarColors(
+                colors.text,
+                if (darkMode) Color.rgb(0x2A, 0x29, 0x26) else Color.rgb(0xD8, 0xD7, 0xD4),
+            )
+            back.setTextColor(colors.background)
+            back.background = GradientDrawable().apply {
+                setColor(colors.text)
+                cornerRadius = dp(4).toFloat()
+            }
+            renderRecentStages()
         }
         paintWaitingScreen()
         viewport.addView(panel, FrameLayout.LayoutParams(-1, -2, Gravity.CENTER))

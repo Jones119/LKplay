@@ -27,6 +27,16 @@ class DiPlayProgressBar @JvmOverloads constructor(
     private var phase = 0f
     private var animator: ValueAnimator? = null
 
+    /**
+     * The sweep and its track follow the screen's day/night palette: a white sweep on the day side's warm
+     * off-white was invisible, which is how this looked on a real screen before the colours were wired in.
+     */
+    fun setBarColors(fill: Int, track: Int) {
+        fillPaint.color = fill
+        trackPaint.color = track
+        invalidate()
+    }
+
     private val thickness: Int
         get() = (2 * resources.displayMetrics.density).roundToInt().coerceAtLeast(2)
 
