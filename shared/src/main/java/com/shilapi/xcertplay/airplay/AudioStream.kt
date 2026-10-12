@@ -1,11 +1,11 @@
 package com.shilapi.xcertplay.airplay
 
+import com.shilapi.xcertplay.transport.DatagramNetwork
+import com.shilapi.xcertplay.transport.DatagramTransport
+import com.shilapi.xcertplay.transport.KernelDatagramNetwork
 import java.io.Closeable
 import java.io.IOException
-import java.net.DatagramPacket
-import java.net.DatagramSocket
 import java.net.InetAddress
-import java.net.InetSocketAddress
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -30,6 +30,8 @@ class AudioStream(
     private val key: ByteArray,
     private val streamType: Int = -1,
     private val onDiagnostic: (String) -> Unit = {},
+    /** The RTP and RTCP endpoints come from here so the wired path can run on a userspace stack. */
+    private val network: DatagramNetwork = KernelDatagramNetwork,
 ) : Closeable {
     interface Listener {
         fun onStarted(firstSample: Int) {}
@@ -46,14 +48,14 @@ class AudioStream(
     private val receivedPackets = AtomicInteger()
     private val decryptedPackets = AtomicInteger()
     private val authenticationFailures = AtomicInteger()
-    private var dataSocket: DatagramSocket? = null
-    private var controlSocket: DatagramSocket? = null
+    private var dataSocket: DatagramTransport? = null
+    private var controlSocket: DatagramTransport? = null
     private var dataThread: Thread? = null
     private var controlThread: Thread? = null
     private var started = false
 
     fun listen(listener: Listener): Pair<Int, Int> {
-        val data = bindAnyPort()
+        val data = network.open(serverBindAddress())
         // Keep short Wi-Fi bursts in the kernel while decrypting or scheduling pauses
         // the receive thread. The platform may cap this request; log the actual size.
         val originalBufferBytes = runCatching { data.receiveBufferSize }.getOrDefault(0)
@@ -61,7 +63,7 @@ class AudioStream(
             runCatching { data.receiveBufferSize = AUDIO_RECEIVE_BUFFER_BYTES }
         }
         onDiagnostic("Audio UDP receive buffer type=$streamType original=$originalBufferBytes requested=$AUDIO_RECEIVE_BUFFER_BYTES actual=${runCatching { data.receiveBufferSize }.getOrDefault(0)}")
-        val control = bindAnyPort()
+        val control = network.open(serverBindAddress())
         dataSocket = data
         controlSocket = control
         dataThread = Thread({
@@ -86,7 +88,7 @@ class AudioStream(
         controlThread?.interrupt()
     }
 
-    private fun runData(socket: DatagramSocket, listener: Listener) {
+    private fun runData(socket: DatagramTransport, listener: Listener) {
         val stats = StreamReceiveStats("audio type=$streamType", onDiagnostic)
         val buffer = ByteArray(DATAGRAM_BYTES)
         // Reused 12-byte AEAD nonce: four zero bytes followed by the packet's eight-byte tail nonce.
@@ -99,22 +101,22 @@ class AudioStream(
         var wire = ByteArray(0)
         try {
             while (!closed.get()) {
-                val packet = DatagramPacket(buffer, buffer.size)
-                try {
+                val received = try {
                     stats.reading()
-                    socket.receive(packet)
+                    socket.receive(buffer)
                 } catch (_: Exception) {
                     if (closed.get()) return else continue
                 }
+                val length = received.size
                 stats.received(
-                    size = packet.length,
-                    sequence = if (packet.length >= RTP_HEADER_LEN) {
+                    size = length,
+                    sequence = if (length >= RTP_HEADER_LEN) {
                         ((buffer[2].toInt() and 0xff) shl 8) or (buffer[3].toInt() and 0xff)
                     } else null,
-                    timestamp = if (packet.length >= RTP_HEADER_LEN) readU32Be(buffer, 4) else null,
+                    timestamp = if (length >= RTP_HEADER_LEN) readU32Be(buffer, 4) else null,
                 )
-                if (wire.size != packet.length) wire = ByteArray(packet.length)
-                buffer.copyInto(wire, 0, 0, packet.length)
+                if (wire.size != length) wire = ByteArray(length)
+                buffer.copyInto(wire, 0, 0, length)
                 val packetNumber = receivedPackets.incrementAndGet()
                 if (wire.size < RTP_HEADER_LEN + TAIL_LEN) {
                     if (packetNumber == 1) {
@@ -237,22 +239,15 @@ class AudioStream(
         } finally { stats.flush(ended = true) }
     }
 
-    private fun runControl(socket: DatagramSocket) {
+    private fun runControl(socket: DatagramTransport) {
         val buffer = ByteArray(DATAGRAM_BYTES)
         while (!closed.get()) {
             try {
-                socket.receive(DatagramPacket(buffer, buffer.size))
+                socket.receive(buffer)
             } catch (_: Exception) {
                 if (closed.get()) return
             }
         }
-    }
-
-    private fun bindAnyPort(): DatagramSocket {
-        val socket = DatagramSocket(null)
-        socket.reuseAddress = true
-        socket.bind(InetSocketAddress(serverBindAddress(), 0))
-        return socket
     }
 
     private fun readU32Be(source: ByteArray, offset: Int): Int =

@@ -22,6 +22,13 @@ class ReceivedDatagram(val size: Int, val address: InetAddress?, val port: Int)
 interface DatagramTransport : Closeable {
     val localPort: Int
 
+    /**
+     * Receive buffer in bytes. The audio path raises it to ride out short decrypt/scheduling pauses
+     * and then reads it back because the platform may cap the request; a userspace stack maps this
+     * onto lwIP's `SO_RCVBUF` and may ignore it.
+     */
+    var receiveBufferSize: Int
+
     fun send(data: ByteArray, size: Int, address: InetAddress, port: Int)
 
     /** Blocks until a datagram arrives. Throws [IOException] when the endpoint is closed or fails. */
@@ -48,6 +55,12 @@ object KernelDatagramNetwork : DatagramNetwork {
 
 private class KernelDatagramTransport(private val socket: DatagramSocket) : DatagramTransport {
     override val localPort: Int get() = socket.localPort
+
+    override var receiveBufferSize: Int
+        get() = socket.receiveBufferSize
+        set(value) {
+            socket.receiveBufferSize = value
+        }
 
     override fun send(data: ByteArray, size: Int, address: InetAddress, port: Int) {
         socket.send(DatagramPacket(data, size, address, port))

@@ -13,11 +13,11 @@ import com.shilapi.xcertplay.compat.recorderRouteTypeCompat
 import com.shilapi.xcertplay.airplay.MicrophoneConfig
 import com.shilapi.xcertplay.airplay.MicrophoneCounters
 import com.shilapi.xcertplay.airplay.MicrophonePacketizer
+import com.shilapi.xcertplay.transport.DatagramNetwork
+import com.shilapi.xcertplay.transport.DatagramTransport
+import com.shilapi.xcertplay.transport.KernelDatagramNetwork
 import java.io.Closeable
-import java.net.DatagramPacket
-import java.net.DatagramSocket
 import java.net.InetAddress
-import java.net.InetSocketAddress
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -41,6 +41,8 @@ internal class MicrophoneUplink(
             },
         )
     },
+    /** The uplink endpoint comes from here so the wired path can run on a userspace stack. */
+    private val network: DatagramNetwork = KernelDatagramNetwork,
 ) : Closeable {
     private val running = AtomicBoolean(false)
     private val stats = MicrophoneCaptureStats(config, report = { message ->
@@ -48,7 +50,7 @@ internal class MicrophoneUplink(
         onDiagnostic(message)
     })
     @Volatile private var recorder: AudioRecord? = null
-    @Volatile private var socket: DatagramSocket? = null
+    @Volatile private var socket: DatagramTransport? = null
     @Volatile private var opusEncoder: MicrophoneOpusEncoder? = null
     @Volatile private var effects: List<AudioEffect> = emptyList()
     private var thread: Thread? = null
@@ -159,10 +161,7 @@ internal class MicrophoneUplink(
         }
 
         val nextSocket = try {
-            DatagramSocket(null).apply {
-                reuseAddress = true
-                bind(InetSocketAddress(serverBindAddress(), 0))
-            }
+            network.open(serverBindAddress())
         } catch (error: Exception) {
             Log.e(TAG, "microphone socket creation failed", error)
             stats.failure(MicrophoneFailureStage.SOCKET_CREATION, error)
@@ -262,7 +261,7 @@ internal class MicrophoneUplink(
         }
     }
 
-    private fun capture(recorder: AudioRecord, socket: DatagramSocket) {
+    private fun capture(recorder: AudioRecord, socket: DatagramTransport) {
         val frame = ByteArray(config.frameBytes)
         val readBuffer = ByteArray(maxOf(frame.size, MIN_READ_BYTES))
         val counters = MicrophoneCounters()
@@ -324,7 +323,7 @@ internal class MicrophoneUplink(
         }
     }
 
-    private fun sendFrame(socket: DatagramSocket, counters: MicrophoneCounters, frame: ByteArray) {
+    private fun sendFrame(socket: DatagramTransport, counters: MicrophoneCounters, frame: ByteArray) {
         val bodies = if (config.codec == AudioCodecKind.OPUS) {
             opusEncoder?.encode(frame).orEmpty()
         } else {
@@ -342,7 +341,7 @@ internal class MicrophoneUplink(
     }
 
     private fun sendPacket(
-        socket: DatagramSocket,
+        socket: DatagramTransport,
         counters: MicrophoneCounters,
         body: ByteArray,
         samples: Int,
@@ -355,7 +354,7 @@ internal class MicrophoneUplink(
             samples = samples,
         )
         try {
-            socket.send(DatagramPacket(packet, packet.size, config.host, config.port))
+            socket.send(packet, packet.size, config.host, config.port)
             stats.sent()
         } catch (error: Exception) {
             stats.sendFailed()

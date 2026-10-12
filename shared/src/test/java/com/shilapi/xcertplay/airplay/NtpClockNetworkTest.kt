@@ -101,6 +101,8 @@ class NtpClockNetworkTest {
 
         override val localPort: Int get() = port
 
+        override var receiveBufferSize: Int = 0
+
         fun awaitOutbound(): Sent = outbound.poll(2, TimeUnit.SECONDS)
             ?: throw AssertionError("the clock sent nothing within two seconds")
 
