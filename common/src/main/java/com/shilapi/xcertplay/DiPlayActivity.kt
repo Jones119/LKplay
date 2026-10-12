@@ -543,9 +543,17 @@ class DiPlayActivity : ComponentActivity() {
         // A section no category names stays visible everywhere: a new section can never be lost by forgetting
         // to list it here, which is the failure mode an index-based filter would otherwise have.
         val named = categories.flatten().toSet()
-        for (index in 0 until sections.childCount) {
+        // Only the section cards are counted. The page's own title and subtitle are children of the same
+        // column, and counting them shifted every category by two: the first screenshot of this screen showed
+        // the title hidden and the connection category holding the language section. section() tags its card
+        // with this literal, deliberately not a new companion-object constant - adding one to this class by
+        // script broke the build once already.
+        val cards = (0 until sections.childCount).filter {
+            sections.getChildAt(it).tag == "diplay-settings-section"
+        }
+        cards.forEachIndexed { index, childIndex ->
             val shown = index in visible || index !in named
-            sections.getChildAt(index).visibility = if (shown) View.VISIBLE else View.GONE
+            sections.getChildAt(childIndex).visibility = if (shown) View.VISIBLE else View.GONE
         }
     }
 
@@ -557,8 +565,15 @@ class DiPlayActivity : ComponentActivity() {
      * so no call site inside it had to change, and the filter runs after it returns.
      */
     private fun settingsPage(content: LinearLayout) {
-        val nav = column().apply { setPadding(0, 0, dp(34), 0) }
         val sections = column()
+        if (isCompactLayout) {
+            // A narrow screen has no room for an index beside the content, so the sections run full width.
+            content.addView(sections)
+            settings(sections)
+            content.post { applySettingsCategoryFilter(sections) }
+            return
+        }
+        val nav = column().apply { setPadding(0, 0, dp(34), 0) }
         settingsCategoryLabels().forEachIndexed { index, title ->
             val selected = index == settingsCategoryIndex
             val item = row().apply { gravity = Gravity.CENTER_VERTICAL }
@@ -578,13 +593,24 @@ class DiPlayActivity : ComponentActivity() {
             }
             nav.addView(item, LinearLayout.LayoutParams(-1, -2))
         }
+        // The right column scrolls on its own, so the index stays where it is while the sections move: a page
+        // scroll would carry the index away with the content, which defeats a two-column settings page. The
+        // height is fixed because a child of the outer ScrollView cannot be told to match the viewport.
+        val sectionScroll = ScrollView(this).apply {
+            isFillViewport = true
+            clipToPadding = false
+            addView(sections, LinearLayout.LayoutParams(-1, -2))
+        }
         val page = row().apply { gravity = Gravity.TOP }
         page.addView(nav, LinearLayout.LayoutParams(dp(300), -2))
-        page.addView(sections, LinearLayout.LayoutParams(0, -2, 1f))
+        page.addView(
+            sectionScroll,
+            LinearLayout.LayoutParams(0, (resources.displayMetrics.heightPixels - dp(240)).coerceAtLeast(dp(360)), 1f),
+        )
         content.addView(page)
         settings(sections)
         // After the sections are attached, so the filter sees every child whatever the category order is.
-        page.post { applySettingsCategoryFilter(sections) }
+        sectionScroll.post { applySettingsCategoryFilter(sections) }
     }
 
     private fun settings(content: LinearLayout) {
@@ -2247,6 +2273,8 @@ class DiPlayActivity : ComponentActivity() {
 
     private fun section(parent: LinearLayout, title: String, icon: Int? = null, build: (LinearLayout) -> Unit) {
         val card = card()
+        // Tagged so the settings category filter counts sections and not the page's own title or subtitle.
+        card.tag = "diplay-settings-section"
         // A section is a micro-label in this system rather than a headline with an icon: 12 sp, letterspaced,
         // secondary colour and uppercased where the script has a case, with a hairline under it. The icon
         // parameter stays because every call site passes one, but the mark is a rule now (docs/_digest/60).
