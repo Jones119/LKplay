@@ -38,11 +38,15 @@ internal data class WiredTransportDecision(val userspace: Boolean, val reason: S
 internal object UserspaceNcmTransport {
     /**
      * This ROM has no TUN (docs/_digest/58 §1), so the userspace bridge can only carry AirPlay once it
-     * owns a TCP/IP stack. Stage 1 vendors lwIP for that (docs/_digest/58 §7) and is **in progress**
-     * (the NDK install was approved 2026-10-13); flipping this to true starts preferring the userspace
-     * transport for real and retires the kernel fallback.
+     * owns a TCP/IP stack. Stage 1 vendored lwIP for that and stage 2 built it into the APK together with
+     * the Kotlin seam, so the stack now exists and only the library's presence decides
+     * `readiness` (docs/_digest/58 §7, §11).
+     *
+     * Flipping this to true makes `AUTO` prefer the userspace transport on API 19 and lets FORCE name a
+     * missing library instead of a missing stack. The kernel netdev stays as the hidden
+     * `debug.diplay.ncm_legacy=kernel` debug fallback until the car retires it.
      */
-    const val stackImplemented = false
+    const val stackImplemented = true
 
     fun readiness(nativeAvailable: Boolean): UserspaceNcmReadiness = when {
         !stackImplemented -> UserspaceNcmReadiness.MISSING_STACK

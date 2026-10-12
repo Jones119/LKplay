@@ -27,9 +27,9 @@ internal class UserSpaceSessionNetwork(
     override fun open(localAddress: InetAddress): DatagramTransport {
         val fd = requireSocket(SOCK_DGRAM, "datagram socket")
         try {
-            requireOk(jni.bind(fd, ipv6Bytes(localAddress), 0), "bind ${localAddress.hostAddress}")
+            requireOk(jni.nativeBind(fd, ipv6Bytes(localAddress), 0), "bind ${localAddress.hostAddress}")
         } catch (error: Throwable) {
-            jni.close(fd)
+            jni.nativeClose(fd)
             throw error
         }
         return UserSpaceDatagramTransport(fd)
@@ -45,20 +45,20 @@ internal class UserSpaceSessionNetwork(
         try {
             // AirPlayPortSelector detects a busy port by failing to bind, so the flag is always explicit.
             requireOk(
-                jni.setSockOptInt(fd, SOL_SOCKET, SO_REUSEADDR, if (reuseAddress) 1 else 0),
+                jni.nativeSetSockOptInt(fd, SOL_SOCKET, SO_REUSEADDR, if (reuseAddress) 1 else 0),
                 "setsockopt SO_REUSEADDR",
             )
-            requireOk(jni.bind(fd, ipv6Bytes(address), port), "bind ${address.hostAddress}:$port")
-            requireOk(jni.listen(fd, backlog), "listen")
+            requireOk(jni.nativeBind(fd, ipv6Bytes(address), port), "bind ${address.hostAddress}:$port")
+            requireOk(jni.nativeListen(fd, backlog), "listen")
         } catch (error: Throwable) {
-            jni.close(fd)
+            jni.nativeClose(fd)
             throw error
         }
         return UserSpaceDuplexServer(fd)
     }
 
     private fun requireSocket(type: Int, what: String): Int {
-        val fd = jni.socket(type)
+        val fd = jni.nativeSocket(type)
         if (fd < 0) throw IOException("lwip could not create a $what (errno ${-fd})")
         return fd
     }
@@ -77,7 +77,7 @@ internal class UserSpaceSessionNetwork(
     private fun socketAddress(fd: Int, peer: Boolean): InetSocketAddress? {
         val bytes = ByteArray(16)
         val port = IntArray(1)
-        val result = if (peer) jni.peerName(fd, bytes, port) else jni.localName(fd, bytes, port)
+        val result = if (peer) jni.nativePeerName(fd, bytes, port) else jni.nativeLocalName(fd, bytes, port)
         if (result < 0) return null
         return runCatching { InetSocketAddress(InetAddress.getByAddress(bytes), port[0]) }.getOrNull()
     }
@@ -94,17 +94,17 @@ internal class UserSpaceSessionNetwork(
                 // lwIP has no getsockopt for SO_RCVBUF through this surface, so the requested value is what
                 // the caller reads back - the audio path logs it either way.
                 requestedReceiveBuffer = value
-                runCatching { jni.setSockOptInt(fd, SOL_SOCKET, SO_RCVBUF, value) }
+                runCatching { jni.nativeSetSockOptInt(fd, SOL_SOCKET, SO_RCVBUF, value) }
             }
 
         override fun send(data: ByteArray, size: Int, address: InetAddress, port: Int) {
-            requireOk(jni.sendTo(fd, data, 0, size, ipv6Bytes(address), port), "sendto $port")
+            requireOk(jni.nativeSendTo(fd, data, 0, size, ipv6Bytes(address), port), "sendto $port")
         }
 
         override fun receive(buffer: ByteArray): ReceivedDatagram {
             val from = ByteArray(16)
             val fromPort = IntArray(1)
-            val received = jni.recvFrom(fd, buffer, 0, buffer.size, from, fromPort)
+            val received = jni.nativeRecvFrom(fd, buffer, 0, buffer.size, from, fromPort)
             if (received < 0) throw IOException("lwip recvfrom failed (errno ${-received})")
             val address = runCatching { InetAddress.getByAddress(from) }.getOrNull()
             return ReceivedDatagram(received, address, fromPort[0])
@@ -113,7 +113,7 @@ internal class UserSpaceSessionNetwork(
         override fun close() {
             if (closed) return
             closed = true
-            jni.close(fd)
+            jni.nativeClose(fd)
         }
     }
 
@@ -129,11 +129,11 @@ internal class UserSpaceSessionNetwork(
         override var soTimeout: Int = 0
             set(value) {
                 field = value
-                runCatching { jni.setSockOptInt(fd, SOL_SOCKET, SO_RCVTIMEO, value) }
+                runCatching { jni.nativeSetSockOptInt(fd, SOL_SOCKET, SO_RCVTIMEO, value) }
             }
 
         override fun accept(): DuplexSocket {
-            val accepted = jni.accept(fd)
+            val accepted = jni.nativeAccept(fd)
             if (accepted < 0) {
                 throw IOException(if (closed) "listener closed" else "lwip accept failed (errno ${-accepted})")
             }
@@ -143,7 +143,7 @@ internal class UserSpaceSessionNetwork(
         override fun close() {
             if (closed) return
             closed = true
-            jni.close(fd)
+            jni.nativeClose(fd)
         }
     }
 
@@ -162,7 +162,7 @@ internal class UserSpaceSessionNetwork(
             override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
                 if (length == 0) return 0
                 // lwip_recv returns 0 for an orderly close, which is this stream's EOF.
-                val received = jni.recv(fd, buffer, offset, length)
+                val received = jni.nativeRecv(fd, buffer, offset, length)
                 if (received < 0) throw IOException("lwip recv failed (errno ${-received})")
                 return if (received == 0) -1 else received
             }
@@ -176,7 +176,7 @@ internal class UserSpaceSessionNetwork(
             override fun write(buffer: ByteArray, offset: Int, length: Int) {
                 var written = 0
                 while (written < length) {
-                    val sent = jni.send(fd, buffer, offset + written, length - written)
+                    val sent = jni.nativeSend(fd, buffer, offset + written, length - written)
                     if (sent <= 0) throw IOException("lwip send failed (errno ${if (sent < 0) -sent else 0})")
                     written += sent
                 }
@@ -191,29 +191,29 @@ internal class UserSpaceSessionNetwork(
             get() = requestedReceiveBuffer
             set(value) {
                 requestedReceiveBuffer = value
-                runCatching { jni.setSockOptInt(fd, SOL_SOCKET, SO_RCVBUF, value) }
+                runCatching { jni.nativeSetSockOptInt(fd, SOL_SOCKET, SO_RCVBUF, value) }
             }
 
         override var tcpNoDelay: Boolean = false
             set(value) {
                 field = value
-                runCatching { jni.setSockOptInt(fd, IPPROTO_TCP, TCP_NODELAY, if (value) 1 else 0) }
+                runCatching { jni.nativeSetSockOptInt(fd, IPPROTO_TCP, TCP_NODELAY, if (value) 1 else 0) }
             }
 
         override var keepAlive: Boolean = false
             set(value) {
                 field = value
-                runCatching { jni.setSockOptInt(fd, SOL_SOCKET, SO_KEEPALIVE, if (value) 1 else 0) }
+                runCatching { jni.nativeSetSockOptInt(fd, SOL_SOCKET, SO_KEEPALIVE, if (value) 1 else 0) }
             }
 
         override fun setSoLinger(on: Boolean, seconds: Int) {
-            runCatching { jni.setSockOptLinger(fd, on, seconds) }
+            runCatching { jni.nativeSetSockOptLinger(fd, on, seconds) }
         }
 
         override fun close() {
             if (closed) return
             closed = true
-            jni.close(fd)
+            jni.nativeClose(fd)
         }
     }
 

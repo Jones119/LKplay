@@ -29,6 +29,8 @@ import com.shilapi.xcertplay.airplay.AirPlayKnobState
 import com.shilapi.xcertplay.airplay.AirPlayDeviceInfo
 import com.shilapi.xcertplay.airplay.AirPlayIdentity
 import com.shilapi.xcertplay.airplay.AirPlayMediaHandler
+import com.shilapi.xcertplay.airplay.CarPlayMediaEngine
+import com.shilapi.xcertplay.airplay.publishSessionBindAddress
 import com.shilapi.xcertplay.airplay.AirPlaySession
 import com.shilapi.xcertplay.airplay.AirPlaySessionListener
 import com.shilapi.xcertplay.airplay.PairingStore
@@ -84,6 +86,7 @@ import com.shilapi.xcertplay.transport.LegacyUsbNative
 import com.shilapi.xcertplay.transport.NcmLegacyMode
 import com.shilapi.xcertplay.transport.NcmLegacyPolicy
 import com.shilapi.xcertplay.transport.UserspaceNcmTransport
+import com.shilapi.xcertplay.transport.UserSpaceNcmLink
 import com.shilapi.xcertplay.transport.wiredTransportDecision
 import com.shilapi.xcertplay.transport.NcmUsbBridge
 import java.io.Closeable
@@ -255,6 +258,12 @@ class CarPlayController(
     @Volatile private var wirelessRuntimeIdentification: Iap2IdentificationConfig? = null
     @Volatile private var wirelessAirPlayEndpoint: Iap2WirelessCarPlayEndpoint? = null
     @Volatile private var vpnService: CarPlayVpnService? = null
+
+    /**
+     * The userspace NCM link when this wired session runs on lwIP instead of the kernel netdev. It owns the
+     * USB bridge, so it is closed with the session (docs/_digest/58 §7).
+     */
+    @Volatile private var userSpaceLink: UserSpaceNcmLink? = null
     @Volatile private var vpnBound = false
     private val wirelessHandoffRequested = AtomicBoolean(false)
     private val wirelessTunnelReady = AtomicBoolean(false)
@@ -619,6 +628,11 @@ class CarPlayController(
         firstTcpWatchdog?.terminate()
         startupTimer.shutdownNow()
         (hotspot as? ManualHotspotManager)?.close()
+        // The userspace link owns its USB claim and its lwIP netif, so it goes with the session (null first,
+        // because closing it lets the endpoint drains fail, and those callbacks may re-enter here).
+        val link = userSpaceLink
+        userSpaceLink = null
+        runCatching { link?.close() }
         val teardownStarted = System.nanoTime()
         connectionDiagnostic("teardown begin transport=${config.transport}")
         videoGate?.close()
@@ -1630,16 +1644,24 @@ class CarPlayController(
                             mode,
                             UserspaceNcmTransport.readiness(LegacyUsbNative.available),
                         )
-                        if (mode == NcmLegacyMode.FORCE && Build.VERSION.SDK_INT < 21) {
-                            // FORCE is the diagnostic mode: say exactly what is missing instead of
-                            // quietly falling back to the kernel netdev.
+                        // API 19 carries the link with lwIP on the userspace bridge; API 21+ uses the raw
+                        // USB NCM path. FORCE with a missing stack or library is still worth a probe, because
+                        // it reports what the descriptors and the negotiation actually did.
+                        val userspaceLink = if (decision.userspace && Build.VERSION.SDK_INT < 21) {
+                            openUserspaceNcm(device)
+                        } else {
+                            null
+                        }
+                        if (userspaceLink == null && mode == NcmLegacyMode.FORCE && !decision.userspace) {
                             probeUserspaceNcm(device)
                         }
                         val ncm = if (decision.userspace && Build.VERSION.SDK_INT >= 21) {
                             openNcm(device)
                         } else {
-                            debugLog(decision.reason)
                             null
+                        }
+                        if (userspaceLink == null && ncm == null) {
+                            debugLog(decision.reason)
                         }
                         runStack(result.session, ncm)
                     } catch (error: Throwable) {
@@ -1648,6 +1670,102 @@ class CarPlayController(
                     }
                 }
                 is IphoneUsbHost.Iap2SessionResult.Failed -> fail(result.error)
+            }
+        }
+    }
+
+    /**
+     * Opens the API-19 userspace NCM bridge and starts lwIP on it (docs/_digest/58 §7).
+     *
+     * Returns null - with the reason logged - when the bridge or the stack cannot come up, so the caller
+     * keeps the kernel netdev. The interfaces stay claimed by us for the whole session, which is why this is
+     * not [probeUserspaceNcm]: nothing is released and re-opened.
+     */
+    private fun openUserspaceNcm(device: UsbDevice): UserSpaceNcmLink? {
+        val connection = requireUsbManager().openDevice(device)
+        if (connection == null) {
+            debugLog("userspace NCM: the iPhone connection could not be opened")
+            return null
+        }
+        var bridge: NcmUsbBridge? = null
+        try {
+            val raw = connection.rawDescriptors
+                ?: throw IphoneUsbException.Protocol("the iPhone exposes no raw USB descriptors")
+            val configurationId = LegacyNcmDescriptors.parse(raw)
+                .singleOrNull { it.hasUsbMux && it.hasNcm }?.id
+                ?: throw IphoneUsbException.Protocol(
+                    "no iPhone USB configuration carries USBMUX and NCM together",
+                )
+            bridge = NcmUsbBridge.openLegacy(connection, device, raw, configurationId, ::debugLog)
+            val link = UserSpaceNcmLink(bridge, onDiagnostic = ::debugLog)
+            val started = link.start()
+            if (started != 0) {
+                debugLog("userspace NCM: lwIP refused the netif (result=$started)")
+                link.close()
+                return null
+            }
+            link.startPump()
+            userSpaceLink = link
+            debugLog("userspace NCM bridge ready configuration=$configurationId; lwIP carries the wired link")
+            return link
+        } catch (error: Throwable) {
+            debugLog("userspace NCM bring-up failed: ${error.javaClass.simpleName}: ${error.message}")
+            if (bridge != null) runCatching { bridge.close() } else runCatching { connection.close() }
+            return null
+        }
+    }
+
+    /**
+     * Binds the AirPlay listener on the userspace stack rather than the kernel one.
+     *
+     * There is no TUN on this ROM, so nothing is routed: this is the same listener-only attach the wireless
+     * path uses, pointed at the lwIP network. The engine is built by the Activity, so its network is set
+     * here as well - both it and the service have to hand the same network to the channels they create
+     * (docs/_digest/58 §6 step 7).
+     */
+    private fun attachUserspace(link: UserSpaceNcmLink): Boolean {
+        onStatus(CarPlayStatus.AttachingNetwork)
+        val service = awaitVpnService() ?: run {
+            debugLog("userspace NCM: VPN service bind failed")
+            return false
+        }
+        (media as? CarPlayMediaEngine)?.network = link
+        service.network = link
+        // serverBindAddress() finds the kernel netdev's scoped fe80::2, and there is no netdev on this path:
+        // the NCM interfaces belong to us. lwIP binds raw IPv6 bytes and has no scope concept, so the
+        // address the phone was told is the right one to bind, and publishing it keeps every channel - the
+        // iAP tunnel included - on the address the control channel was accepted on.
+        val bindAddress = runCatching {
+            InetAddress.getByName(config.linkLocal.substringBefore('%'))
+        }.getOrElse { InetAddress.getByName("fe80::2") }
+        publishSessionBindAddress(bindAddress)
+        val result = try {
+            service.attachWireless(
+                bindAddress = bindAddress,
+                config = airPlayConfig,
+                identity = identity,
+                pairings = pairings,
+                mfi = mfiSession?.client,
+                listener = sessionListener,
+                media = media,
+            )
+        } catch (error: Throwable) {
+            onStatus(CarPlayStatus.Failed(error.message ?: error.javaClass.simpleName))
+            return false
+        }
+        return when (result) {
+            CarPlayVpnService.AttachResult.Started -> {
+                debugLog("userspace NCM AirPlay listener attached on lwIP address=${bindAddress.hostAddress}")
+                true
+            }
+            CarPlayVpnService.AttachResult.AlreadyStarted -> {
+                debugLog("userspace NCM listener was already started")
+                true
+            }
+            is CarPlayVpnService.AttachResult.Failed -> {
+                debugLog("userspace NCM listener attach failed: ${result.message}")
+                onStatus(CarPlayStatus.Failed(result.message))
+                false
             }
         }
     }
@@ -1720,6 +1838,9 @@ class CarPlayController(
     private fun runStack(usbSession: Iap2UsbSession, ncm: NcmUsbBridge?) {
         phase = Phase.CONTROL
         var ncmOwnedLocally = true
+        // Set once the userspace link has handed the listener to the service: until then the link is ours to
+        // release, exactly like `ncmOwnedLocally` above.
+        var userspaceAttached = false
         try {
             if (closed) return
             val mux = Iap2UsbMuxHost.open(usbSession, onDiagnostic = ::connectionDiagnostic)
@@ -1792,16 +1913,23 @@ class CarPlayController(
             this.csm = csm
             debugLog("wired iAP2 CSM channel opened")
 
-            val ncmHostMac = ncm?.hostMac ?: config.hostMac
+            val ncmHostMac = ncm?.hostMac ?: userSpaceLink?.hostMac ?: config.hostMac
             debugLog("ncm using hostMac=${ncmHostMac.macString()}")
             // CS11: the kernel has no TUN driver, so the classic VpnService/NCM bridge cannot
-            // attach ("Cannot create interface"). When the root-assisted kernel netdev path is
-            // available, the AirPlay listener binds on the cdc_ncm interface address instead and
-            // the phone reaches it over the kernel NCM link; otherwise degrade to control-only.
-            val directNetdev = Build.VERSION.SDK_INT < 21 && Cs11NetdevBootstrap.supported &&
-                attachSystemNetdev()
+            // attach ("Cannot create interface"). Three transports exist here, in order of preference:
+            // the userspace bridge that owns lwIP (API 19, no root), the kernel cdc_ncm netdev + root
+            // fire (API 19, debug fallback), and VpnService/NCM (API 21+). See docs/_digest/58.
+            val userspace = userSpaceLink
+            val directNetdev = userspace == null && Build.VERSION.SDK_INT < 21 &&
+                Cs11NetdevBootstrap.supported && attachSystemNetdev()
             if (!directNetdev) {
-                if (ncm == null) {
+                if (userspace != null) {
+                    if (attachUserspace(userspace)) {
+                        userspaceAttached = true
+                    } else {
+                        debugLog("CS11 degraded mode: userspace NCM listener failed; control channel only")
+                    }
+                } else if (ncm == null) {
                     if (Build.VERSION.SDK_INT >= 21) {
                         throw IphoneUsbException.DeviceUnavailable("Could not attach the NCM/VPN AirPlay transport")
                     }
@@ -1815,7 +1943,10 @@ class CarPlayController(
                 }
             }
             ncmOwnedLocally = false
-            debugLog("wired AirPlay transport attached kernelNetdev=$directNetdev")
+            debugLog(
+                "wired AirPlay transport attached kernelNetdev=$directNetdev " +
+                    "userspaceLwip=${userspace != null}",
+            )
             if (closed) {
                 vpnService?.detach()
                 return
@@ -1859,6 +1990,11 @@ class CarPlayController(
             fail(error)
         } finally {
             if (ncmOwnedLocally) ncm?.close()
+            if (!userspaceAttached) {
+                // Nothing else owns the link yet, so this session has to release the USB claim and the netif.
+                userSpaceLink?.close()
+                userSpaceLink = null
+            }
         }
     }
 

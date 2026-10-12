@@ -13,26 +13,26 @@ import android.util.Log
  * is no sockaddr marshalling anywhere in this path (docs/_digest/58 §7.4).
  */
 internal interface UserSpaceNetworkJni {
-    fun start(hostMac: ByteArray?, mtu: Int): Int
-    fun injectFrame(frame: ByteArray, length: Int): Int
+    fun nativeStart(hostMac: ByteArray?, mtu: Int): Int
+    fun nativeInjectFrame(frame: ByteArray, length: Int): Int
     /** Returns the length of the next outbound frame copied into [out], or 0 when the ring is empty. */
-    fun pollTxFrame(out: ByteArray): Int
-    fun txPending(): Int
-    fun stats(): IntArray
+    fun nativePollTxFrame(out: ByteArray): Int
+    fun nativeTxPending(): Int
+    fun nativeStats(): IntArray
 
-    fun socket(type: Int): Int
-    fun bind(fd: Int, address: ByteArray, port: Int): Int
-    fun listen(fd: Int, backlog: Int): Int
-    fun accept(fd: Int): Int
-    fun recv(fd: Int, buffer: ByteArray, offset: Int, length: Int): Int
-    fun send(fd: Int, buffer: ByteArray, offset: Int, length: Int): Int
-    fun sendTo(fd: Int, buffer: ByteArray, offset: Int, length: Int, address: ByteArray, port: Int): Int
-    fun recvFrom(fd: Int, buffer: ByteArray, offset: Int, length: Int, fromAddress: ByteArray, fromPort: IntArray): Int
-    fun close(fd: Int): Int
-    fun setSockOptInt(fd: Int, level: Int, option: Int, value: Int): Int
-    fun setSockOptLinger(fd: Int, on: Boolean, seconds: Int): Int
-    fun localName(fd: Int, address: ByteArray, port: IntArray): Int
-    fun peerName(fd: Int, address: ByteArray, port: IntArray): Int
+    fun nativeSocket(type: Int): Int
+    fun nativeBind(fd: Int, address: ByteArray, port: Int): Int
+    fun nativeListen(fd: Int, backlog: Int): Int
+    fun nativeAccept(fd: Int): Int
+    fun nativeRecv(fd: Int, buffer: ByteArray, offset: Int, length: Int): Int
+    fun nativeSend(fd: Int, buffer: ByteArray, offset: Int, length: Int): Int
+    fun nativeSendTo(fd: Int, buffer: ByteArray, offset: Int, length: Int, address: ByteArray, port: Int): Int
+    fun nativeRecvFrom(fd: Int, buffer: ByteArray, offset: Int, length: Int, fromAddress: ByteArray, fromPort: IntArray): Int
+    fun nativeClose(fd: Int): Int
+    fun nativeSetSockOptInt(fd: Int, level: Int, option: Int, value: Int): Int
+    fun nativeSetSockOptLinger(fd: Int, on: Boolean, seconds: Int): Int
+    fun nativeLocalName(fd: Int, address: ByteArray, port: IntArray): Int
+    fun nativePeerName(fd: Int, address: ByteArray, port: IntArray): Int
 }
 
 /**
@@ -54,18 +54,18 @@ internal object UserSpaceNetworkNative : UserSpaceNetworkJni {
         }
     }
 
-    external override fun start(hostMac: ByteArray?, mtu: Int): Int
-    external override fun injectFrame(frame: ByteArray, length: Int): Int
-    external override fun pollTxFrame(out: ByteArray): Int
-    external override fun txPending(): Int
-    external override fun stats(): IntArray
-    external override fun socket(type: Int): Int
-    external override fun bind(fd: Int, address: ByteArray, port: Int): Int
-    external override fun listen(fd: Int, backlog: Int): Int
-    external override fun accept(fd: Int): Int
-    external override fun recv(fd: Int, buffer: ByteArray, offset: Int, length: Int): Int
-    external override fun send(fd: Int, buffer: ByteArray, offset: Int, length: Int): Int
-    external override fun sendTo(
+    external override fun nativeStart(hostMac: ByteArray?, mtu: Int): Int
+    external override fun nativeInjectFrame(frame: ByteArray, length: Int): Int
+    external override fun nativePollTxFrame(out: ByteArray): Int
+    external override fun nativeTxPending(): Int
+    external override fun nativeStats(): IntArray
+    external override fun nativeSocket(type: Int): Int
+    external override fun nativeBind(fd: Int, address: ByteArray, port: Int): Int
+    external override fun nativeListen(fd: Int, backlog: Int): Int
+    external override fun nativeAccept(fd: Int): Int
+    external override fun nativeRecv(fd: Int, buffer: ByteArray, offset: Int, length: Int): Int
+    external override fun nativeSend(fd: Int, buffer: ByteArray, offset: Int, length: Int): Int
+    external override fun nativeSendTo(
         fd: Int,
         buffer: ByteArray,
         offset: Int,
@@ -73,7 +73,7 @@ internal object UserSpaceNetworkNative : UserSpaceNetworkJni {
         address: ByteArray,
         port: Int,
     ): Int
-    external override fun recvFrom(
+    external override fun nativeRecvFrom(
         fd: Int,
         buffer: ByteArray,
         offset: Int,
@@ -81,9 +81,9 @@ internal object UserSpaceNetworkNative : UserSpaceNetworkJni {
         fromAddress: ByteArray,
         fromPort: IntArray,
     ): Int
-    external override fun close(fd: Int): Int
-    external override fun setSockOptInt(fd: Int, level: Int, option: Int, value: Int): Int
-    external override fun setSockOptLinger(fd: Int, on: Boolean, seconds: Int): Int
-    external override fun localName(fd: Int, address: ByteArray, port: IntArray): Int
-    external override fun peerName(fd: Int, address: ByteArray, port: IntArray): Int
+    external override fun nativeClose(fd: Int): Int
+    external override fun nativeSetSockOptInt(fd: Int, level: Int, option: Int, value: Int): Int
+    external override fun nativeSetSockOptLinger(fd: Int, on: Boolean, seconds: Int): Int
+    external override fun nativeLocalName(fd: Int, address: ByteArray, port: IntArray): Int
+    external override fun nativePeerName(fd: Int, address: ByteArray, port: IntArray): Int
 }

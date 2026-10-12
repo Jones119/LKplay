@@ -24,6 +24,9 @@ internal class UserSpaceNcmLink(
     private val jni: UserSpaceNetworkJni = UserSpaceNetworkNative,
     private val onDiagnostic: (String) -> Unit = {},
 ) : SessionNetwork by UserSpaceSessionNetwork(jni), Closeable {
+    /** The MAC the iPhone's NCM configuration reports; iAP2 is told this is our device identifier. */
+    val hostMac: ByteArray? get() = bridge.hostMac
+
     private val running = AtomicBoolean(false)
     private val injectedFrames = AtomicLong(0)
     private val injectedBytes = AtomicLong(0)
@@ -39,7 +42,7 @@ internal class UserSpaceNcmLink(
      * the caller can decide to fall back to the kernel netdev instead of pretending the link is ready.
      */
     fun start(mtu: Int = NCM_MTU): Int {
-        val result = jni.start(bridge.hostMac, mtu)
+        val result = jni.nativeStart(bridge.hostMac, mtu)
         onDiagnostic(
             "userspace NCM network started mtu=$mtu hostMac=" +
                 (bridge.hostMac?.joinToString(":") { "%02x".format(it) } ?: "descriptor-none") +
@@ -66,7 +69,7 @@ internal class UserSpaceNcmLink(
                 return
             } ?: continue
             if (frame.isEmpty()) continue
-            val result = jni.injectFrame(frame, frame.size)
+            val result = jni.nativeInjectFrame(frame, frame.size)
             if (result == 0) {
                 injectedFrames.incrementAndGet()
                 injectedBytes.addAndGet(frame.size.toLong())
@@ -77,12 +80,12 @@ internal class UserSpaceNcmLink(
     private fun pumpTransmit() {
         val frame = ByteArray(TRANSMIT_BUFFER_BYTES)
         while (running.get()) {
-            if (jni.txPending() <= 0) {
+            if (jni.nativeTxPending() <= 0) {
                 // Short enough for the audio path (12 ms frames) and cheap enough on this SoC.
                 Thread.sleep(TRANSMIT_POLL_MILLIS)
                 continue
             }
-            val length = jni.pollTxFrame(frame)
+            val length = jni.nativePollTxFrame(frame)
             if (length <= 0) continue
             try {
                 bridge.send(frame.copyOf(length), TRANSMIT_TIMEOUT_MILLIS)
@@ -106,13 +109,13 @@ internal class UserSpaceNcmLink(
                 return
             }
             if (!running.get()) return
-            val native = runCatching { jni.stats() }.getOrNull() ?: IntArray(5)
+            val native = runCatching { jni.nativeStats() }.getOrNull() ?: IntArray(5)
             onDiagnostic(
                 "userspace NCM link rxFrames=${native.getOrElse(0) { 0 }} rxBytes=${native.getOrElse(1) { 0 }} " +
                     "txFrames=${native.getOrElse(2) { 0 }} txBytes=${native.getOrElse(3) { 0 }} " +
                     "txDropped=${native.getOrElse(4) { 0 }} injected=$injectedFrames/$injectedBytes " +
                     "written=$writtenFrames/$writtenBytes writeFailures=$transmitFailures " +
-                    "pending=${runCatching { jni.txPending() }.getOrDefault(0)}",
+                    "pending=${runCatching { jni.nativeTxPending() }.getOrDefault(0)}",
             )
         }
     }

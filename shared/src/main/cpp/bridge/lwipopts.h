@@ -45,6 +45,25 @@
 #define MEM_LIBC_MALLOC                 1
 #define MEMP_MEM_MALLOC                 1
 #define MEM_ALIGNMENT                   4
+/* ── USB path checksum tuning (performance) ───────────────────────────────────────────────────── */
+/*
+ * lwIP checks every received IPv4/IPv6, TCP and UDP checksum by default, and on this 1 GHz i.MX6Q that is
+ * per-packet CPU on a link that carries the whole video stream. The NCM segment is point to point over USB,
+ * which has its own CRCs, and EasyPlay's userspace bridge on this same car runs with checksum verification
+ * off - so RX verification is disabled here.
+ *
+ * Note the lwIP scale: 2 means "never", while 0 means "always, ignoring the netif flags". Only RX is
+ * touched: an IPv6 UDP or TCP checksum is mandatory, so a packet we sent with a zero checksum would simply
+ * be dropped by iOS (generation stays enabled).
+ */
+#define CHECKSUM_CHECK_IP               2
+#define CHECKSUM_CHECK_UDP              2
+#define CHECKSUM_CHECK_TCP              2
+#define CHECKSUM_CHECK_ICMP             2
+
+/* ── Memory and buffers sized for one video stream plus the control channels ──────────────────── */
+/* 256 KiB heap and 64 x 1600 B pbufs: the TCP receive window is 16 KiB, so at most ~12 full frames are in
+ * flight at once and the rest is headroom for the audio and control channels. */
 #define MEM_SIZE                        (256 * 1024)
 #define PBUF_POOL_SIZE                  64
 #define PBUF_POOL_BUFSIZE               1600

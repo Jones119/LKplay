@@ -75,11 +75,21 @@ class CarPlayWiredTransportDecisionTest {
     }
 
     @Test
-    fun theMissingStackIsTheOnlyReasonTheDefaultFallsBackToday() {
-        // Documents the one line that changes the car's default transport: `stackImplemented`
-        // (docs/_digest/58 §7). While it is false, AUTO always resolves to the kernel netdev.
-        assertEquals(UserspaceNcmReadiness.MISSING_STACK, UserspaceNcmTransport.readiness(nativeAvailable = true))
-        assertEquals(UserspaceNcmReadiness.MISSING_STACK, UserspaceNcmTransport.readiness(nativeAvailable = false))
+    fun theLibraryIsTheOnlyThingLeftBetweenTheDefaultAndTheUserspaceBridge() {
+        // The stack is implemented now (docs/_digest/58 §11), so readiness turns on the library: with
+        // lwip_bridge and legacy_usb in the APK the default transport is the userspace bridge, and a build
+        // without them still falls back to the kernel netdev.
+        assertTrue(UserspaceNcmTransport.stackImplemented)
+        assertEquals(UserspaceNcmReadiness.READY, UserspaceNcmTransport.readiness(nativeAvailable = true))
+        assertEquals(
+            UserspaceNcmReadiness.MISSING_NATIVE,
+            UserspaceNcmTransport.readiness(nativeAvailable = false),
+        )
+        assertTrue(wiredTransportDecision(19, NcmLegacyMode.AUTO, UserspaceNcmReadiness.READY).userspace)
+        assertFalse(
+            wiredTransportDecision(19, NcmLegacyMode.AUTO, UserspaceNcmReadiness.MISSING_NATIVE).userspace,
+        )
+        // A verdict that can no longer be produced must still not select the userspace transport.
         assertFalse(wiredTransportDecision(19, NcmLegacyMode.AUTO, UserspaceNcmReadiness.MISSING_STACK).userspace)
     }
 }

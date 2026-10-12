@@ -32,37 +32,37 @@ class UserSpaceSessionNetworkTest {
         var receivedPort = 0
         var acceptDescriptor = 55
 
-        override fun start(hostMac: ByteArray?, mtu: Int): Int {
+        override fun nativeStart(hostMac: ByteArray?, mtu: Int): Int {
             calls.add("start")
             return 0
         }
 
-        override fun injectFrame(frame: ByteArray, length: Int) = 0
-        override fun pollTxFrame(out: ByteArray) = 0
-        override fun txPending() = 0
-        override fun stats() = intArrayOf(0, 0, 0, 0, 0)
+        override fun nativeInjectFrame(frame: ByteArray, length: Int) = 0
+        override fun nativePollTxFrame(out: ByteArray) = 0
+        override fun nativeTxPending() = 0
+        override fun nativeStats() = intArrayOf(0, 0, 0, 0, 0)
 
-        override fun socket(type: Int): Int {
+        override fun nativeSocket(type: Int): Int {
             calls.add("socket$type")
             return if (failWith != 0) -failWith else nextDescriptor.also { descriptors.add(it); nextDescriptor++ }
         }
 
-        override fun bind(fd: Int, address: ByteArray, port: Int): Int {
+        override fun nativeBind(fd: Int, address: ByteArray, port: Int): Int {
             calls.add("bind:${address.joinToString("") { "%02x".format(it) }}:$port")
             return if (failWith != 0) -failWith else if (failBind) -98 else 0
         }
 
-        override fun listen(fd: Int, backlog: Int): Int {
+        override fun nativeListen(fd: Int, backlog: Int): Int {
             calls.add("listen$backlog")
             return if (failWith != 0) -failWith else 0
         }
 
-        override fun accept(fd: Int): Int {
+        override fun nativeAccept(fd: Int): Int {
             calls.add("accept")
             return if (failWith != 0) -failWith else acceptDescriptor
         }
 
-        override fun recv(fd: Int, buffer: ByteArray, offset: Int, length: Int): Int {
+        override fun nativeRecv(fd: Int, buffer: ByteArray, offset: Int, length: Int): Int {
             // A stream: each read continues where the previous one stopped, and 0 is EOF. The test replaces
             // `received` to simulate EOF, so the offset is clamped to the current buffer.
             val start = receivedOffset.coerceAtMost(received.size)
@@ -73,9 +73,9 @@ class UserSpaceSessionNetworkTest {
             return count
         }
 
-        override fun send(fd: Int, buffer: ByteArray, offset: Int, length: Int): Int = length
+        override fun nativeSend(fd: Int, buffer: ByteArray, offset: Int, length: Int): Int = length
 
-        override fun sendTo(
+        override fun nativeSendTo(
             fd: Int,
             buffer: ByteArray,
             offset: Int,
@@ -87,7 +87,7 @@ class UserSpaceSessionNetworkTest {
             return if (failWith != 0) -failWith else length
         }
 
-        override fun recvFrom(
+        override fun nativeRecvFrom(
             fd: Int,
             buffer: ByteArray,
             offset: Int,
@@ -102,28 +102,28 @@ class UserSpaceSessionNetworkTest {
             return count
         }
 
-        override fun close(fd: Int): Int {
+        override fun nativeClose(fd: Int): Int {
             calls.add("close$fd")
             return 0
         }
 
-        override fun setSockOptInt(fd: Int, level: Int, option: Int, value: Int): Int {
+        override fun nativeSetSockOptInt(fd: Int, level: Int, option: Int, value: Int): Int {
             calls.add("setsockopt:$option=$value")
             return 0
         }
 
-        override fun setSockOptLinger(fd: Int, on: Boolean, seconds: Int): Int {
+        override fun nativeSetSockOptLinger(fd: Int, on: Boolean, seconds: Int): Int {
             calls.add("linger:$on:$seconds")
             return 0
         }
 
-        override fun localName(fd: Int, address: ByteArray, port: IntArray): Int {
+        override fun nativeLocalName(fd: Int, address: ByteArray, port: IntArray): Int {
             linkLocalBytes.copyInto(address)
             port[0] = 7000
             return 0
         }
 
-        override fun peerName(fd: Int, address: ByteArray, port: IntArray): Int {
+        override fun nativePeerName(fd: Int, address: ByteArray, port: IntArray): Int {
             phoneBytes.copyInto(address)
             port[0] = 53668
             return 0
