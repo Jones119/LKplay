@@ -69,7 +69,14 @@ class NcmUsbBridge internal constructor(
             this.sequence.also { this.sequence = (this.sequence + 1) and 0xffff }
         }
         val block = Ntb16Codec.build(frame, sequence)
-        val transferred = connection.bulkTransfer(outEndpoint, block, block.size, timeoutMillis)
+        // Resume a truncated bulk-out from its real offset under one shared deadline (UsbBulkWrite).
+        // The slice is only built on the rare resume, so a normal frame writes in one call.
+        val result = UsbBulkWrite.all(block.size, timeoutMillis) { offset, length, timeout ->
+            val remaining = if (offset == 0 && length == block.size) block
+            else block.copyOfRange(offset, offset + length)
+            connection.bulkTransfer(outEndpoint, remaining, remaining.size, timeout)
+        }
+        val transferred = result.written
         // Before StartCarPlaySession the phone keeps the NCM data path NAKed. Android reports the
         // resulting timeout as -1; it is not a detach and later packets must be allowed to retry.
         if (transferred <= 0) {
@@ -81,7 +88,8 @@ class NcmUsbBridge internal constructor(
         }
         if (transferred != block.size) {
             throw IphoneUsbException.DeviceUnavailable(
-                "NCM write transferred $transferred of ${block.size} bytes",
+                "NCM write transferred $transferred of ${block.size} bytes" +
+                    if (result.timedOut) " before its deadline" else "",
             )
         }
         if (loggedWriteTimeout) {
