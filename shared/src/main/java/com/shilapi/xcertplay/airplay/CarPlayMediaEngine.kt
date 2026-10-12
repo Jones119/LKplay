@@ -567,12 +567,25 @@ class CarPlayMediaEngine(
         val key = dataStreamKey(session, stream, DATASTREAM_INPUT_KEY) ?: return null
         val formatBits = (stream["audioFormat"] as? Number)?.toLong() ?: 0L
         val framesPerPacket = (stream["framesPerPacket"] as? Number)?.toInt() ?: 0
-        val frameMillis = if (format.codec == AudioCodecKind.OPUS) {
-            20
+        val preferredMillis = if (format.codec == AudioCodecKind.OPUS) {
+            MicrophoneFramePolicy.DEFAULT_MILLIS
         } else if (framesPerPacket > 0) {
-            Math.round(framesPerPacket * 1000.0 / format.sampleRate).toInt().coerceIn(5, 60)
+            Math.round(framesPerPacket * 1000.0 / format.sampleRate).toInt().coerceIn(1, 60)
         } else {
-            20
+            MicrophoneFramePolicy.DEFAULT_MILLIS
+        }
+        // Wired LPCM is capped so a sealed packet fits the NCM MTU: 20 ms at 48 kHz mono was 1956 bytes on
+        // the wire, so the phone received IPv6 fragments and recorded silence while wireless (Opus, tiny
+        // frames) kept working (docs/_digest/58 §10).
+        val frameMillis = if (format.codec == AudioCodecKind.OPUS) {
+            preferredMillis
+        } else {
+            MicrophoneFramePolicy.resolve(
+                preferredMillis = preferredMillis,
+                sampleRate = format.sampleRate,
+                channels = format.channels,
+                overrideMillis = MicrophoneFramePolicy.currentOverride(),
+            )
         }
         val opusBitrate = when {
             formatBits and OPUS_48K != 0L -> 96_000
