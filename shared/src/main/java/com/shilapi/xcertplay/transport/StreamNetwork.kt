@@ -24,6 +24,9 @@ interface DuplexSocket : Closeable {
     /** Peer address and port. The control channel logs this verbatim, so it stays one value. */
     val remoteSocketAddress: InetSocketAddress?
 
+    /** Our end of the connection; the AirPlay listener compares it with the peer to spot its own host. */
+    val localSocketAddress: InetSocketAddress?
+
     /**
      * Socket options the channels actually set (measured, not guessed): the video stream raises its
      * receive buffer and turns Nagle off, the buffered audio stream raises the buffer too, and the
@@ -104,6 +107,7 @@ private class KernelDuplexSocket(private val socket: Socket) : DuplexSocket {
     override val inputStream: InputStream get() = socket.getInputStream()
     override val outputStream: OutputStream get() = socket.getOutputStream()
     override val remoteSocketAddress: InetSocketAddress? get() = socket.remoteSocketAddress as? InetSocketAddress
+    override val localSocketAddress: InetSocketAddress? get() = socket.localSocketAddress as? InetSocketAddress
 
     override var receiveBufferSize: Int
         get() = socket.receiveBufferSize
