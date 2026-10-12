@@ -71,6 +71,12 @@ data class AirPlayConfig(
      * version or absent MediaCodec encoder alone must not remove the wireless Opus formats.
      */
     val microphoneOpus: Boolean = true,
+    /**
+     * Whether the output entries may offer Opus. Separate from [microphoneOpus] because iOS built no
+     * audio stream at all when a head unit without an encoder also advertised none (docs 27/39);
+     * [AudioOpusPolicy] only clears it for the legacy-build-parity experiment.
+     */
+    val opusOutput: Boolean = true,
     val manufacturer: String = "xcertplay",
     val model: String = "xcertplay",
     val oemLabel: String = "xcertplay",

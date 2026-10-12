@@ -56,6 +56,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.shilapi.xcertplay.airplay.CarPlayMediaButton
 import com.shilapi.xcertplay.airplay.AirPlayConfig
+import com.shilapi.xcertplay.airplay.AudioOpusPolicy
 import com.shilapi.xcertplay.airplay.AirPlayDisplaySettings
 import com.shilapi.xcertplay.airplay.AirPlayPhysicalSizeBasis
 import com.shilapi.xcertplay.airplay.AirPlayPhysicalSizeMm
@@ -3365,7 +3366,11 @@ class CarPlayHostActivity : ComponentActivity() {
             // the CS11 has no MediaCodec Opus encoder, so the microphone input is advertised only
             // when the car can really encode it (libopus or the vendored Java encoder). Output
             // formats are deliberately not gated — removing Opus there stops audio entirely.
-            microphoneOpus = com.shilapi.xcertplay.media.OpusEncoderSupport.isAvailable(),
+            // `debug.diplay.opus` moves both sides only for the experiment in docs/_digest/28.
+            microphoneOpus = AudioOpusPolicy.microphoneOpus(
+                AudioOpusPolicy.current(), com.shilapi.xcertplay.media.OpusEncoderSupport.isAvailable(),
+            ),
+            opusOutput = AudioOpusPolicy.opusOutput(AudioOpusPolicy.current()),
             manufacturer = normalizedManufacturer(),
             model = normalizedModel(),
             oemLabel = oemLabel,

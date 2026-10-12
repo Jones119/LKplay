@@ -55,6 +55,7 @@ object AirPlayInfoPlist {
                 config.microphone,
                 config.mainBufferedAudio,
                 config.microphoneOpus,
+                config.opusOutput,
                 audioFormatOverride,
             )
         }
@@ -129,6 +130,7 @@ object AirPlayInfoPlist {
         microphone: Boolean,
         mainBuffered: Boolean = false,
         microphoneOpus: Boolean = true,
+        opusOutput: Boolean = true,
         override: AudioFormatOverride = AudioFormatOverride.AUTO,
     ): List<Map<String, Any?>> {
         fun format(type: Int, audioType: String, outputFormats: Int, inputFormats: Int? = null): Map<String, Any?> {
@@ -145,7 +147,7 @@ object AirPlayInfoPlist {
         val pcmVoice = 0x3fc
         val pcm = pcmVoice or (if (is48) 0xc000 else 0xc00)
         val pcmMono = 0x154 or (if (is48) 0x4000 else 0x400)
-        val opus = 0x70000000
+        val opus = if (opusOutput) 0x70000000 else 0
         val aacLc = if (is48) 0x800000 else 0x400000
         val pcmInput = if (microphone) pcmMono else null
         // CS11: audioOutputFormats keeps advertising Opus in every entry above; only the input side

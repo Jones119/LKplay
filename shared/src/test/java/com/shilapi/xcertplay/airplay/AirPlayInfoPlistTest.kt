@@ -288,6 +288,34 @@ class AirPlayInfoPlistTest {
     }
 
     @Test
+    fun clearingTheOutputOpusFlagRemovesOpusFromEveryEntry() {
+        // `debug.diplay.opus=off`: legacy-build parity, whose /info advertises no Opus anywhere
+        // (easyplay v74 logged "opus=false"). Used to test whether our Opus advertisement is what
+        // silences a third-party voice recording over wired CarPlay (docs/_digest/28, 2026-10-12).
+        val config = AirPlayConfig(
+            deviceName = "test", deviceId = "02:00:00:00:00:02", btMac = "02:00:00:00:00:02",
+            sourceVersion = "366.0", main = AirPlayDisplayConfig(widthPixels = 1280, heightPixels = 720),
+            microphone = true,
+            microphoneOpus = true,
+            opusOutput = false,
+        )
+        val formats = (AirPlayInfoPlist.build(config)["audioFormats"] as List<*>)
+            .map { it as Map<*, *> }
+        for (format in formats) {
+            assertEquals(
+                "output Opus bit in ${format["type"]}/${format["audioType"]}",
+                0,
+                (format["audioOutputFormats"] as Int) and 0x70000000,
+            )
+            val input = format["audioInputFormats"] as? Int ?: continue
+            assertEquals("input Opus bit in ${format["type"]}/${format["audioType"]}", 0, input and 0x70000000)
+        }
+        // The microphone entries keep their PCM mono formats, so calls and Siri still record.
+        val telephony = formats.single { it["type"] == 100 && it["audioType"] == "telephony" }
+        assertEquals(0x4154, telephony["audioInputFormats"])
+    }
+
+    @Test
     fun bundledEncoderKeepsWirelessMicrophoneOpusWithoutAPlatformEncoder() {
         val config = AirPlayConfig(
             deviceName = "test", deviceId = "02:00:00:00:00:02", btMac = "02:00:00:00:00:02",

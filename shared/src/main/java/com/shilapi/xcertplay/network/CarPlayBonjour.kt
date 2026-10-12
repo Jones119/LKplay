@@ -14,6 +14,7 @@ import java.io.BufferedReader
 import java.io.Closeable
 import java.io.IOException
 import java.io.InputStreamReader
+import java.net.BindException
 import java.net.Inet4Address
 import java.net.Inet6Address
 import java.net.InetAddress
@@ -279,19 +280,33 @@ class CarPlayBonjour(
                     requireNotNull(localAdvertisedAddress) {
                         "Interface mDNS requires a local advertised address"
                     }
-                    // A JmDNS instance joins only its address family's multicast group.
+                    // A JmDNS instance joins only its address family's multicast group, but this ROM's
+                    // libcore gives JmDNS no SO_REUSEADDR on port 5353: whichever family binds first
+                    // owns the multicast socket and the next one throws EADDRINUSE. Publishing a
+                    // second family is therefore best effort and must never fail the bring-up - on
+                    // 2026-10-12 the dual-stack advertisement turned every wireless attempt into
+                    // "wireless bring-up failed" and the car retried forever (docs/_digest/28, 57).
+                    val published = ArrayList<String>(advertisedAddresses.size)
                     for (address in advertisedAddresses) {
-                        val dns = JmDNS.create(address, "carplay-${config.deviceId.replace(":", "")}")
+                        val family = if (address is Inet4Address) "IPv4" else "IPv6"
+                        val dns = try {
+                            JmDNS.create(address, "carplay-${config.deviceId.replace(":", "")}")
+                        } catch (error: BindException) {
+                            Log.w(TAG, "Bonjour $family multicast socket unavailable: ${error.message}")
+                            continue
+                        }
                         interfaceMdns.add(dns)
                         dns.addServiceListener("$CARPLAY_CONTROL_SERVICE_TYPE.local.", interfaceListener)
                         dns.registerService(ServiceInfo.create(
                             "$AIRPLAY_SERVICE_TYPE.local.", config.deviceName, config.port,
                             0, 0, CarPlayBonjourProtocol.airPlayTxtRecords(config, identity),
                         ))
+                        published.add(family)
                     }
-                    publishedFamilies = advertisedAddresses.joinToString(",") {
-                        if (it is Inet4Address) "IPv4" else "IPv6"
-                    }
+                    // Only a completely unpublished service is a failure: that is the state the
+                    // iPhone cannot discover at all.
+                    check(published.isNotEmpty()) { "No Bonjour address family could be published" }
+                    publishedFamilies = published.joinToString(",")
                 } else {
                     registerAirPlay()
                     registrationRequested = true
