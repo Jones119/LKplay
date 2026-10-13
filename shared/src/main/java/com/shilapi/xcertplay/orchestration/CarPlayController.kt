@@ -86,6 +86,7 @@ import com.shilapi.xcertplay.transport.LegacyUsbNative
 import com.shilapi.xcertplay.transport.NcmLegacyMode
 import com.shilapi.xcertplay.transport.NcmLegacyPolicy
 import com.shilapi.xcertplay.transport.UserspaceNcmTransport
+import com.shilapi.xcertplay.transport.LinkLocalAddress
 import com.shilapi.xcertplay.transport.UserSpaceNcmLink
 import com.shilapi.xcertplay.transport.BluetoothRadioCheck
 import com.shilapi.xcertplay.transport.wiredTransportDecision
@@ -1770,8 +1771,12 @@ class CarPlayController(
         // the NCM interfaces belong to us. lwIP binds raw IPv6 bytes and has no scope concept, so the
         // address the phone was told is the right one to bind, and publishing it keeps every channel - the
         // iAP tunnel included - on the address the control channel was accepted on.
+        // The address has to be the one the netif actually carries, and that is the MAC-derived EUI-64: the
+        // reference implementation's AirPlay SETUP URL reads rtsp://fe80::9c92:4fff:fe09:bf8b, the EUI-64 of
+        // the link MAC, while this path used to pin fe80::2 - an address the phone never dialled.
         val bindAddress = runCatching {
-            InetAddress.getByName(config.linkLocal.substringBefore('%'))
+            val derived = LinkLocalAddress.fromMacOrNull(link.hostMac) ?: config.linkLocal.substringBefore('%')
+            InetAddress.getByName(derived)
         }.getOrElse { InetAddress.getByName("fe80::2") }
         publishSessionBindAddress(bindAddress)
         val result = try {
@@ -2050,7 +2055,7 @@ class CarPlayController(
             val mfi = mfiSession?.client
                 ?: throw IphoneUsbException.DeviceUnavailable("MFi coprocessor client is unavailable")
             val endpoint = Iap2WiredCarPlayEndpoint(
-                ipv6Addresses = listOf(config.linkLocal),
+                ipv6Addresses = listOf(LinkLocalAddress.fromMacOrNull(ncmHostMac) ?: config.linkLocal),
                 airPlayPort = vpnService?.boundPort() ?: airPlayConfig.port,
                 publicKey = identity.publicKeyHex,
                 sourceVersion = airPlayConfig.sourceVersion,

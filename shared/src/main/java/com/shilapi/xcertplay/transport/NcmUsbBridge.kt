@@ -536,6 +536,18 @@ class NcmUsbBridge internal constructor(
                             "${layout.idle.alternate} (${LegacyUsbNative.describe(parkResult)})",
                     )
                 }
+
+                val parameters = NcmNegotiation.configure(
+                    connection, layout.control.id, layout.capabilities, onDiagnostic,
+                )
+                NcmNegotiation.enablePacketFilter(
+                    connection, layout.control.id, layout.capabilities, onDiagnostic,
+                )
+                // Then activate the data interface, which is the order the reference implementation uses and
+                // the reason its class requests succeed: measured on the car, its log reads alt=0, parameters,
+                // format16, crcOff, inputSize, alt=1, packetFilter, ready - all succeeding - while this port
+                // had been made to activate first and every one of those requests came back refused (-1)
+                // before the bring-up carried on regardless.
                 val activeResult = LegacyUsbNative.setInterface(
                     descriptor, layout.data.id, layout.data.alternate,
                 )
@@ -545,16 +557,6 @@ class NcmUsbBridge internal constructor(
                             "${layout.data.alternate} (${LegacyUsbNative.describe(activeResult)})",
                     )
                 }
-                onDiagnostic(
-                    "NCM legacy stage=activeBeforeNegotiation idle=${layout.idle.id}/" +
-                        "${layout.idle.alternate} active=${layout.data.id}/${layout.data.alternate}",
-                )
-                val parameters = NcmNegotiation.configure(
-                    connection, layout.control.id, layout.capabilities, onDiagnostic,
-                )
-                NcmNegotiation.enablePacketFilter(
-                    connection, layout.control.id, layout.capabilities, onDiagnostic,
-                )
                 NcmNegotiation.lastStall?.let { stall ->
                     onDiagnostic("NCM legacy stage=classRequestStalled detail=$stall (continuing to the data path)")
                 }

@@ -117,15 +117,18 @@ CS11_JNI(jint) Java_com_shilapi_xcertplay_transport_UserSpaceNetworkNative_nativ
 CS11_JNI(jintArray) Java_com_shilapi_xcertplay_transport_UserSpaceNetworkNative_nativeStats(
         JNIEnv *env, jobject self) {
     (void)self;
-    unsigned int counters[5] = {0, 0, 0, 0, 0};
+    /* Ten slots: the five link counters plus the IPv6 protocol histogram and the port the phone last dialled
+     * (cs11_netif_stats fills exactly these). This array and the C side have to agree - writing past five
+     * here is what killed the process once already. */
+    unsigned int counters[10] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
     cs11_netif_stats(counters);
-    jint values[5];
-    for (int i = 0; i < 5; i++) {
+    jint values[10];
+    for (int i = 0; i < 10; i++) {
         values[i] = (jint)counters[i];
     }
-    jintArray result = (*env)->NewIntArray(env, 5);
+    jintArray result = (*env)->NewIntArray(env, 10);
     if (result != NULL) {
-        (*env)->SetIntArrayRegion(env, result, 0, 5, values);
+        (*env)->SetIntArrayRegion(env, result, 0, 10, values);
     }
     return result;
 }

@@ -109,13 +109,16 @@ internal class UserSpaceNcmLink(
                 return
             }
             if (!running.get()) return
-            val native = runCatching { jni.nativeStats() }.getOrNull() ?: IntArray(5)
+            val native = runCatching { jni.nativeStats() }.getOrNull() ?: IntArray(10)
             onDiagnostic(
                 "userspace NCM link rxFrames=${native.getOrElse(0) { 0 }} rxBytes=${native.getOrElse(1) { 0 }} " +
                     "txFrames=${native.getOrElse(2) { 0 }} txBytes=${native.getOrElse(3) { 0 }} " +
                     "txDropped=${native.getOrElse(4) { 0 }} injected=$injectedFrames/$injectedBytes " +
                     "written=$writtenFrames/$writtenBytes writeFailures=$transmitFailures " +
-                    "pending=${runCatching { jni.nativeTxPending() }.getOrDefault(0)}",
+                    "pending=${runCatching { jni.nativeTxPending() }.getOrDefault(0)} " +
+                    "ipv6Rx=${native.getOrElse(5) { 0 }} tcpRx=${native.getOrElse(6) { 0 }} " +
+                    "udpRx=${native.getOrElse(7) { 0 }} icmp6Rx=${native.getOrElse(8) { 0 }} " +
+                    "lastTcpDst=${native.getOrElse(9) { 0 }}",
             )
         }
     }

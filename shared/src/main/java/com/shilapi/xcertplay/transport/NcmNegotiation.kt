@@ -37,7 +37,7 @@ internal object NcmNegotiation {
     // This was 0, so the switch asked the device to stay on (or move to) NTB-32 and the iPhone stalled the
     // request - measured on the car as "NCM class request 0x1b (request=27 value=0 index=3 ...) returned -1"
     // while the reference build's log reads format16.
-    private const val NTB16_FORMAT = 1
+    private const val NTB16_FORMAT = 0
     private const val CRC_MODE_OFF = 0
     private const val NTB16_BIT = 1
     private const val NTB32_BIT = 2
@@ -183,8 +183,10 @@ internal object NcmNegotiation {
             // detached it, so the value probably stands already - and the data path is what decides whether
             // any of these stalls mattered, which is why this no longer fails the bring-up.
             diagnostic(
-                "NCM legacy stage=inputSizeStalled value=${parameters.inputSize} " +
-                    "bytes=${size.size} index=$controlId returned=$written",
+                "NCM legacy stage=inputSizeStalled value=${parameters.inputSize} bytes=${size.size} " +
+                    "index=$controlId type=0x${CLASS_INTERFACE_HOST_TO_DEVICE.toString(16)} " +
+                    "request=0x${SET_NTB_INPUT_SIZE.toString(16)} payload=${size.joinToString("") { "%02x".format(it) }} " +
+                    "returned=$written",
             )
             return parameters
         }

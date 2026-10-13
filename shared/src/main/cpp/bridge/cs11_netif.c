@@ -112,11 +112,13 @@ int cs11_netif_start(const u8_t *host_mac, int mtu) {
         netif->hwaddr[5] = 0x55;
     }
 
-    /* IP6_ADDR takes four 32-bit words in network order (lwip/ip6_addr.h). */
-    ip6_addr_t linklocal;
-    IP6_ADDR(&linklocal, PP_HTONL(0xfe800000UL), PP_HTONL(0x00000000UL),
-             PP_HTONL(0x00000000UL), PP_HTONL(0x00000002UL));
-    netif_ip6_addr_set(netif, 0, &linklocal);
+    /* The link-local comes from the MAC, the way the reference implementation's does: the phone dials the
+     * address CarPlayStartSession named, and it never dialled the fe80::2 this used to pin - measured as zero
+     * TCP frames from the phone, while the reference (AirPlay SETUP rtsp://fe80::9c92:4fff:fe09:bf8b) streams
+     * megabytes. The Java side derives the same address from the same MAC (LinkLocalAddress), so the netif and
+     * the advertisement agree. PREFERRED right away: on a point-to-point NCM link there is no DAD to wait for,
+     * and a tentative address answers no neighbour solicitation. */
+    netif_create_ip6_linklocal_address(netif, 1);
     netif_ip6_addr_set_state(netif, 0, IP6_ADDR_PREFERRED);
 
     netif_set_up(netif);
