@@ -53,7 +53,19 @@ internal class PhoneMediaAudioWatcher(
  *
  * The iPhone may re-establish A2DP on its own, so the check is periodic rather than a one-shot.
  */
-internal class PhoneMediaAudioWatchdog(private val context: Context) {
+/**
+ * @param onLog also receives every line this watchdog writes.
+ *
+ * Measured on the car on 2026-10-13: the app's `Log.i` output does not reach logcat on this ROM, so a
+ * watchdog that logged only there was invisible -- the field log showed the `disableBluetooth` handler
+ * running and then nothing at all from the release, which read as "never called" when the release had in
+ * fact run and answered false. The caller passes its own diagnostic sink (CarPlayHostActivity passes
+ * `appendLog`) so these lines land in `/sdcard/DiPlay/logs/`.
+ */
+internal class PhoneMediaAudioWatchdog(
+    private val context: Context,
+    private val onLog: (String) -> Unit = {},
+) {
     private var thread: HandlerThread? = null
     private var handler: Handler? = null
     private var proxy: BluetoothProfile? = null
@@ -74,7 +86,11 @@ internal class PhoneMediaAudioWatchdog(private val context: Context) {
     }
 
     fun start() {
-        if (running) return
+        if (running) {
+            // Said out loud because "already running" and "never asked" looked identical in the field log.
+            log("phone media watchdog already running for $phoneAddress")
+            return
+        }
         val adapter = runCatching { context.systemServiceOrNull(BluetoothManager::class.java)?.adapter ?: android.bluetooth.BluetoothAdapter.getDefaultAdapter() }.getOrNull()
         // The stored address is the one the pairing flow saved, and it is only written there -- so on a
         // wired session it can still be missing and this watchdog used to log
@@ -84,7 +100,10 @@ internal class PhoneMediaAudioWatchdog(private val context: Context) {
         // LegacyVendorBluetoothHandoff), so ask the stack the same question here: whichever bonded device
         // is an iPhone is the one CarPlay means. This also keeps the release independent of the AirPlay
         // session having delivered `/info` at all.
-        val stored = DiPlayPreferences.phoneAddress(context)
+        // The Bluetooth key first, then the legacy field only when it really holds a MAC: on the car,
+        // `phone_address` held an IP and cost every release attempt (2026-10-13 18:41).
+        val stored = DiPlayPreferences.phoneBluetoothAddress(context)
+            ?: validPhoneAddress(DiPlayPreferences.phoneAddress(context))
         val address = stored?.takeIf { it.isNotBlank() } ?: bondedIphoneAddress(adapter)
         if (adapter == null || address.isNullOrBlank()) {
             log("phone media watchdog not started (adapter=${adapter != null} address=${!address.isNullOrBlank()})")
@@ -188,8 +207,10 @@ internal class PhoneMediaAudioWatchdog(private val context: Context) {
         }.getOrDefault(false)
     }
 
-    private fun log(message: String) {
+    internal fun log(message: String) {
         Log.i(TAG, message)
+        // The file sink is the one that survives on this ROM; a failure here must never cost the release.
+        runCatching { onLog(message) }
     }
 
     private companion object {
@@ -215,7 +236,80 @@ private fun bondedIphoneAddress(adapter: android.bluetooth.BluetoothAdapter?): S
         }?.address
     }.getOrNull()
 
-internal fun PhoneMediaAudioWatchdog.startQuietly() = runCatching { start() }
+/**
+ * Starts the watchdog, and never silently.
+ *
+ * Measured on the car on 2026-10-13: `CarPlay asked for Bluetooth off; releasing the phone's A2DP link`
+ * reached the diagnostic log and the watchdog itself then produced no line at all, in logcat or in the
+ * private log -- because the previous body was a bare `runCatching { start() }`. A release that fails in
+ * silence leaves the driver with music that stops after a second and no reason in the log, which is
+ * exactly the report this whole path exists to answer, so a failure now names itself.
+ */
+/**
+ * A Bluetooth MAC as the reference validates it (`CarPlayController.BLUETOOTH_ADDRESS`).
+ *
+ * Measured on the car on 2026-10-13 18:35: the watchdog logged `not started (bad phone address)`, so the
+ * stored preference had been handed to `getRemoteDevice` and rejected. Whatever the stored value came
+ * from, a release must not be lost to it: an address that is not a MAC is not an address, and the bonded
+ * iPhone below is the answer the reference asks its backend for anyway.
+ */
+internal val BLUETOOTH_MAC = Regex("^[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){5}$")
+
+/** [address] when it really is a MAC, null otherwise. */
+private fun validPhoneAddress(address: String?): String? =
+    address?.trim()?.takeIf { BLUETOOTH_MAC.matches(it) }
+
+internal fun PhoneMediaAudioWatchdog.startQuietly() {
+    runCatching { start() }.onFailure { error ->
+        log("phone media watchdog failed to start: ${error.javaClass.name}: ${error.message}")
+    }
+}
+
+/**
+ * Releases the phone's A2DP link once, without starting the watchdog.
+ *
+ * Split out so CarPlay's `disableBluetooth` can act immediately and independently of the watchdog's own
+ * startup: on 2026-10-13 the handler's line reached the diagnostic log while the watchdog produced no
+ * line at all, in either sink, so the command's effect must not depend on that path having gone right.
+ * The address follows the same rule as the watchdog -- the stored one, else the bonded iPhone -- and
+ * every step is logged to logcat under [DiPlay-BtAudio] so a failure names the call that did not resolve.
+ */
+internal fun releasePhoneA2dp(context: Context, onLog: (String) -> Unit = {}): Boolean {
+    fun say(message: String) {
+        Log.i(A2DP_LOG_TAG, message)
+        runCatching { onLog(message) }
+    }
+
+    return runCatching {
+        val adapter = context.systemServiceOrNull(BluetoothManager::class.java)?.adapter
+            ?: BluetoothAdapter.getDefaultAdapter()
+        // The Bluetooth key first, then the legacy field only when it really holds a MAC: on the car,
+        // `phone_address` held an IP and cost every release attempt (2026-10-13 18:41).
+        val stored = DiPlayPreferences.phoneBluetoothAddress(context)
+            ?: validPhoneAddress(DiPlayPreferences.phoneAddress(context))?.takeIf { it.isNotBlank() }
+        val address = stored ?: bondedIphoneAddress(adapter)
+        if (address.isNullOrBlank()) {
+            say("a2dp release skipped: no phone address (stored=${!stored.isNullOrBlank()})")
+            return@runCatching false
+        }
+        val vendor = VendorA2dpControl(context, address) { message -> say(message) }
+        val connected = runCatching { vendor.isConnected() }.getOrNull()
+        val hfpConnected = runCatching { vendor.isHfpConnected() }.getOrNull()
+        val released = runCatching { vendor.disconnect() }.getOrNull()
+        say(
+            "a2dp release address=$address source=${if (stored != null) "stored" else "bonded"} " +
+                "connected=$connected hfp=$hfpConnected released=$released",
+        )
+        runCatching { DiPlayPreferences.savePhone(context, address, DiPlayPreferences.phoneName(context)) }
+        released == true
+    }.getOrElse { error ->
+        say("a2dp release failed: ${error.javaClass.name}: ${error.message}")
+        false
+    }
+}
+
+/** The logcat tag the A2DP release uses, shared with [PhoneMediaAudioWatchdog]'s own lines. */
+internal const val A2DP_LOG_TAG = "DiPlay-BtAudio"
 
 /**
  * The head unit's own adapter API (`com.ecarx.xui.adaptapi`, in `/system/framework/ecarx.adapterapi.jar`)

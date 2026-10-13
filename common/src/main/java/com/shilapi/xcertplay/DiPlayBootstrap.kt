@@ -52,6 +52,23 @@ internal object DiPlayBootstrap {
 internal object DiPlayPreferences {
     private fun prefs(context: Context) = context.getSharedPreferences("diplay", Context.MODE_PRIVATE)
     fun phoneAddress(context: Context): String? = prefs(context).getString("phone_address", null)
+
+    /**
+     * The phone's Bluetooth MAC, kept apart from [phoneAddress].
+     *
+     * Measured on the car on 2026-10-13 18:41: the A2DP release was handed an *IP* out of `phone_address`
+     * (the redactor labelled it `[ip]`), so `getRemoteDevice` answered `bad phone address` and every
+     * release attempt was lost. That field belongs to the wireless flow's own addressing, so the
+     * Bluetooth address gets its own key and only ever holds something that is really a MAC.
+     */
+    fun phoneBluetoothAddress(context: Context): String? =
+        prefs(context).getString("phone_bt_address", null)
+
+    fun savePhoneBluetoothAddress(context: Context, address: String) {
+        if (!BLUETOOTH_MAC.matches(address.trim())) return
+        prefs(context).edit().putString("phone_bt_address", address.trim()).apply()
+    }
+
     fun phoneName(context: Context): String = prefs(context).getString("phone_name", null) ?: "Your iPhone"
     fun savePhone(context: Context, address: String, name: String) {
         prefs(context).edit().putString("phone_address", address).putString("phone_name", name).apply()

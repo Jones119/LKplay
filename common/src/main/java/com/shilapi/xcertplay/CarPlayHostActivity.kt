@@ -3657,7 +3657,7 @@ class CarPlayHostActivity : ComponentActivity() {
      * iPhone stays A2DP-paired to this head unit, so iOS 26 even asks for the link to go away itself
      * (the `disableBluetooth` command below).
      */
-    private val mediaAudioWatchdog by lazy { PhoneMediaAudioWatchdog(this) }
+    private val mediaAudioWatchdog by lazy { PhoneMediaAudioWatchdog(this) { appendLog(it) } }
 
     private fun createSessionListener(controllerGeneration: Int): AirPlaySessionListener =
         object : AirPlaySessionListener {
@@ -3691,8 +3691,23 @@ class CarPlayHostActivity : ComponentActivity() {
              */
             override fun onCommand(session: AirPlaySession, type: String, params: Map<String, Any?>) {
                 if (!type.equals("disableBluetooth", ignoreCase = true)) return
-                appendLog("CarPlay asked for Bluetooth off; releasing the phone's A2DP link")
-                mediaAudioWatchdog.startQuietly()
+                // Wrapped so a failure names itself: on 2026-10-13 the log showed the line below and then
+                // nothing from the watchdog, which is indistinguishable from "the phone was never asked".
+                // The direct release is called as well as the watchdog: the watchdog owns the periodic
+                // re-check and the address bookkeeping, while this call is the one that must not depend on
+                // any of that having gone right first.
+                runCatching {
+                    android.util.Log.i("DiPlay-BtAudio", "disableBluetooth received; releasing the phone's A2DP link")
+                    appendLog("CarPlay asked for Bluetooth off; releasing the phone's A2DP link")
+                    val released = releasePhoneA2dp(this@CarPlayHostActivity) { appendLog(it) }
+                    android.util.Log.i("DiPlay-BtAudio", "disableBluetooth release -> a2dpReleased=$released")
+                    appendLog("released the phone's A2DP link=$released")
+                    mediaAudioWatchdog.startQuietly()
+                    android.util.Log.i("DiPlay-BtAudio", "disableBluetooth watchdog start requested")
+                }.onFailure { error ->
+                    android.util.Log.i("DiPlay-BtAudio", "disableBluetooth handling failed: ${error.javaClass.name}: ${error.message}")
+                    appendLog("releasing the phone's A2DP link failed: ${error.javaClass.name}: ${error.message}")
+                }
             }
 
             /**
@@ -3707,9 +3722,9 @@ class CarPlayHostActivity : ComponentActivity() {
              */
             override fun onDeviceInfo(session: AirPlaySession, info: AirPlayDeviceInfo) {
                 if (info.deviceId.count { it == ':' } != 5) return
-                val known = DiPlayPreferences.phoneAddress(this@CarPlayHostActivity)
+                val known = DiPlayPreferences.phoneBluetoothAddress(this@CarPlayHostActivity)
                 if (known != null && known.equals(info.deviceId, ignoreCase = true)) return
-                DiPlayPreferences.savePhone(this@CarPlayHostActivity, info.deviceId, info.name)
+                DiPlayPreferences.savePhoneBluetoothAddress(this@CarPlayHostActivity, info.deviceId)
                 appendLog("recorded the phone's Bluetooth address ${info.deviceId}")
                 mediaAudioWatchdog.startQuietly()
             }
