@@ -10,7 +10,7 @@ import android.hardware.usb.UsbDeviceConnection
  * codes are known to work against this iPhone. The decompiled legacy build uses the same sequence
  * and values but its literal codes are unusable: jadx rendered them as TLS cipher-suite constants
  * (`control(connection, TLS_RSA_WITH_CAMELLIA_256_CBC_SHA, 0, …)`), which is why the codes below are
- * the specification's (`GET_NTB_PARAMETERS 0x80`, `SET_NTB_FORMAT 0x1B`, `SET_CRC_MODE 0x1E`,
+ * the codes the reference binary actually sends, recovered from the TLS names jadx rendered them as
  * `SET_NTB_INPUT_SIZE 0x1F`, `SET_ETHERNET_PACKET_FILTER 0x43`) while the order, the value logic and
  * the validation follow the legacy build (docs/_digest/58 §5 item 5). That build's car log shows
  * `parameters input=16384 output=16384 divisor=4 remainder=0 alignment=4`, `format16`, `crcOff`,
@@ -28,9 +28,9 @@ internal object NcmNegotiation {
     private const val CLASS_INTERFACE_DEVICE_TO_HOST = 0xA1
     private const val CLASS_INTERFACE_HOST_TO_DEVICE = 0x21
     private const val GET_NTB_PARAMETERS = 0x80
-    private const val SET_NTB_FORMAT = 0x1B
-    private const val SET_CRC_MODE = 0x1E
-    private const val SET_NTB_INPUT_SIZE = 0x1F
+    private const val SET_NTB_FORMAT = 0x84
+    private const val SET_CRC_MODE = 0x8A
+    private const val SET_NTB_INPUT_SIZE = 0x86
     private const val SET_ETHERNET_PACKET_FILTER = 0x43
     private const val CONTROL_TIMEOUT_MILLIS = 1_000
     // CDC-NCM `SET_NTB_FORMAT` encodes the requested format in wValue: 0 selects NTB-32 and 1 selects NTB-16.
