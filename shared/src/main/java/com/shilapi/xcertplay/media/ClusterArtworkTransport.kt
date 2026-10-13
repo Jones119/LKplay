@@ -153,6 +153,21 @@ internal const val CLUSTER_ARTWORK_SHARED_ROOT = "DiPlay"
 internal const val CLUSTER_ARTWORK_SDCARD_ROOT = "/sdcard"
 
 /**
+ * The car media centre's own cover directory, and the one tree a cluster cover is measured to come from.
+ *
+ * Measured 2026-10-13 by playing the same track through the car's own player and through this app and
+ * reading `com.ecarx.dim_interaction`'s log for both: the player hands over
+ * `file:///sdcard/Music/mediacenter/images/天龙八部之宿敌-….jpg`, the service logs `CHANGE COVER:` and
+ * `DimImageUtils: originalWidth:300 originalHeight:300`, and the instrument cluster draws it. The same
+ * service accepted our own `file:///sdcard/DiPlay/cluster-artwork/<session>/<uuid>.jpg` with a
+ * `CHANGE COVER:` of its own but never ran `DimImageUtils` for it, and the cluster kept its placeholder.
+ */
+internal const val CLUSTER_ARTWORK_CAR_MEDIA_IMAGES = "/sdcard/Music/mediacenter/images"
+
+/** Marks the covers this app parks in [CLUSTER_ARTWORK_CAR_MEDIA_IMAGES], so a sweep can tell them apart. */
+private const val CLUSTER_ARTWORK_CAR_MEDIA_PREFIX = "diplay-"
+
+/**
  * The other spellings of that one volume this ROM was measured to expose, without `/sdcard` itself.
  *
  * They are the prefixes [clusterArtworkSdcardSpelling] rewrites. `/mnt/sdcard` and `/storage/sdcard0`
@@ -474,6 +489,26 @@ internal fun parseArtworkTierOverride(property: String?): ClusterArtworkTier? =
 /** [CLUSTER_ARTWORK_TIER_OVERRIDE] as read from the system properties, or null when it is not forcing one. */
 internal fun clusterArtworkTierOverride(): ClusterArtworkTier? =
     parseArtworkTierOverride(debugProperty(CLUSTER_ARTWORK_TIER_OVERRIDE))
+
+/** The characters a file name may not carry on this volume, plus the control range. */
+private val CAR_MEDIA_FORBIDDEN_NAME_CHARS = Regex("[\\\\/:*?\"<>|\\u0000-\\u001f]")
+
+/**
+ * The car media centre's own cover name for a track: `<title>-<album>-<artist>.jpg`.
+ *
+ * Measured on the car on 2026-10-13 (17:01, while the car's own player was showing a cover on the
+ * instrument cluster): that directory holds `逆光-我怀念的-孙燕姿.jpg`, so the convention is part of how
+ * the working case names its files. A track with no title answers null, which leaves the caller's unique
+ * name in place -- a cover nothing can pair with the metadata is no better than one with a uglier name.
+ */
+internal fun carMediaArtworkFileName(title: String?, album: String?, artist: String?): String? {
+    fun clean(value: String?): String? =
+        value?.replace(CAR_MEDIA_FORBIDDEN_NAME_CHARS, "_")?.trim()?.takeIf { it.isNotEmpty() }
+
+    val cleanTitle = clean(title) ?: return null
+    val parts = listOfNotNull(cleanTitle, clean(album), clean(artist))
+    return parts.joinToString("-").take(120) + ".jpg"
+}
 
 /**
  * What the vendor is handed for one handover: the override when it is usable, the computed Uri
@@ -1238,11 +1273,24 @@ internal class ClusterArtworkStore(
      * loopback server is *started* only after that write succeeded and is told about the directory it
      * must serve, so a car whose storage refuses the cover never pays for a port either.
      */
-    fun publish(bitmap: Bitmap): Uri? {
+    fun publish(bitmap: Bitmap, carMediaName: String? = null): Uri? {
         val encoded = encodeCover(bitmap) ?: return null
         // A forced tier skips the shapes it did not ask for. CONTENT is served by the provider out of
         // the *cache* copy, so it must not take the shared-tree write; FILE and HTTP both need it.
         val forced = clusterArtworkTierOverride()
+        // The car media centre's own images tree first, because it is the one tree a cover is *measured*
+        // to be drawn from on this car. 2026-10-13, car's own player vs us, same baseMediaType=6 and the
+        // same `CHANGE COVER:` line in com.ecarx.dim_interaction:
+        //   theirs  albumCover2 = file:///sdcard/Music/mediacenter/images/天龙八部之宿敌-….jpg -> DimImageUtils
+        //           logged `originalWidth:300 originalHeight:300` and the cluster drew it
+        //   ours    file:///sdcard/DiPlay/cluster-artwork/<session>/<uuid>.jpg -> DimImageUtils never ran,
+        //           FrameBuilder built a text-only payload.length:152, the cluster kept its placeholder
+        // The service accepts either string (it only rejects a Uri containing "http"), so the difference
+        // is the file, not the handover: this is the same directory, the same flat shape and the same
+        // `file://` scheme the working case uses.
+        if (forced == null || forced == ClusterArtworkTier.FILE) {
+            publishIntoCarMediaImages(encoded, forced, carMediaName)?.let { return it }
+        }
         val base = if (forced == ClusterArtworkTier.CONTENT) null else selector.select(encoded)
         if (base != null) {
             // The cover lands under the session directory of the base that just read its own probe back.
@@ -1426,6 +1474,42 @@ internal class ClusterArtworkStore(
      * itself, and even when it is a copy the next candidate's write simply overwrites it, so a failed
      * attempt cannot destroy the cover of the attempt that follows.
      */
+    private fun publishIntoCarMediaImages(
+        encoded: File,
+        forced: ClusterArtworkTier?,
+        carMediaName: String?,
+    ): Uri? {
+        // Only ever written into a tree that already exists: it is the car media centre's own, and a car
+        // without it (or a host JVM) must fall through to the tier walk rather than have us invent it.
+        if (!raw.isDirectory(File(CLUSTER_ARTWORK_CAR_MEDIA_IMAGES))) {
+            return null
+        }
+        // The car media centre names its covers `<title>-<album>-<artist>.jpg`, measured on the car
+        // (2026-10-13 17:01, `/sdcard/Music/mediacenter/images/逆光-我怀念的-孙燕姿.jpg`), and the DIM
+        // service renders those. Our earlier `diplay-<uuid>-<uuid>.jpg` in the same directory was
+        // accepted with a `CHANGE COVER:` of its own and still never reached `DimImageUtils`, so the
+        // name is the remaining difference we can act on: use exactly that convention, and fall back to
+        // the unique name only when the phone has not told us what is playing.
+        val name = carMediaName ?: "$CLUSTER_ARTWORK_CAR_MEDIA_PREFIX$session-${encoded.name}"
+        val target = File(CLUSTER_ARTWORK_CAR_MEDIA_IMAGES, name)
+        if (!deliverToBase(encoded, target)) {
+            // Not writable for us, or not readable back: the tier walk below is unchanged, so a car that
+            // refuses this tree still gets the cover it used to get.
+            return null
+        }
+        val delivered = target.absolutePath
+        // The shared file *is* the delivered one here, so the cache copy has no reader left -- the same
+        // move the loopback tier makes. Retained so the session end deletes it with the rest.
+        runCatching { encoded.delete() }
+        evict(retention.add(ClusterArtworkRetention.Entry(target, uriFor(delivered), delivered = true)))
+        Log.i(
+            TAG,
+            "cluster artwork tier=car-media-images forced=${forced ?: "none"} bytes=${target.length()} " +
+                "uri=${uriFor(delivered)} source=$CLUSTER_ARTWORK_SOURCE_TIER",
+        )
+        return uriFor(delivered)
+    }
+
     private fun deliverToBase(encoded: File, target: File): Boolean {
         return try {
             val directory = target.parentFile

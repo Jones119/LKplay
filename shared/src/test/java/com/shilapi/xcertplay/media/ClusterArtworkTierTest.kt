@@ -143,4 +143,23 @@ class ClusterArtworkTierTest {
         assertNull(parseArtworkTierOverride("file:///sdcard/DiPlay/cluster-artwork/a/b.jpg"))
         assertNull(parseArtworkTierOverride("https"))
     }
+
+    /**
+     * The name a cover carries in the car media centre's own tree, which is the shape the cluster draws.
+     *
+     * Measured on the car on 2026-10-13: `/sdcard/Music/mediacenter/images/逆光-我怀念的-孙燕姿.jpg` is
+     * one of the media centre's own covers, written while its player was on screen with the cover showing
+     * on the instrument cluster.
+     */
+    @Test
+    fun theCarMediaCoverNameFollowsTheConventionTheClusterDraws() {
+        assertEquals("逆光-我怀念的-孙燕姿.jpg", carMediaArtworkFileName("逆光", "我怀念的", "孙燕姿"))
+        assertEquals("甲-乙.jpg", carMediaArtworkFileName("甲", "乙", null))
+        assertEquals("Only Title.jpg", carMediaArtworkFileName("Only Title", null, null))
+        // No title means nothing to pair the cover with, so the caller's unique name stays.
+        assertNull(carMediaArtworkFileName(null, "album", "artist"))
+        assertNull(carMediaArtworkFileName("   ", "album", "artist"))
+        // No separator a file name may not carry survives, and the parts are trimmed.
+        assertEquals("a_b-c_d-e.jpg", carMediaArtworkFileName("a/b", "c:d", " e "))
+    }
 }

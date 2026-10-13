@@ -295,7 +295,13 @@ object VendorClusterBridge {
             artworkUri = null
             artworkStore?.clear()
         } else {
-            val computed = artworkStore(context).publish(bitmap)
+            // The cover is named after the track, the way the car media centre names its own, so the
+            // handover speaks the convention the cluster's working case uses (see
+            // [carMediaArtworkFileName]); a track whose metadata never arrived keeps the unique name.
+            val computed = artworkStore(context).publish(
+                bitmap,
+                carMediaArtworkFileName(lastMedia?.title, lastMedia?.album, lastMedia?.artist),
+            )
             artworkUri = handoverUri(property, computed)
         }
         val accepted = parseArtworkUriOverride(property)
