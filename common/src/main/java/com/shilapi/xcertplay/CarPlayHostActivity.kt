@@ -3645,11 +3645,27 @@ class CarPlayHostActivity : ComponentActivity() {
             audioCaptureDirectory = audioCaptureDirectory(),
         )
 
+    /**
+     * Releases the phone's Bluetooth media link while CarPlay owns the audio.
+     *
+     * The CS11's own engine (`com.ecarx.multimedia`'s `BTMusicPlaybackEngine`) pauses whatever the phone
+     * plays over its A2DP link whenever the head unit's current source is not Bluetooth, which is what
+     * the field reports as "the music stops one second after play" (docs/_digest/27 §6sexies, measured
+     * 2026-10-07: `[AVRCP_PLAYING_STATUS_ID_PLAYING]` -> `NotToPlay current audio is not bt,so pause bt
+     * music` -> `reqAvrcpPause` -> `[AVRCP_PLAYING_STATUS_ID_PAUSED]`). Wired CarPlay hits it too: the
+     * iPhone stays A2DP-paired to this head unit, so iOS 26 even asks for the link to go away itself
+     * (the `disableBluetooth` command below).
+     */
+    private val mediaAudioWatchdog by lazy { PhoneMediaAudioWatchdog(this) }
+
     private fun createSessionListener(controllerGeneration: Int): AirPlaySessionListener =
         object : AirPlaySessionListener {
             private val diagnosticLog = sessionLog
 
             override fun onSessionActive(session: AirPlaySession) {
+                // Started here as well as by DiPlaySessionService: the release is what keeps the phone
+                // playing at all, and the service is not always the thing that brought the session up.
+                mediaAudioWatchdog.startQuietly()
                 runOnUiThread {
                     if (controllerGeneration != restartGeneration) {
                         return@runOnUiThread
@@ -3662,6 +3678,20 @@ class CarPlayHostActivity : ComponentActivity() {
                     if (menuOpen) return@runOnUiThread
                     appendLog("AirPlay session active")
                 }
+            }
+
+            /**
+             * iOS asks the accessory to drop its Bluetooth link once CarPlay owns the media audio.
+             *
+             * The command arrives on both transports; only the wireless handoff used to look at it, so a
+             * wired session ignored it and the head unit kept pausing the phone over A2DP. Releasing the
+             * link is the protocol's own remedy (the same release `PhoneMediaAudioWatchdog` performs
+             * periodically, because the iPhone may re-establish A2DP on its own).
+             */
+            override fun onCommand(session: AirPlaySession, type: String, params: Map<String, Any?>) {
+                if (!type.equals("disableBluetooth", ignoreCase = true)) return
+                appendLog("CarPlay asked for Bluetooth off; releasing the phone's A2DP link")
+                mediaAudioWatchdog.startQuietly()
             }
 
             override fun onVideoFrameRendered(session: AirPlaySession) {
