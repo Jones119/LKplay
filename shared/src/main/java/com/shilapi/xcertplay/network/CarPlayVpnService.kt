@@ -168,38 +168,6 @@ class CarPlayVpnService : VpnService() {
         }
     }
 
-    /**
-     * CS11 rooted path: binds the AirPlay listener on a kernel netdev address (the iPhone's NCM
-     * interface owned by cdc_ncm) without establishing a VPN tunnel or a raw-USB NCM bridge.
-     * The CS11 kernel cannot create TUN interfaces, so this replaces [attach] on that platform.
-     */
-    @Synchronized
-    fun attachSystemNetdev(
-        bindAddress: InetAddress,
-        config: AirPlayConfig,
-        identity: AirPlayIdentity,
-        pairings: PairingStore,
-        mfi: MfiAuthenticator?,
-        listener: AirPlaySessionListener,
-        media: AirPlayMediaHandler,
-    ): AttachResult {
-        if (active.get()) {
-            Log.i(TAG, "replacing stale system-netdev attachment")
-            releaseLocked()
-        }
-        active.set(true)
-        val generation = ++attachGeneration
-        return try {
-            startAirPlayServer(
-                generation,
-                AirPlayAttachment(bindAddress, config, identity, pairings, mfi, listener, media),
-            )
-            AttachResult.Started
-        } catch (error: Exception) {
-            releaseLocked()
-            AttachResult.Failed(error.message ?: error.javaClass.simpleName)
-        }
-    }
 
     /** Releases the active AirPlay listener and whichever VPN/NCM transport resources are active. */
     @Synchronized

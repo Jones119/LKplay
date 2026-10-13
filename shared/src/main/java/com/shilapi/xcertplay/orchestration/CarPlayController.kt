@@ -64,7 +64,6 @@ import com.shilapi.xcertplay.transport.Iap2IdentificationConfig
 import com.shilapi.xcertplay.transport.Iap2LocationProvider
 import com.shilapi.xcertplay.transport.Iap2UsbMuxHost
 import com.shilapi.xcertplay.transport.Iap2UsbSession
-import com.shilapi.xcertplay.network.Cs11NetdevBootstrap
 import com.shilapi.xcertplay.transport.Iap2WiredCarPlayEndpoint
 import com.shilapi.xcertplay.transport.Iap2WiredControlClient
 import com.shilapi.xcertplay.transport.Iap2WiredControlTerminal
@@ -1939,13 +1938,11 @@ class CarPlayController(
             val ncmHostMac = ncm?.hostMac ?: userSpaceLink?.hostMac ?: config.hostMac
             debugLog("ncm using hostMac=${ncmHostMac.macString()}")
             // CS11: the kernel has no TUN driver, so the classic VpnService/NCM bridge cannot
-            // attach ("Cannot create interface"). Three transports exist here, in order of preference:
-            // the userspace bridge that owns lwIP (API 19, no root), the kernel cdc_ncm netdev + root
-            // fire (API 19, debug fallback), and VpnService/NCM (API 21+). See docs/_digest/58.
+            // attach ("Cannot create interface"). Two transports remain (docs/_digest/58 §9): the userspace
+            // bridge that owns lwIP (API 19, no root) and VpnService/NCM (API 21+). The kernel cdc_ncm netdev
+            // and its root fire are deleted - they needed adb and root to fire, so they were never shippable.
             val userspace = userSpaceLink
-            val directNetdev = userspace == null && Build.VERSION.SDK_INT < 21 &&
-                Cs11NetdevBootstrap.supported && attachSystemNetdev()
-            if (!directNetdev) {
+            if (true) {
                 if (userspace != null) {
                     if (attachUserspace(userspace)) {
                         userspaceAttached = true
@@ -1966,10 +1963,7 @@ class CarPlayController(
                 }
             }
             ncmOwnedLocally = false
-            debugLog(
-                "wired AirPlay transport attached kernelNetdev=$directNetdev " +
-                    "userspaceLwip=${userspace != null}",
-            )
+            debugLog("wired AirPlay transport attached userspaceLwip=${userspace != null}")
             if (closed) {
                 vpnService?.detach()
                 return
@@ -2404,68 +2398,6 @@ class CarPlayController(
         config.transport == CarPlayTransport.WIRED -> Iap2WiredControlClient.NO_TIMEOUT_MILLIS
         config.locationReportingEnabled -> LOCATION_CONTROL_LOOP_TIMEOUT_MILLIS
         else -> CONTROL_LOOP_TIMEOUT_MILLIS
-    }
-
-    /**
-     * CS11: binds the AirPlay listener on the kernel cdc_ncm netdev address (usb1) with no VPN
-     * tunnel and no raw-USB NCM bridge; the kernel network stack carries all IPv6 traffic.
-     * Returns false when the netdev path is unavailable so the caller can fall back.
-     */
-    private fun attachSystemNetdev(): Boolean {
-        val service = awaitVpnService() ?: run {
-            debugLog("CS11 netdev: VPN service bind failed")
-            return false
-        }
-        val netdev = Cs11NetdevBootstrap.ensure(config.linkLocal, log = ::debugLog) ?: return false
-        val bindAddress = Cs11NetdevBootstrap.scopedAddress(config.linkLocal, netdev.linkLocal.scopeId)
-            ?: netdev.linkLocal
-        onStatus(CarPlayStatus.AttachingNetwork)
-        var attempt = 0
-        while (attempt < 4) {
-            attempt++
-            val result = try {
-                service.attachSystemNetdev(
-                    bindAddress = bindAddress,
-                    config = airPlayConfig,
-                    identity = identity,
-                    pairings = pairings,
-                    mfi = mfiSession?.client,
-                    listener = sessionListener,
-                    media = media,
-                )
-            } catch (error: Throwable) {
-                debugLog("CS11 netdev: attach error ${error.message}")
-                return false
-            }
-            when (result) {
-                CarPlayVpnService.AttachResult.Started -> {
-                    debugLog(
-                        "CS11 netdev: AirPlay listener on ${bindAddress.hostAddress}" +
-                            " port=${service.boundPort()} (attempt $attempt)",
-                    )
-                    return true
-                }
-                CarPlayVpnService.AttachResult.AlreadyStarted -> {
-                    debugLog("CS11 netdev: attach reported already-started")
-                    return false
-                }
-                is CarPlayVpnService.AttachResult.Failed -> {
-                    debugLog("CS11 netdev: attach failed ${result.message} (attempt $attempt)")
-                    // EADDRNOTAVAIL: the link-local address is still in DAD (tentative) right
-                    // after the netdev comes up; the kernel rejects binds until it settles.
-                    val transient = result.message?.contains("EADDRNOTAVAIL") == true ||
-                        result.message?.contains("Cannot assign") == true
-                    if (!transient) return false
-                }
-            }
-            try {
-                Thread.sleep(1500)
-            } catch (_: InterruptedException) {
-                return false
-            }
-        }
-        debugLog("CS11 netdev: attach failed after $attempt attempts")
-        return false
     }
 
     private fun attachVpn(ncm: NcmUsbBridge, hostMac: ByteArray): Boolean {
