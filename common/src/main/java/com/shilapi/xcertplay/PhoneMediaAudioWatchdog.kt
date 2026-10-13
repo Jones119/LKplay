@@ -102,7 +102,12 @@ internal class PhoneMediaAudioWatchdog(
         // session having delivered `/info` at all.
         // The Bluetooth key first, then the legacy field only when it really holds a MAC: on the car,
         // `phone_address` held an IP and cost every release attempt (2026-10-13 18:41).
-        val stored = DiPlayPreferences.phoneBluetoothAddress(context)
+        // Both fields are validated as MACs before use: the legacy one holds an IP on this car, and the
+        // Bluetooth one is written by other paths too, so an unvalidated value reaches getRemoteDevice and
+        // comes back as "bad phone address" -- measured on 2026-10-13, which left the periodic re-check
+        // switched off while the direct release (which validated first) worked, so a phone that
+        // re-established HFP mid-drive was never released again.
+        val stored = validPhoneAddress(DiPlayPreferences.phoneBluetoothAddress(context))
             ?: validPhoneAddress(DiPlayPreferences.phoneAddress(context))
         val address = stored?.takeIf { it.isNotBlank() } ?: bondedIphoneAddress(adapter)
         if (adapter == null || address.isNullOrBlank()) {
@@ -285,7 +290,12 @@ internal fun releasePhoneA2dp(context: Context, onLog: (String) -> Unit = {}): B
             ?: BluetoothAdapter.getDefaultAdapter()
         // The Bluetooth key first, then the legacy field only when it really holds a MAC: on the car,
         // `phone_address` held an IP and cost every release attempt (2026-10-13 18:41).
-        val stored = DiPlayPreferences.phoneBluetoothAddress(context)
+        // Both fields are validated as MACs before use: the legacy one holds an IP on this car, and the
+        // Bluetooth one is written by other paths too, so an unvalidated value reaches getRemoteDevice and
+        // comes back as "bad phone address" -- measured on 2026-10-13, which left the periodic re-check
+        // switched off while the direct release (which validated first) worked, so a phone that
+        // re-established HFP mid-drive was never released again.
+        val stored = validPhoneAddress(DiPlayPreferences.phoneBluetoothAddress(context))
             ?: validPhoneAddress(DiPlayPreferences.phoneAddress(context))?.takeIf { it.isNotBlank() }
         val address = stored ?: bondedIphoneAddress(adapter)
         if (address.isNullOrBlank()) {
