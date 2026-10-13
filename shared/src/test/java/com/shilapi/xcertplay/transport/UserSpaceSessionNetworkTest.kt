@@ -141,7 +141,7 @@ class UserSpaceSessionNetworkTest {
         val network = UserSpaceSessionNetwork(jni)
         val server = network.listen(linkLocal, 7000, backlog = 50, reuseAddress = true)
         assertEquals("socket1", jni.calls[0])
-        assertEquals("setsockopt:2=1", jni.calls[1])
+        assertEquals("setsockopt:4=1", jni.calls[1])
         assertTrue("bind was ${jni.calls[2]}", jni.calls[2].startsWith("bind:fe80") && jni.calls[2].endsWith(":7000"))
         assertEquals("listen50", jni.calls[3])
         assertTrue(server.localPort > 0)
@@ -161,7 +161,7 @@ class UserSpaceSessionNetworkTest {
         assertTrue(jni.calls.last().startsWith("sendTo:") && jni.calls.last().endsWith(":53668"))
         transport.receiveBufferSize = 262_144
         assertEquals(262_144, transport.receiveBufferSize)
-        assertTrue(jni.calls.contains("setsockopt:8=262144"))
+        assertTrue(jni.calls.contains("setsockopt:4098=262144"))
     }
 
     @Test
@@ -218,8 +218,8 @@ class UserSpaceSessionNetworkTest {
         socket.receiveBufferSize = 4096
         socket.setSoLinger(true, 1)
         assertTrue(jni.calls.contains("setsockopt:1=1"))
-        assertTrue(jni.calls.contains("setsockopt:9=1"))
-        assertTrue(jni.calls.contains("setsockopt:8=4096"))
+        assertTrue(jni.calls.contains("setsockopt:8=1"))
+        assertTrue(jni.calls.contains("setsockopt:4098=4096"))
         assertTrue(jni.calls.contains("linger:true:1"))
         socket.close()
         server.close()

@@ -1,3 +1,7 @@
+/* Enable SO_REUSEADDR: the wired session sets it on every listener, and lwIP only recognises the option
+ * when this is on - without it lwip_setsockopt answers ENOPROTOOPT (errno 92), which kept the userspace
+ * AirPlay listener from attaching (measured on the car). */
+#define LWIP_SO_REUSE 1
 /*
  * lwIP configuration for the CS11 userspace NCM bridge (docs/_digest/58 §7).
  *

@@ -222,11 +222,11 @@ internal class UserSpaceSessionNetwork(
         const val AF_INET6 = 10
         const val SOCK_STREAM = 1
         const val SOCK_DGRAM = 2
-        const val SOL_SOCKET = 1
-        const val SO_REUSEADDR = 2
-        const val SO_RCVBUF = 8
-        const val SO_KEEPALIVE = 9
-        const val SO_RCVTIMEO = 20
+        const val SOL_SOCKET = 0xFFF
+        const val SO_REUSEADDR = 0x0004
+        const val SO_RCVBUF = 0x1002
+        const val SO_KEEPALIVE = 0x0008
+        const val SO_RCVTIMEO = 0x1006
         const val IPPROTO_TCP = 6
         const val TCP_NODELAY = 1
 
