@@ -296,9 +296,16 @@ internal fun releasePhoneA2dp(context: Context, onLog: (String) -> Unit = {}): B
         val connected = runCatching { vendor.isConnected() }.getOrNull()
         val hfpConnected = runCatching { vendor.isHfpConnected() }.getOrNull()
         val released = runCatching { vendor.disconnect() }.getOrNull()
+        // HFP goes with A2DP, wired included. The requirement is that calls stay inside CarPlay: while
+        // HFP stays connected the head unit's own dialer takes them over -- the same rule the periodic
+        // watcher follows (PhoneMediaAudioWatchdog.kt, `CarPlay has to own phone calls`) and the same pair
+        // the reference reports (LegacyVendorBluetoothHandoff.Result: a2dpHandled, hfpHandled).
+        // Confirmed on the car on 2026-10-13: releasing only A2DP left the head unit showing
+        // Bluetooth + phone (HFP) and kept its dialer in play.
+        val hfpReleased = if (hfpConnected == true) runCatching { vendor.disconnectHfp() }.getOrNull() else null
         say(
             "a2dp release address=$address source=${if (stored != null) "stored" else "bonded"} " +
-                "connected=$connected hfp=$hfpConnected released=$released",
+                "connected=$connected hfp=$hfpConnected released=$released hfpReleased=$hfpReleased",
         )
         runCatching { DiPlayPreferences.savePhone(context, address, DiPlayPreferences.phoneName(context)) }
         released == true

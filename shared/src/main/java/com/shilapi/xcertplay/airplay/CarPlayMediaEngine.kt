@@ -64,6 +64,15 @@ class CarPlayMediaEngine(
      * session starts (docs/_digest/58 §6 step 7).
      */
     @Volatile internal var network: SessionNetwork = KernelSessionNetwork
+        set(value) {
+            field = value
+            // The microphone uplink is built by the sink, not by this engine, so the stack the session was
+            // switched to has to reach it: otherwise the mic keeps the kernel default while every other
+            // channel runs on lwIP, and on this ROM the platform layer rejects the link-local it then
+            // binds (measured 2026-10-13: `stage=SOCKET_CREATION reason=ipv6-scope-id-required`, which
+            // recorded WeChat voice notes as silence).
+            (sink as? com.shilapi.xcertplay.media.AndroidMediaSink)?.network = value
+        }
 
     internal data class StreamKey(
         val session: AirPlaySession,

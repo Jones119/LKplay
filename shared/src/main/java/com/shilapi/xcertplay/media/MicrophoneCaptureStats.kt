@@ -108,7 +108,41 @@ internal class MicrophoneCaptureStats(
             code: Int?,
         ): String = "Microphone: failure $metadata stage=${stage.name} " +
             "error=${error?.javaClass?.simpleName?.replace(Regex("[^A-Za-z0-9_]"), "")?.take(64) ?: "none"} " +
+            "reason=${failureReason(error)} " +
             "code=${code ?: "none"}"
+
+        /**
+         * The failure's kind, from a fixed vocabulary — never its message.
+         *
+         * Measured on the car on 2026-10-13: the wired microphone failed with
+         * `stage=SOCKET_CREATION error=SocketException code=none`, and a bare class name cannot tell
+         * "the address is not bindable" from "lwIP ran out of sockets". This classifies the exception
+         * text into one of a closed set of tokens, so the reason is readable without ever putting the
+         * exception's own text (which can carry endpoints or keys) into the log -- the invariant
+         * `MicrophoneCaptureStatsTest` guards.
+         */
+        private fun failureReason(error: Throwable?): String {
+            val text = buildString {
+                append(error?.message ?: "")
+                append(' ')
+                append(error?.cause?.message ?: "")
+                append(' ')
+                append(error?.cause?.javaClass?.simpleName ?: "")
+            }.lowercase()
+            return when {
+                text.contains("scope id") -> "ipv6-scope-id-required"
+                text.contains("eaddrnotavail") || text.contains("errno 99") || text.contains("error=99") -> "addr-not-available"
+                text.contains("eaddrinuse") || text.contains("errno 98") || text.contains("error=98") -> "addr-in-use"
+                text.contains("enoprotoopt") || text.contains("errno 92") || text.contains("error=92") -> "no-proto-option"
+                text.contains("enfile") || text.contains("errno 23") || text.contains("error=23") -> "no-sockets"
+                text.contains("permission") || text.contains("eacces") || text.contains("errno 13") -> "permission-denied"
+                text.contains("network is unreachable") || text.contains("enetunreach") -> "network-unreachable"
+                text.contains("bind") -> "bind-failed"
+                text.contains("socket") -> "socket-failed"
+                text.isEmpty() || text.isBlank() -> "none"
+                else -> "unclassified"
+            }
+        }
 
         fun reportStartFailure(config: MicrophoneConfig, error: Throwable, report: (String) -> Unit) {
             runCatching { report(failureMessage(metadata(config), MicrophoneFailureStage.START, error, null)) }

@@ -160,10 +160,21 @@ internal class MicrophoneUplink(
             return false
         }
 
+        val bindAddress = serverBindAddress()
         val nextSocket = try {
-            network.open(serverBindAddress())
+            network.open(bindAddress)
         } catch (error: Exception) {
-            Log.e(TAG, "microphone socket creation failed", error)
+            // The address and the cause, not just the exception: measured on 2026-10-13 the wired mic
+            // reported `stage=SOCKET_CREATION error=SocketException` and nothing else, while Siri's own
+            // input worked -- so the failing value is the whole diagnosis. serverBindAddress() falls back
+            // to this ROM's rejected all-zero wildcard when no session address is published, and that is
+            // indistinguishable from a lwIP socket-table failure without seeing the address.
+            Log.e(
+                TAG,
+                "microphone socket creation failed address=$bindAddress " +
+                    "cause=${error.cause?.javaClass?.name}:${error.cause?.message}",
+                error,
+            )
             stats.failure(MicrophoneFailureStage.SOCKET_CREATION, error)
             nextRecorder.release()
             nextEncoder?.close()

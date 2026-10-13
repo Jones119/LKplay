@@ -20,6 +20,8 @@ import com.shilapi.xcertplay.airplay.MicrophoneConfig
 import com.shilapi.xcertplay.airplay.OwnedVideoFrame
 import com.shilapi.xcertplay.airplay.VideoCodec
 import com.shilapi.xcertplay.airplay.toHexString
+import com.shilapi.xcertplay.transport.DatagramNetwork
+import com.shilapi.xcertplay.transport.KernelDatagramNetwork
 import java.io.Closeable
 import java.nio.ByteBuffer
 import java.util.concurrent.ConcurrentHashMap
@@ -183,6 +185,15 @@ class AndroidMediaSink(
     /** True while any music ("media") audio stream is running; called from media threads. */
     private val onMediaAudioChanged: (Boolean) -> Unit = {},
 ) : MediaSink {
+    /**
+     * The session's datagram stack. [CarPlayMediaEngine] points this at the userspace link on the wired
+     * path, and [MicrophoneUplink] has to use it: with the kernel default the microphone bound through the
+     * platform layer, which this ROM rejects for a link-local without a scope id -- measured on the car on
+     * 2026-10-13 as `stage=SOCKET_CREATION reason=ipv6-scope-id-required`, and the reason a WeChat voice
+     * note recorded silence while the phone still showed its own recording indicator.
+     */
+    @Volatile internal var network: DatagramNetwork = KernelDatagramNetwork
+
     private val appContext = context?.applicationContext
     private val audioManager = appContext?.systemServiceOrNull(AudioManager::class.java)
     private val audioFocusCoordinator = AudioFocusCoordinator(
@@ -361,7 +372,9 @@ class AndroidMediaSink(
             if (config.audioType == "telephony" && debugSwitch("debug.diplay.mic_mode", true)) {
                 enterCommunicationMode(id)
             }
-            val uplink = microphoneUplinks.computeIfAbsent(id) { MicrophoneUplink(config, onAudioDiagnostic) }
+            val uplink = microphoneUplinks.computeIfAbsent(id) {
+                MicrophoneUplink(config, onAudioDiagnostic, network = network)
+            }
             if (!uplink.start()) {
                 microphoneUplinks.remove(id, uplink)
                 restoreAudioMode(id)

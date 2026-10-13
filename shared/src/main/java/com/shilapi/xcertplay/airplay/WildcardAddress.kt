@@ -1,5 +1,6 @@
 package com.shilapi.xcertplay.airplay
 
+import com.shilapi.xcertplay.diagnostics.DiagnosticLog
 import java.net.Inet6Address
 import java.net.InetAddress
 import java.net.NetworkInterface
@@ -37,8 +38,18 @@ internal fun clearSessionBindAddress() {
  */
 internal fun serverBindAddress(): InetAddress {
     sessionBindAddress.get()?.let { return it }
+    // No session address published. On this ROM the fallbacks below cannot produce a bindable address:
+    // the kernel `usb1` netdev the first one looks for is deleted (docs/_digest/58 §9), and the second
+    // returns the all-zero wildcard, which libcore rejects for IPv6 ("Can't bind to a link-local address
+    // without a scope id"). A channel that asks here before a session published its address therefore
+    // fails with a bare SocketException -- measured on the car on 2026-10-13 as the wired microphone's
+    // `stage=SOCKET_CREATION`, which recorded WeChat voice notes as silence while Siri (whose channel
+    // binds the published address) kept working. Said out loud, into the file sink, because the app's
+    // Log.i does not reach this ROM's logcat.
+    DiagnosticLog.line("serverBindAddress: no session address published; falling back to the wildcard")
     try {
         val nif = NetworkInterface.getByName("usb1")
+        DiagnosticLog.line("serverBindAddress: kernel usb1 netdev present=${nif != null}")
         if (nif != null) {
             val advertised = InetAddress.getByName("fe80::2").address
             val addresses = nif.inetAddresses.toList().filterIsInstance<Inet6Address>()
@@ -50,9 +61,12 @@ internal fun serverBindAddress(): InetAddress {
                 else Inet6Address.getByAddress(null, linkLocal.address, nif.index)
             }
         }
-    } catch (_: Exception) {
+    } catch (error: Exception) {
+        DiagnosticLog.line("serverBindAddress: netdev lookup failed ${error.javaClass.simpleName}: ${error.message}")
     }
-    return Inet6Address.getByAddress(null, ByteArray(16), 0)
+    val wildcard = Inet6Address.getByAddress(null, ByteArray(16), 0)
+    DiagnosticLog.line("serverBindAddress: returning wildcard $wildcard (this ROM rejects it for IPv6)")
+    return wildcard
 }
 
 /**
