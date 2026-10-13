@@ -25,7 +25,9 @@ internal fun clearSessionBindAddress() {
 }
 
 /**
- * The address the AirPlay servers bind on the CS11 kernel netdev: fe80::2 scoped to usb1.
+ * The address the AirPlay servers bind: fe80::2, scoped to usb1 when that kernel netdev exists. The kernel
+ * cdc_ncm transport is deleted (docs/_digest/58 section 9) and every session publishes its address through
+ * publishSessionBindAddress, so this lookup is only a legacy fallback.
  *
  * This ROM's libcore rejects every unscoped IPv6 bind with "Can't bind to a link-local address
  * without a scope id" — the "::" literal and even the programmatic all-zero address fail — so

@@ -77,7 +77,7 @@ internal object UserspaceNcmTransport {
  *
  * ```
  * adb shell setprop debug.diplay.ncm_legacy force   # userspace only (diagnostic)
- * adb shell setprop debug.diplay.ncm_legacy kernel  # legacy kernel netdev (debug fallback)
+ * adb shell setprop debug.diplay.ncm_legacy kernel  # retired, falls back to AUTO
  * adb shell setprop debug.diplay.ncm_legacy ''      # userspace preferred (default)
  * ```
  */
@@ -88,7 +88,7 @@ internal object NcmLegacyPolicy {
     /** The pure part: one property value to one mode. JVM-testable without a device. */
     fun parse(raw: String?): NcmLegacyMode = when (raw?.trim()?.lowercase()) {
         "force", "userspace", "legacy" -> NcmLegacyMode.FORCE
-        "kernel", "off", "root", "netdev" -> NcmLegacyMode.KERNEL
+        "kernel", "off", "root", "netdev" -> NcmLegacyMode.AUTO  // retired: the kernel transport is deleted (docs/_digest/58 section 9)
         else -> NcmLegacyMode.AUTO
     }
 

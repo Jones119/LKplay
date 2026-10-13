@@ -27,7 +27,7 @@ class NcmLegacyPolicyTest {
     @Test
     fun theKernelSpellingsAreAccepted() {
         for (value in listOf("kernel", "off", "root", "netdev")) {
-            assertEquals(NcmLegacyMode.KERNEL, NcmLegacyPolicy.parse(value))
+            assertEquals(NcmLegacyMode.AUTO, NcmLegacyPolicy.parse(value))
         }
     }
 
