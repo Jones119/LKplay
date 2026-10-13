@@ -522,8 +522,11 @@ class NcmUsbBridge internal constructor(
                         " wantedIdle=${layout.idle.id}/${layout.idle.alternate}",
                 )
                 val descriptor = connection.fileDescriptor
-                // The legacy build's order: idle alternate, negotiate, active alternate
-                // (V74/NcmUsbBridge.java:1349-1352).
+                // Measured on this car: with the data interface parked on its idle alternate, the device
+                // answered GET_NTB_PARAMETERS but stalled SET_NTB_FORMAT (both wValue 0 and 1) - so the
+                // legacy build's order (idle, negotiate, active; V74/NcmUsbBridge.java:1349-1352) does not
+                // hold for this iPhone. This activates the data interface first and negotiates afterwards;
+                // the parking call stays in front of it so the idle state is still entered explicitly.
                 val parkResult = LegacyUsbNative.setInterface(
                     descriptor, layout.idle.id, layout.idle.alternate,
                 )
@@ -533,12 +536,6 @@ class NcmUsbBridge internal constructor(
                             "${layout.idle.alternate} (${LegacyUsbNative.describe(parkResult)})",
                     )
                 }
-                val parameters = NcmNegotiation.configure(
-                    connection, layout.control.id, layout.capabilities, onDiagnostic,
-                )
-                NcmNegotiation.enablePacketFilter(
-                    connection, layout.control.id, layout.capabilities, onDiagnostic,
-                )
                 val activeResult = LegacyUsbNative.setInterface(
                     descriptor, layout.data.id, layout.data.alternate,
                 )
@@ -547,6 +544,19 @@ class NcmUsbBridge internal constructor(
                         "could not select the NCM data alternate ${layout.data.id}/" +
                             "${layout.data.alternate} (${LegacyUsbNative.describe(activeResult)})",
                     )
+                }
+                onDiagnostic(
+                    "NCM legacy stage=activeBeforeNegotiation idle=${layout.idle.id}/" +
+                        "${layout.idle.alternate} active=${layout.data.id}/${layout.data.alternate}",
+                )
+                val parameters = NcmNegotiation.configure(
+                    connection, layout.control.id, layout.capabilities, onDiagnostic,
+                )
+                NcmNegotiation.enablePacketFilter(
+                    connection, layout.control.id, layout.capabilities, onDiagnostic,
+                )
+                NcmNegotiation.lastStall?.let { stall ->
+                    onDiagnostic("NCM legacy stage=classRequestStalled detail=$stall (continuing to the data path)")
                 }
                 val inEndpoint = bulkEndpoint(data, UsbConstants.USB_DIR_IN)
                     ?: throw IphoneUsbException.Protocol("NCM data interface exposes no bulk IN endpoint")

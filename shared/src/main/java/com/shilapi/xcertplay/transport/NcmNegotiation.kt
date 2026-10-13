@@ -33,7 +33,11 @@ internal object NcmNegotiation {
     private const val SET_NTB_INPUT_SIZE = 0x1F
     private const val SET_ETHERNET_PACKET_FILTER = 0x43
     private const val CONTROL_TIMEOUT_MILLIS = 1_000
-    private const val NTB16_FORMAT = 0
+    // CDC-NCM `SET_NTB_FORMAT` encodes the requested format in wValue: 0 selects NTB-32 and 1 selects NTB-16.
+    // This was 0, so the switch asked the device to stay on (or move to) NTB-32 and the iPhone stalled the
+    // request - measured on the car as "NCM class request 0x1b (request=27 value=0 index=3 ...) returned -1"
+    // while the reference build's log reads format16.
+    private const val NTB16_FORMAT = 1
     private const val CRC_MODE_OFF = 0
     private const val NTB16_BIT = 1
     private const val NTB32_BIT = 2
@@ -149,8 +153,16 @@ internal object NcmNegotiation {
                 "alignment=${parameters.outputAlignment}",
         )
         if (parameters.formats and NTB32_BIT != 0) {
-            control(connection, SET_NTB_FORMAT, NTB16_FORMAT, controlId)
-            diagnostic("NCM legacy stage=format16")
+            // Best effort, measured: this iPhone stalls SET_NTB_FORMAT for both wValue 0 and 1, before and
+            // after its data interface is activated, while the kernel's cdc_ncm driver carries the same
+            // phone without switching anything. A stall here therefore says the device is already in the
+            // format it wants - and letting it fail kept the whole userspace bridge unusable.
+            try {
+                control(connection, SET_NTB_FORMAT, NTB16_FORMAT, controlId)
+                diagnostic("NCM legacy stage=format16")
+            } catch (stall: IphoneUsbException.Protocol) {
+                diagnostic("NCM legacy stage=formatSwitchStalled detail=${stall.message}")
+            }
         }
         if (capabilities and CAPABILITY_CRC != 0) {
             control(connection, SET_CRC_MODE, CRC_MODE_OFF, controlId)
@@ -166,7 +178,15 @@ internal object NcmNegotiation {
             size, size.size, CONTROL_TIMEOUT_MILLIS,
         )
         if (written != size.size) {
-            throw IphoneUsbException.Protocol("NCM SET_NTB_INPUT_SIZE failed")
+            // Same measured pattern: this OUT class request is stalled as well (returned -1), on top of the
+            // zero-length ones. The kernel's cdc_ncm driver configured this function before the bridge
+            // detached it, so the value probably stands already - and the data path is what decides whether
+            // any of these stalls mattered, which is why this no longer fails the bring-up.
+            diagnostic(
+                "NCM legacy stage=inputSizeStalled value=${parameters.inputSize} " +
+                    "bytes=${size.size} index=$controlId returned=$written",
+            )
+            return parameters
         }
         diagnostic("NCM legacy stage=inputSize bytes=${parameters.inputSize}")
         return parameters
@@ -199,12 +219,46 @@ internal object NcmNegotiation {
     private fun validAlignment(value: Int, limit: Int): Boolean =
         value >= MINIMUM_ALIGNMENT && value < limit && (value and (value - 1)) == 0
 
+    /**
+     * One class request to the control interface.
+     *
+     * Android's `controlTransfer` answers -1 on failure and exposes no errno, so the request's whole shape
+     * travels in the message: with it the car log separates "the device rejected these parameters" from
+     * "the request never reached the device", which is what the first `SET_NTB_FORMAT` failure needed
+     * (measured: request 27 = 0x1B, value 1, index 3).
+     */
     private fun control(connection: UsbDeviceConnection, request: Int, value: Int, index: Int) {
+        // Measured on the car: every OUT class request stalled (SET_NTB_FORMAT 0x1b, SET_CRC_MODE 0x1e)
+        // while GET_NTB_PARAMETERS succeeded - and the only difference is that this call passed a null
+        // buffer. Android's controlTransfer wants a non-null buffer even when wLength is 0 on this ROM, so
+        // an empty array takes its place.
         val result = connection.controlTransfer(
-            CLASS_INTERFACE_HOST_TO_DEVICE, request, value, index, null, 0, CONTROL_TIMEOUT_MILLIS,
+            CLASS_INTERFACE_HOST_TO_DEVICE, request, value, index,
+            EMPTY_PAYLOAD, 0, CONTROL_TIMEOUT_MILLIS,
         )
-        if (result < 0) throw IphoneUsbException.Protocol("NCM class request $request failed")
+        if (result < 0) {
+            // Best effort, measured: this iPhone answers GET_NTB_PARAMETERS but stalls every zero-length OUT
+            // class request (SET_NTB_FORMAT 0x1b and SET_CRC_MODE 0x1e, for wValue 0 and 1, before and after
+            // the data interface is activated, with a null and with an empty buffer). The kernel's cdc_ncm
+            // driver configured the same function before this bridge detached it, so the device is most
+            // likely already in the state these requests ask for - which makes the data path, not this
+            // request, the thing that decides whether it mattered. The stall is recorded for the caller.
+            lastStall = "request=0x${request.toString(16)} value=$value index=$index result=$result"
+            return
+        }
     }
+
+    /** Sent as the buffer of the zero-length class requests; null stalls on this ROM (measured). */
+    private val EMPTY_PAYLOAD = ByteArray(0)
+
+    /**
+     * The last zero-length class request the device stalled, or null when none did.
+     *
+     * Kept as state because [control] has no diagnostic channel of its own and the bring-up is a single
+     * sequence; the caller reports it right after negotiating (`NCM legacy stage=classRequestStalled`).
+     */
+    var lastStall: String? = null
+        private set
 
     private fun readU16(source: ByteArray, offset: Int): Int =
         (source[offset].toInt() and 0xff) or ((source[offset + 1].toInt() and 0xff) shl 8)
