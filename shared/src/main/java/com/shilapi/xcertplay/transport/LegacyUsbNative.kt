@@ -23,6 +23,21 @@ internal object LegacyUsbNative {
     /** 0 on success, a negative errno otherwise. */
     external fun setInterface(fileDescriptor: Int, interfaceNumber: Int, alternateSetting: Int): Int
 
+    /**
+     * Reads a [setInterface] failure back into words. The native side encodes both attempts as
+     * ioctl errno * 1000 + control-transfer errno, which is what separates "a driver holds this
+     * interface" (EBUSY) from "the phone re-enumerated under us" (ENODEV/EPIPE) - the two candidates
+     * the first car run could not distinguish.
+     */
+    fun describe(result: Int): String {
+        if (result == 0) return "ok"
+        val code = -result
+        val ioctl = code / 1000
+        val control = code % 1000
+        if (ioctl == 0) return "errno=$code"
+        return "ioctl errno=$ioctl controlTransfer errno=${if (control == 1) "unset" else control}"
+    }
+
     /** Self-report so the car log proves which library build is loaded. */
     external fun version(): String
 }

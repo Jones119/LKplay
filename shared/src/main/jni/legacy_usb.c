@@ -39,8 +39,12 @@ JNIEXPORT jint JNICALL Java_com_shilapi_xcertplay_transport_LegacyUsbNative_setI
     control.timeout = 1000;
     control.data = NULL;
     if (ioctl(file_descriptor, USBDEVFS_CONTROL, &control) == 0) return 0;
+    const int control_errno = errno;
 
-    return (jint) (errno != 0 ? -errno : -select_errno);
+    // Both errnos travel back, encoded as ioctl * 1000 + control, so the car log can tell a driver
+    // holding the interface (EBUSY) from the phone having re-enumerated mid-sequence (ENODEV/EPIPE):
+    // the two need different fixes, and the first car run could only say "could not park".
+    return (jint) -(select_errno * 1000 + (control_errno != 0 ? control_errno : 1));
 }
 
 // Proves the toolchain and the library on the car before any of it carries traffic.

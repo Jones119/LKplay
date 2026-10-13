@@ -467,21 +467,26 @@ class NcmUsbBridge internal constructor(
                 )
             }
             val layout = LegacyNcmDescriptors.ncm(rawDescriptors, configurationId)
-            val indices = LegacyNcmSelection.locate(
-                LegacyNcmSelection.interfaceOrder(rawDescriptors, configurationId),
-                layout,
-            ) ?: throw IphoneUsbException.Protocol(
-                "The active iPhone USB configuration does not expose the parsed NCM interfaces",
-            )
-            if (indices.control >= device.interfaceCount || indices.data >= device.interfaceCount) {
+            val order = LegacyNcmSelection.interfaceOrder(rawDescriptors, configurationId)
+            val indices = LegacyNcmSelection.locate(order, layout)
+                ?: throw IphoneUsbException.Protocol(
+                    "The active iPhone USB configuration does not expose the parsed NCM interfaces",
+                )
+            // The platform list covers every configuration, the parsed order only this one: without the
+            // offset the claim lands on another configuration's interfaces and the interface the kernel
+            // driver holds is never claimed (measured: EBUSY on both setInterface forms).
+            val platformOffset = LegacyNcmSelection.platformOffset(rawDescriptors, configurationId)
+            val controlIndex = platformOffset + indices.control
+            val dataIndex = platformOffset + indices.data
+            if (controlIndex >= device.interfaceCount || dataIndex >= device.interfaceCount) {
                 throw IphoneUsbException.Protocol(
                     "The active iPhone USB configuration does not expose the parsed NCM interfaces",
                 )
             }
             val claimed = ArrayList<UsbInterface>(2)
             try {
-                val control = device.getInterface(indices.control)
-                val data = device.getInterface(indices.data)
+                val control = device.getInterface(controlIndex)
+                val data = device.getInterface(dataIndex)
                 if (!connection.claimInterface(control, true)) {
                     throw IphoneUsbException.DeviceUnavailable(
                         "Android could not claim the NCM control interface ${layout.control.id}",
@@ -496,12 +501,36 @@ class NcmUsbBridge internal constructor(
                     }
                     claimed.add(data)
                 }
+                // Measured on the car: parking interface 4 answered EBUSY (errno 16) from both the ioctl and
+                // the control-transfer fallback, which says the interface we claimed is not the one we park -
+                // `locate` returns positions in the descriptor order while these are platform list indices.
+                // The platform's endpoint fingerprints are logged next to the parsed order so the two can be
+                // compared (endpointCount/getEndpoint exist on API 19; getId/alternateSetting do not).
+                onDiagnostic(
+                    "NCM claim platformInterfaces=${device.interfaceCount} " +
+                        (0 until device.interfaceCount).joinToString(" ") { index ->
+                            val usbInterface = device.getInterface(index)
+                            val endpoints = (0 until usbInterface.endpointCount).joinToString(",") {
+                                "0x${usbInterface.getEndpoint(it).address.toString(16)}"
+                            }
+                            "p$index=[$endpoints]"
+                        } +
+                        " parsedOrder=${LegacyNcmSelection.interfaceOrder(rawDescriptors, configurationId)}" +
+                        " platformOffset=$platformOffset controlIndex=$controlIndex dataIndex=$dataIndex" +
+                        " wantedControl=${layout.control.id}/${layout.control.alternate}" +
+                        " wantedData=${layout.data.id}/${layout.data.alternate}" +
+                        " wantedIdle=${layout.idle.id}/${layout.idle.alternate}",
+                )
                 val descriptor = connection.fileDescriptor
                 // The legacy build's order: idle alternate, negotiate, active alternate
                 // (V74/NcmUsbBridge.java:1349-1352).
-                if (LegacyUsbNative.setInterface(descriptor, layout.idle.id, layout.idle.alternate) != 0) {
+                val parkResult = LegacyUsbNative.setInterface(
+                    descriptor, layout.idle.id, layout.idle.alternate,
+                )
+                if (parkResult != 0) {
                     throw IphoneUsbException.DeviceUnavailable(
-                        "could not park the NCM data interface ${layout.idle.id} on alternate ${layout.idle.alternate}",
+                        "could not park the NCM data interface ${layout.idle.id} on alternate " +
+                            "${layout.idle.alternate} (${LegacyUsbNative.describe(parkResult)})",
                     )
                 }
                 val parameters = NcmNegotiation.configure(
@@ -510,9 +539,13 @@ class NcmUsbBridge internal constructor(
                 NcmNegotiation.enablePacketFilter(
                     connection, layout.control.id, layout.capabilities, onDiagnostic,
                 )
-                if (LegacyUsbNative.setInterface(descriptor, layout.data.id, layout.data.alternate) != 0) {
+                val activeResult = LegacyUsbNative.setInterface(
+                    descriptor, layout.data.id, layout.data.alternate,
+                )
+                if (activeResult != 0) {
                     throw IphoneUsbException.DeviceUnavailable(
-                        "could not select the NCM data alternate ${layout.data.id}/${layout.data.alternate}",
+                        "could not select the NCM data alternate ${layout.data.id}/" +
+                            "${layout.data.alternate} (${LegacyUsbNative.describe(activeResult)})",
                     )
                 }
                 val inEndpoint = bulkEndpoint(data, UsbConstants.USB_DIR_IN)

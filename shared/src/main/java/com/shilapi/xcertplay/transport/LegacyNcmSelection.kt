@@ -55,4 +55,36 @@ internal object LegacyNcmSelection {
     }
 
     data class Indices(val control: Int, val data: Int)
+
+    /**
+     * How many interface entries the platform's list holds before [configurationId]'s own.
+     *
+     * Measured on the car: `UsbDevice.getInterface(i)` enumerates **every** configuration's interfaces (31
+     * entries for an iPhone that reports six configurations) while [interfaceOrder] covers only the one
+     * configuration it is asked about (11 entries for configuration 6). Indexing the platform list with a
+     * position from that order therefore claimed another configuration's interfaces: the interface the
+     * kernel's cdc_ncm driver held was never claimed, and parking it answered EBUSY (errno 16) from both the
+     * ioctl and the control-transfer fallback. Adding this offset is what makes the two lists line up.
+     */
+    fun platformOffset(raw: ByteArray, configurationId: Int): Int {
+        var count = 0
+        var current = -1
+        var reached = false
+        var offset = 0
+        while (offset + 2 <= raw.size) {
+            val length = raw[offset].toInt() and 0xff
+            val type = raw[offset + 1].toInt() and 0xff
+            if (length < 2 || offset + length > raw.size) break
+            when {
+                type == DESCRIPTOR_TYPE_CONFIGURATION && length >= MINIMUM_DESCRIPTOR_BYTES -> {
+                    current = raw[offset + CONFIGURATION_VALUE_OFFSET].toInt() and 0xff
+                    if (current == configurationId) reached = true
+                }
+                !reached && current != -1 &&
+                    type == DESCRIPTOR_TYPE_INTERFACE && length >= MINIMUM_DESCRIPTOR_BYTES -> count++
+            }
+            offset += length
+        }
+        return count
+    }
 }
