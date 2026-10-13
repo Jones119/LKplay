@@ -30,7 +30,7 @@
 #define LWIP_IPV6_DHCP6                 0
 #define LWIP_IPV6_SEND_ROUTER_SOLICIT   0
 #define LWIP_ICMP6                      1  /* ND6 needs it */
-#define LWIP_IPV6_MLD                   0
+#define LWIP_IPV6_MLD                   1
 #define LWIP_TCP                        1
 #define LWIP_UDP                        1
 #define LWIP_RAW                        0
@@ -127,3 +127,7 @@
 #define LWIP_NOASSERT                   0
 
 #endif /* CS11_LWIPOPTS_H */
+
+/* How many IPv6 multicast groups a socket may join. The announcement does not need a group, but answering
+ * the iPhone's mDNS queries does, so this is the precondition for that step (docs/_digest/64 section 8). */
+#define MEMP_NUM_MLD6_GROUP             4
