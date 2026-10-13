@@ -1825,6 +1825,23 @@ class CarPlayController(
                         val message = com.shilapi.xcertplay.transport.mdns.DnsSdMessages.announcement(advertised)
                         announcer.announce(message)
                     }.onFailure { error -> debugLog("mdns: announcement failed: ${error.message}") }
+
+                    // Answering the phone's queries is the other half of DNS-SD: the announcement alone was
+                    // measured not to be enough (docs/_digest/64 section 7). Its own daemon thread, because
+                    // the loop blocks in recv; it ends when the link does, and never throws into the session.
+                    val responder = com.shilapi.xcertplay.transport.mdns.MdnsResponder(
+                        com.shilapi.xcertplay.transport.mdns.MdnsQuerySocket.over(
+                            com.shilapi.xcertplay.transport.UserSpaceNetworkNative,
+                        ),
+                        ::debugLog,
+                    )
+                    Thread {
+                        runCatching { responder.run(advertised) }
+                            .onFailure { error -> debugLog("mdns: query loop failed: ${error.message}") }
+                    }.apply {
+                        isDaemon = true
+                        name = "mdns-queries"
+                    }.start()
                 }
                 true
             }

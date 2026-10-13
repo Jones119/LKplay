@@ -185,3 +185,10 @@ void cs11_netif_stats(u32_t *out) {
     out[3] = g_cs11.tx_bytes;
     out[4] = g_cs11.tx_dropped;
 }
+
+/* The netif this port owns. lwIP's socket-level IPV6_JOIN_GROUP resolves a netif *index* and answered
+ * EADDRNOTAVAIL for every value the Java side could guess (measured on the car: errno 99), so the join goes
+ * through mld6_joingroup_netif() with this handle instead (docs/_digest/64 §9). */
+struct netif *cs11_netif_handle(void) {
+    return &g_cs11.netif;
+}

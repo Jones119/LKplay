@@ -13,6 +13,8 @@
  */
 #include <jni.h>
 #include <errno.h>
+#include "lwip/mld6.h"
+#include "lwip/netif.h"
 #include <string.h>
 #include <unistd.h>
 
@@ -301,6 +303,13 @@ CS11_JNI(jint) Java_com_shilapi_xcertplay_transport_UserSpaceNetworkNative_nativ
     memset(&request, 0, sizeof(request));
     (*env)->GetByteArrayRegion(env, group, 0, 16, (jbyte *) &request.ipv6mr_multiaddr);
     request.ipv6mr_interface = (unsigned int) interface_index;
-    if (lwip_setsockopt(fd, IPPROTO_IPV6, IPV6_JOIN_GROUP, &request, sizeof(request)) == 0) return 0;
-    return -errno;
+    (void) fd;
+    /* Straight to lwIP's own group join with the netif this port owns. The socket option resolves the
+     * interface through an index and answered EADDRNOTAVAIL for every value the Java side could supply
+     * (errno 99 on the car), while this call takes the netif itself and updates the same group list the
+     * UDP input path checks membership against. */
+    extern struct netif *cs11_netif_handle(void);
+    const err_t joined = mld6_joingroup_netif(cs11_netif_handle(), ip_2_ip6((ip_addr_t *) &request.ipv6mr_multiaddr));
+    if (joined == ERR_OK) return 0;
+    return (jint) -joined;
 }
