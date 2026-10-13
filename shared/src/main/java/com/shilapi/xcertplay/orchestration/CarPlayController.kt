@@ -1791,6 +1791,41 @@ class CarPlayController(
         return when (result) {
             CarPlayVpnService.AttachResult.Started -> {
                 debugLog("userspace NCM AirPlay listener attached on lwIP address=${bindAddress.hostAddress}")
+                // Nothing else tells the phone this link carries an AirPlay receiver: the Bonjour side is
+                // JmDNS on the platform stack, and this address exists only inside lwIP (docs/_digest/64).
+                // The TXT values come from the same AirPlayInfoPlist the /info answer does, so features and
+                // model cannot drift apart, and debug.diplay.mdns=off turns the announcement off (ADR-8).
+                val advertisedPort = service.boundPort()
+                if (advertisedPort != null && com.shilapi.xcertplay.transport.mdns.MdnsSwitch.enabled()) {
+                    val info = com.shilapi.xcertplay.airplay.AirPlayInfoPlist.build(airPlayConfig)
+                    val txt = LinkedHashMap<String, String>()
+                    listOf("deviceID", "features", "model", "srcvers", "flags", "statusFlags", "pi", "pk", "gid", "psi")
+                        .forEach { key ->
+                            val value = info[key] ?: return@forEach
+                            txt[key.lowercase()] = when (value) {
+                                is Long -> "0x" + value.toString(16).uppercase()
+                                is Int -> "0x" + value.toString(16).uppercase()
+                                else -> value.toString()
+                            }
+                        }
+                    val advertised = com.shilapi.xcertplay.transport.mdns.DnsSdMessages.Service(
+                        instance = "DiPlay._airplay._tcp.local",
+                        host = "DiPlay.local",
+                        port = advertisedPort,
+                        address = bindAddress.address,
+                        txt = txt,
+                    )
+                    val announcer = com.shilapi.xcertplay.transport.mdns.MdnsAnnouncer(
+                        com.shilapi.xcertplay.transport.mdns.MdnsDatagramSocket.over(
+                            com.shilapi.xcertplay.transport.UserSpaceNetworkNative,
+                        ),
+                        ::debugLog,
+                    )
+                    runCatching {
+                        val message = com.shilapi.xcertplay.transport.mdns.DnsSdMessages.announcement(advertised)
+                        announcer.announce(message)
+                    }.onFailure { error -> debugLog("mdns: announcement failed: ${error.message}") }
+                }
                 true
             }
             CarPlayVpnService.AttachResult.AlreadyStarted -> {
