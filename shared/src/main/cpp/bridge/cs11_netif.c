@@ -87,8 +87,35 @@ static err_t cs11_netif_init(struct netif *netif) {
     return ERR_OK;
 }
 
-/** Creates the netif and pins fe80::2 on it. Call once, before any JVM thread uses a socket. */
+/** Creates the netif and pins its MAC-derived link-local on it. Safe to call again: a reconnect re-arms
+ *  the existing netif instead of rebuilding it. */
 int cs11_netif_start(const u8_t *host_mac, int mtu) {
+    static int netif_created = 0;
+
+    if (netif_created) {
+        /* Why this branch exists, measured on the car on 2026-10-13 (the "it will not connect again"
+         * defect): every reconnect used to run the body below again, which memsets this struct and calls
+         * netif_add() on it a second time. lwIP still holds this very struct in netif_list, so the
+         * second call zeroed a live netif (next/input/linkoutput NULL) and inserted the same pointer
+         * into the list again, while the TX ring and its mutex - which the Kotlin pump thread is using -
+         * were reset underneath it. The symptoms were a wedged pipe after any in-process reconnect:
+         * rxFrames frozen while txDropped climbed, and the iPhone never starting the AirPlay transport.
+         * The Java side derives the same address from the same MAC, so re-arming is all a reconnect
+         * needs. */
+        struct netif *netif = &g_cs11.netif;
+        if (mtu > 0) {
+            netif->mtu = (u16_t)mtu;
+        }
+        if (host_mac != NULL) {
+            memcpy(netif->hwaddr, host_mac, 6);
+        }
+        netif_create_ip6_linklocal_address(netif, 1);
+        netif_ip6_addr_set_state(netif, 0, IP6_ADDR_PREFERRED);
+        netif_set_up(netif);
+        netif_set_link_up(netif);
+        return 0;
+    }
+
     memset(&g_cs11, 0, sizeof(g_cs11));
     pthread_mutex_init(&g_cs11.tx.mutex, NULL);
 
@@ -129,6 +156,7 @@ int cs11_netif_start(const u8_t *host_mac, int mtu) {
 
     netif_set_up(netif);
     netif_set_link_up(netif);
+    netif_created = 1;
     return 0;
 }
 

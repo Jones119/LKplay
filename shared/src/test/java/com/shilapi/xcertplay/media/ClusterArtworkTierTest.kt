@@ -119,4 +119,28 @@ class ClusterArtworkTierTest {
         assertEquals("override", CLUSTER_ARTWORK_SOURCE_OVERRIDE)
         assertEquals("tier", CLUSTER_ARTWORK_SOURCE_TIER)
     }
+
+    /**
+     * The tier pin, which is the only way to ask the car "does a `file://` handover get drawn?".
+     *
+     * The vendor's own `MediaDimInteraction.updatePlayStatus` requires `!coverString.contains("http")`
+     * before it sends a cover at all (decompiled from `/system/app/XCDimInteractionService.apk`), so the
+     * loopback URL this app prefers can never reach the cluster -- and `debug.diplay.artwork_uri` cannot
+     * test the other two shapes, because it takes only an absolute `http`/`https` URL and a bench cannot
+     * know the per-track UUID file name a `file://` delivery needs.
+     */
+    @Test
+    fun theTierOverrideAcceptsOnlyTheThreeTierNames() {
+        assertEquals(ClusterArtworkTier.FILE, parseArtworkTierOverride("file"))
+        assertEquals(ClusterArtworkTier.FILE, parseArtworkTierOverride("  FILE  "))
+        assertEquals(ClusterArtworkTier.HTTP, parseArtworkTierOverride("http"))
+        assertEquals(ClusterArtworkTier.CONTENT, parseArtworkTierOverride("content"))
+        assertEquals("debug.diplay.artwork_tier", CLUSTER_ARTWORK_TIER_OVERRIDE)
+        // A typo leaves the real order in charge instead of costing the cover.
+        assertNull(parseArtworkTierOverride(null))
+        assertNull(parseArtworkTierOverride(""))
+        assertNull(parseArtworkTierOverride("   "))
+        assertNull(parseArtworkTierOverride("file:///sdcard/DiPlay/cluster-artwork/a/b.jpg"))
+        assertNull(parseArtworkTierOverride("https"))
+    }
 }

@@ -435,6 +435,47 @@ internal fun parseArtworkUriOverride(property: String?): String? {
 }
 
 /**
+ * The bench override that pins which tier delivers the cover: `debug.diplay.artwork_tier`.
+ *
+ * Needed because [ClusterArtworkStore.publish] decides its own order inline -- a validated shared base
+ * plus a bound loopback port hands over an `http://127.0.0.1` URL, and the tiers below it are only
+ * reached when the port cannot bind. `debug.diplay.artwork_uri` cannot test the other shapes, because
+ * it only accepts an absolute `http`/`https` URL (see [parseArtworkUriOverride]) and a bench cannot know
+ * the per-track UUID file name a `file://`/`content://` delivery needs.
+ *
+ * Why this exists at all, measured on 2026-10-13 by decompiling the car's own DIM service
+ * (`/system/app/XCDimInteractionService.apk`, package `com.ecarx.dim_interaction`, class
+ * `MediaDimInteraction.updatePlayStatus`): the branch that actually sends a cover requires
+ *
+ * ```java
+ * if (… && !coverString.contains(HTTP_PREFIX) && media.getBasePlayState() == 1)   // HTTP_PREFIX = "http"
+ * ```
+ *
+ * and every other branch does `builder.albumCover2(0)` and logs `send messages except album cover.` --
+ * which is exactly the line the car printed for our `http://127.0.0.1:<port>/covers/…` handover. An
+ * `http` Uri therefore cannot reach the instrument cluster at all, whatever the loopback server answers.
+ */
+internal const val CLUSTER_ARTWORK_TIER_OVERRIDE = "debug.diplay.artwork_tier"
+
+/**
+ * [property] as the tier to force, or null to let [ClusterArtworkStore.publish] decide.
+ *
+ * Only the three tier names are accepted, case-insensitively and trimmed, so a bench typo leaves the
+ * real order in charge instead of costing the driver a cover -- the same rule the other overrides follow.
+ */
+internal fun parseArtworkTierOverride(property: String?): ClusterArtworkTier? =
+    when (property?.trim()?.lowercase()) {
+        "http" -> ClusterArtworkTier.HTTP
+        "file" -> ClusterArtworkTier.FILE
+        "content" -> ClusterArtworkTier.CONTENT
+        else -> null
+    }
+
+/** [CLUSTER_ARTWORK_TIER_OVERRIDE] as read from the system properties, or null when it is not forcing one. */
+internal fun clusterArtworkTierOverride(): ClusterArtworkTier? =
+    parseArtworkTierOverride(debugProperty(CLUSTER_ARTWORK_TIER_OVERRIDE))
+
+/**
  * What the vendor is handed for one handover: the override when it is usable, the computed Uri
  * otherwise.
  *
@@ -1199,14 +1240,17 @@ internal class ClusterArtworkStore(
      */
     fun publish(bitmap: Bitmap): Uri? {
         val encoded = encodeCover(bitmap) ?: return null
-        val base = selector.select(encoded)
+        // A forced tier skips the shapes it did not ask for. CONTENT is served by the provider out of
+        // the *cache* copy, so it must not take the shared-tree write; FILE and HTTP both need it.
+        val forced = clusterArtworkTierOverride()
+        val base = if (forced == ClusterArtworkTier.CONTENT) null else selector.select(encoded)
         if (base != null) {
             // The cover lands under the session directory of the base that just read its own probe back.
             val directory = File(File(base, CLUSTER_ARTWORK_DIRECTORY), session)
             val target = File(directory, encoded.name)
             if (deliverToBase(encoded, target)) {
                 val serving = serverOrNull(directory)
-                if (serving != null) {
+                if (serving != null && forced != ClusterArtworkTier.FILE) {
                     // Moved, not copied: the loopback server reads the external file per request, so the
                     // cache copy has no reader left. The server was told about `directory` before the URL
                     // that names it was returned, so the URL cannot 404 on a handover that just worked.
@@ -1220,11 +1264,17 @@ internal class ClusterArtworkStore(
                     )
                     return Uri.parse(url)
                 }
-                // No port this time: the very same file is delivered on its `file://` string, which is
-                // also a string that names this file -- so it is retained exactly like the URL above.
+                // No port this time -- or the bench pinned this tier: the very same file is delivered on
+                // its `file://` string, which is also a string that names this file, so it is retained
+                // exactly like the URL above.
                 val delivered = target.absolutePath
                 runCatching { encoded.delete() }
                 evict(retention.add(ClusterArtworkRetention.Entry(target, uriFor(delivered), delivered = true)))
+                Log.i(
+                    TAG,
+                    "cluster artwork tier=file forced=${forced ?: "none"} port=${serving?.port ?: "none"} " +
+                        "bytes=${target.length()} uri=${uriFor(delivered)} source=$CLUSTER_ARTWORK_SOURCE_TIER",
+                )
                 return uriFor(delivered)
             }
             // The volume went away between the probe and the write: re-probe on the next track.
