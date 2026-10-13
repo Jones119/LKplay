@@ -288,3 +288,19 @@ CS11_JNI(jint) Java_com_shilapi_xcertplay_transport_UserSpaceNetworkNative_nativ
     (void)self;
     return bound_name(env, fd, JNI_TRUE, address, port);
 }
+
+/* Joins an IPv6 multicast group on one of our lwIP sockets - what answering the iPhone's mDNS queries needs
+ * (the announcement itself needs no membership). lwIP handles this option only with LWIP_IPV6_MLD on, which
+ * 50b1e132 enabled; the interface index selects our netif, since a link-local group is meaningless without
+ * one. Note the constants are lwIP's, not the platform's (see 1fba7a21 for the same trap). */
+CS11_JNI(jint) Java_com_shilapi_xcertplay_transport_UserSpaceNetworkNative_nativeJoinGroupV6(
+        JNIEnv *env, jobject self, jint fd, jbyteArray group, jint interface_index) {
+    (void) self;
+    if (fd < 0 || group == NULL || (*env)->GetArrayLength(env, group) != 16) return -EINVAL;
+    struct ipv6_mreq request;
+    memset(&request, 0, sizeof(request));
+    (*env)->GetByteArrayRegion(env, group, 0, 16, (jbyte *) &request.ipv6mr_multiaddr);
+    request.ipv6mr_interface = (unsigned int) interface_index;
+    if (lwip_setsockopt(fd, IPPROTO_IPV6, IPV6_JOIN_GROUP, &request, sizeof(request)) == 0) return 0;
+    return -errno;
+}

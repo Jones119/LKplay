@@ -31,6 +31,7 @@ internal interface UserSpaceNetworkJni {
     fun nativeClose(fd: Int): Int
     fun nativeSetSockOptInt(fd: Int, level: Int, option: Int, value: Int): Int
     fun nativeSetSockOptLinger(fd: Int, on: Boolean, seconds: Int): Int
+    fun nativeJoinGroupV6(fd: Int, group: ByteArray, interfaceIndex: Int): Int
     fun nativeLocalName(fd: Int, address: ByteArray, port: IntArray): Int
     fun nativePeerName(fd: Int, address: ByteArray, port: IntArray): Int
 }
@@ -84,6 +85,7 @@ internal object UserSpaceNetworkNative : UserSpaceNetworkJni {
     external override fun nativeClose(fd: Int): Int
     external override fun nativeSetSockOptInt(fd: Int, level: Int, option: Int, value: Int): Int
     external override fun nativeSetSockOptLinger(fd: Int, on: Boolean, seconds: Int): Int
+    external override fun nativeJoinGroupV6(fd: Int, group: ByteArray, interfaceIndex: Int): Int
     external override fun nativeLocalName(fd: Int, address: ByteArray, port: IntArray): Int
     external override fun nativePeerName(fd: Int, address: ByteArray, port: IntArray): Int
 }

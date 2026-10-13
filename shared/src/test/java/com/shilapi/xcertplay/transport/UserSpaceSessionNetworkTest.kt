@@ -108,6 +108,10 @@ class UserSpaceSessionNetworkTest {
         }
 
         override fun nativeSetSockOptInt(fd: Int, level: Int, option: Int, value: Int): Int {
+        override fun nativeJoinGroupV6(fd: Int, group: ByteArray, interfaceIndex: Int): Int {
+            calls.add("joinGroupV6:${group.size}@$interfaceIndex")
+            return 0
+        }
             calls.add("setsockopt:$option=$value")
             return 0
         }
