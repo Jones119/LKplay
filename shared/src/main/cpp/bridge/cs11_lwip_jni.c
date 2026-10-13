@@ -60,7 +60,17 @@ CS11_JNI(jint) Java_com_shilapi_xcertplay_transport_UserSpaceNetworkNative_nativ
         (*env)->GetByteArrayRegion(env, hostMac, 0, 6, (jbyte *)mac);
         macPtr = mac;
     }
-    lwip_init();
+    /* The netconn/socket API (lwip_socket, lwip_send, ...) runs on lwIP's tcpip thread and posts every
+     * call to tcpip_mbox, so the stack has to be brought up with tcpip_init() rather than lwip_init():
+     * lwip_init() alone leaves that mailbox unset, and the first lwip_socket then crashed inside
+     * sys_mbox_post - measured on the car as SIGSEGV at fault addr 0x10 on the session's own pool thread.
+     * tcpip_init() calls lwip_init() itself. Guarded because a second bring-up would start a second
+     * tcpip thread on the same mailbox. */
+    static int stack_started = 0;
+    if (!stack_started) {
+        tcpip_init(NULL, NULL);
+        stack_started = 1;
+    }
     return cs11_netif_start(macPtr, mtu);
 }
 
