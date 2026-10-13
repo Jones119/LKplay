@@ -87,10 +87,10 @@
 #define TCP_SND_BUF                     (16 * 1024)
 #define TCP_SND_QUEUELEN                ((8 * TCP_SND_BUF) / TCP_MSS)
 #define TCP_QUEUE_OOSEQ                 1
-#define MEMP_NUM_TCP_PCB                16
+#define MEMP_NUM_TCP_PCB                32
 #define MEMP_NUM_TCP_PCB_LISTEN         8
 #define MEMP_NUM_TCP_SEG                512
-#define MEMP_NUM_UDP_PCB                16
+#define MEMP_NUM_UDP_PCB                24
 #define DEFAULT_TCP_RECVMBOX_SIZE       256
 #define DEFAULT_UDP_RECVMBOX_SIZE       64
 #define DEFAULT_ACCEPTMBOX_SIZE         8
@@ -131,3 +131,8 @@
 /* How many IPv6 multicast groups a socket may join. The announcement does not need a group, but answering
  * the iPhone's mDNS queries does, so this is the precondition for that step (docs/_digest/64 section 8). */
 #define MEMP_NUM_MLD6_GROUP             4
+
+/* Sockets are netconns in lwIP, and the default is 4 - measured on the car: the phone's SETUP failed with
+ * 'lwip could not create a stream socket (errno 23)' because a CarPlay session needs a control socket, its event
+ * channel, and one or two per media stream on top. 32 leaves room and costs a few hundred bytes. */
+#define MEMP_NUM_NETCONN                32

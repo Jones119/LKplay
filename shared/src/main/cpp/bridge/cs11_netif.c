@@ -74,7 +74,13 @@ static err_t cs11_netif_init(struct netif *netif) {
     netif->name[1] = 's';
     netif->mtu = 1500;
     netif->hwaddr_len = 6;
-    netif->flags = NETIF_FLAG_BROADCAST | NETIF_FLAG_ETHERNET | NETIF_FLAG_UP | NETIF_FLAG_LINK_UP;
+    /* NETIF_FLAG_MLD6 matters here: the iPhone's neighbour solicitations are sent to the solicited-node
+     * multicast address (33:33:ff:.., measured on the car), and lwIP's ethernet_input only passes IPv6
+     * multicast frames up when the netif carries this flag. Without it every NS was dropped, no neighbour
+     * advertisement ever went out (txFrames stayed at the four frames of the mDNS announcement), and the
+     * phone could never resolve us - which is why it never opened the AirPlay connection. */
+    netif->flags = NETIF_FLAG_BROADCAST | NETIF_FLAG_ETHERNET | NETIF_FLAG_UP | NETIF_FLAG_LINK_UP |
+                   NETIF_FLAG_MLD6;
     netif->linkoutput = cs11_netif_linkoutput;
     /* IPv4 is compiled out; only the IPv6 output path is used. */
     netif->output_ip6 = ethip6_output;
