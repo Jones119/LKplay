@@ -1713,10 +1713,23 @@ class CarPlayController(
         try {
             val raw = connection.rawDescriptors
                 ?: throw IphoneUsbException.Protocol("the iPhone exposes no raw USB descriptors")
-            val configurationId = LegacyNcmDescriptors.parse(raw)
-                .singleOrNull { it.hasUsbMux && it.hasNcm }?.id
+            // The reference find() (LegacyUsbConfiguration.java:951-985) collects every configuration that
+            // carries USBMUX and NCM and then prefers one that also exposes an Apple Ethernet interface.
+            // This used singleOrNull, which answers null as soon as the phone offers more than one such
+            // configuration - measured on the car, where the iPhone reports six configurations - and the
+            // error it threw then said "no configuration", which pointed the diagnosis the wrong way.
+            val candidates = LegacyNcmDescriptors.parse(raw).filter { it.hasUsbMux && it.hasNcm }
+            val chosen = candidates.firstOrNull { configuration ->
+                configuration.interfaces.any { it.isAppleEthernet }
+            } ?: candidates.firstOrNull()
+            debugLog(
+                "NCM configuration candidates=${candidates.size} ids=${candidates.map { it.id }} " +
+                    "chosen=${chosen?.id} appleEthernet=${chosen?.interfaces?.count { it.isAppleEthernet }}",
+            )
+            val configurationId = chosen?.id
                 ?: throw IphoneUsbException.Protocol(
-                    "no iPhone USB configuration carries USBMUX and NCM together",
+                    "no iPhone USB configuration carries USBMUX and NCM together " +
+                        "(parsed=${LegacyNcmDescriptors.parse(raw).size} configurations)",
                 )
             bridge = NcmUsbBridge.openLegacy(connection, device, raw, configurationId, ::debugLog)
             val link = UserSpaceNcmLink(bridge, onDiagnostic = ::debugLog)
@@ -1809,10 +1822,23 @@ class CarPlayController(
         try {
             val raw = connection.rawDescriptors
                 ?: throw IphoneUsbException.Protocol("the iPhone exposes no raw USB descriptors")
-            val configurationId = LegacyNcmDescriptors.parse(raw)
-                .singleOrNull { it.hasUsbMux && it.hasNcm }?.id
+            // The reference find() (LegacyUsbConfiguration.java:951-985) collects every configuration that
+            // carries USBMUX and NCM and then prefers one that also exposes an Apple Ethernet interface.
+            // This used singleOrNull, which answers null as soon as the phone offers more than one such
+            // configuration - measured on the car, where the iPhone reports six configurations - and the
+            // error it threw then said "no configuration", which pointed the diagnosis the wrong way.
+            val candidates = LegacyNcmDescriptors.parse(raw).filter { it.hasUsbMux && it.hasNcm }
+            val chosen = candidates.firstOrNull { configuration ->
+                configuration.interfaces.any { it.isAppleEthernet }
+            } ?: candidates.firstOrNull()
+            debugLog(
+                "NCM configuration candidates=${candidates.size} ids=${candidates.map { it.id }} " +
+                    "chosen=${chosen?.id} appleEthernet=${chosen?.interfaces?.count { it.isAppleEthernet }}",
+            )
+            val configurationId = chosen?.id
                 ?: throw IphoneUsbException.Protocol(
-                    "no iPhone USB configuration carries USBMUX and NCM together",
+                    "no iPhone USB configuration carries USBMUX and NCM together " +
+                        "(parsed=${LegacyNcmDescriptors.parse(raw).size} configurations)",
                 )
             bridge = NcmUsbBridge.openLegacy(connection, device, raw, configurationId, ::debugLog)
             debugLog("userspace NCM probe ok configuration=$configurationId: parsed, claimed, switched, negotiated")
