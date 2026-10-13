@@ -75,11 +75,24 @@ internal class PhoneMediaAudioWatchdog(private val context: Context) {
 
     fun start() {
         if (running) return
-        val address = DiPlayPreferences.phoneAddress(context)
         val adapter = runCatching { context.systemServiceOrNull(BluetoothManager::class.java)?.adapter ?: android.bluetooth.BluetoothAdapter.getDefaultAdapter() }.getOrNull()
+        // The stored address is the one the pairing flow saved, and it is only written there -- so on a
+        // wired session it can still be missing and this watchdog used to log
+        // `phone media watchdog not started (adapter=true address=false)` and never release anything
+        // (measured on the car on 2026-10-13, while the head unit paused every track a second in).
+        // The reference asks its Bluetooth backend instead (`connectedAddress(profile)` / `isBonded` in
+        // LegacyVendorBluetoothHandoff), so ask the stack the same question here: whichever bonded device
+        // is an iPhone is the one CarPlay means. This also keeps the release independent of the AirPlay
+        // session having delivered `/info` at all.
+        val stored = DiPlayPreferences.phoneAddress(context)
+        val address = stored?.takeIf { it.isNotBlank() } ?: bondedIphoneAddress(adapter)
         if (adapter == null || address.isNullOrBlank()) {
             log("phone media watchdog not started (adapter=${adapter != null} address=${!address.isNullOrBlank()})")
             return
+        }
+        if (address != stored) {
+            log("phone media watchdog using the bonded iPhone $address (stored=$stored)")
+            runCatching { DiPlayPreferences.savePhone(context, address, DiPlayPreferences.phoneName(context)) }
         }
         val remote = runCatching { adapter.getRemoteDevice(address) }.getOrNull()
         if (remote == null) {
@@ -186,6 +199,22 @@ internal class PhoneMediaAudioWatchdog(private val context: Context) {
 }
 
 /** Convenience for the service: silence when Bluetooth is unavailable. */
+/**
+ * The bonded device that is an iPhone: the phone this head unit pairs with.
+ *
+ * The pairing flow stores the address it saw, but a wired session can start without that ever having
+ * been written (see [PhoneMediaAudioWatchdog.start]). The reference reads the bonded/connected list
+ * instead, which is the same question asked of the stack. A wrong answer costs nothing here: the
+ * watcher only releases a link whose own profile state says it is connected.
+ */
+private fun bondedIphoneAddress(adapter: android.bluetooth.BluetoothAdapter?): String? =
+    runCatching {
+        adapter?.bondedDevices?.firstOrNull { device ->
+            val name = device?.name ?: return@firstOrNull false
+            name.contains("iPhone", ignoreCase = true) || name.contains("iPad", ignoreCase = true)
+        }?.address
+    }.getOrNull()
+
 internal fun PhoneMediaAudioWatchdog.startQuietly() = runCatching { start() }
 
 /**

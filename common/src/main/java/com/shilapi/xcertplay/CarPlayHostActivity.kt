@@ -69,6 +69,7 @@ import com.shilapi.xcertplay.airplay.OemIconAbsence
 import com.shilapi.xcertplay.airplay.CarPlayClusterDisplay
 import com.shilapi.xcertplay.airplay.AirPlaySafeArea
 import com.shilapi.xcertplay.airplay.AirPlaySession
+import com.shilapi.xcertplay.airplay.AirPlayDeviceInfo
 import com.shilapi.xcertplay.airplay.AirPlaySessionListener
 import com.shilapi.xcertplay.airplay.CarPlayMediaEngine
 import com.shilapi.xcertplay.airplay.SafeAreaRect
@@ -3691,6 +3692,25 @@ class CarPlayHostActivity : ComponentActivity() {
             override fun onCommand(session: AirPlaySession, type: String, params: Map<String, Any?>) {
                 if (!type.equals("disableBluetooth", ignoreCase = true)) return
                 appendLog("CarPlay asked for Bluetooth off; releasing the phone's A2DP link")
+                mediaAudioWatchdog.startQuietly()
+            }
+
+            /**
+             * Records the phone's own address, which is the device the A2DP release has to disconnect.
+             *
+             * The iPhone reports `9c:92:4f:02:b7:b7` as its deviceId, and the head unit's adapter API takes
+             * exactly that address (`reqA2dpDisconnect(9C:92:4F:02:B7:B7)=true` in the 2026-10-07 log,
+             * docs/_digest/27 §6sexies). Only the wireless pairing flow used to save it, so a wired
+             * session left [PhoneMediaAudioWatchdog] without one: it logged
+             * `phone media watchdog not started (adapter=true address=false)` on 2026-10-13 and the head
+             * unit kept pausing the phone a second into every track.
+             */
+            override fun onDeviceInfo(session: AirPlaySession, info: AirPlayDeviceInfo) {
+                if (info.deviceId.count { it == ':' } != 5) return
+                val known = DiPlayPreferences.phoneAddress(this@CarPlayHostActivity)
+                if (known != null && known.equals(info.deviceId, ignoreCase = true)) return
+                DiPlayPreferences.savePhone(this@CarPlayHostActivity, info.deviceId, info.name)
+                appendLog("recorded the phone's Bluetooth address ${info.deviceId}")
                 mediaAudioWatchdog.startQuietly()
             }
 
