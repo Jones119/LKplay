@@ -1,0 +1,621 @@
+> Task :common:preBuild UP-TO-DATE
+> Task :common:preDebugBuild UP-TO-DATE
+> Task :common:generateDebugResources UP-TO-DATE
+> Task :common:packageDebugResources UP-TO-DATE
+> Task :common:processDebugNavigationResources UP-TO-DATE
+> Task :common:parseDebugLocalResources UP-TO-DATE
+> Task :common:generateDebugRFile UP-TO-DATE
+> Task :shared:preBuild UP-TO-DATE
+> Task :shared:preDebugBuild UP-TO-DATE
+> Task :shared:generateDebugResources UP-TO-DATE
+> Task :shared:packageDebugResources UP-TO-DATE
+> Task :shared:processDebugNavigationResources UP-TO-DATE
+> Task :shared:parseDebugLocalResources UP-TO-DATE
+> Task :shared:generateDebugRFile UP-TO-DATE
+> Task :shared:compileDebugKotlin UP-TO-DATE
+> Task :shared:javaPreCompileDebug UP-TO-DATE
+> Task :shared:compileDebugJavaWithJavac NO-SOURCE
+> Task :shared:bundleLibCompileToJarDebug UP-TO-DATE
+
+> Task :common:compileDebugKotlin FAILED
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/AirPlayPersistence.kt:589:20 Unresolved reference 'AdbClusterRouter'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarHotspotSetup.kt:9:34 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarHotspotSetup.kt:17:52 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:150:62 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:151:60 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:152:89 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:287:38 Unresolved reference 'ClusterMapPresentation'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:289:33 Unresolved reference 'DiLink51ClusterMonitor'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:290:35 Unresolved reference 'ClusterActivityState'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:292:55 Unresolved reference 'ClusterMapPresentation'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:293:64 Unresolved reference 'ClusterTurnGuidance'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:294:72 Unresolved reference 'ClusterTurnGuidance'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:294:106 Unresolved reference 'com.shilapi.xcertplay.hud.ClusterTurnGuidance'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:423:39 Unresolved reference 'BydNavigationOutputs'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:487:9 Unresolved reference 'CarPlayCallKeys'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:778:13 Unresolved reference 'DiLink51ClusterLayout'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:779:30 Unresolved reference 'DiLink51ClusterMonitor'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:779:85 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:779:90 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:779:95 Unresolved reference 'start'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:780:21 Unresolved reference 'DiLink51ClusterLayout'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:781:29 Unresolved reference 'stop'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:788:35 Unresolved reference 'BydNavigationOutputs'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:812:42 Unresolved reference 'DiLink51ClusterLayout'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:813:13 Unresolved reference 'DiLink51ClusterLayout'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:813:77 Unresolved reference 'DiLink51ClusterLayout'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:814:14 Unresolved reference 'DiLink51ClusterLayout'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:816:47 Unresolved reference 'ClusterActivityState'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:817:86 Unresolved reference 'theme'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:817:112 Unresolved reference 'mapVisible'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:828:13 Unresolved reference 'AdbClusterRouter'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:829:13 Unresolved reference 'ClusterActivityOutput'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:829:73 Unresolved reference 'it'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:830:13 Unresolved reference 'ClusterActivityOutput'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:832:13 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:832:27 Unresolved reference 'ClusterActivityOutput'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:832:64 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:832:64 Not enough information to infer type argument for 'T'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:837:9 Unresolved reference 'ClusterActivityOutput'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:839:13 Unresolved reference 'DiLink51ClusterLayout'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:844:23 Unresolved reference 'ClusterMapPresentation'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:845:75 Unresolved reference 'ClusterMapPresentation'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:848:28 Unresolved reference 'ClusterMapPresentation'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:848:75 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:851:17 Unresolved reference 'ClusterMapPresentation'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:853:43 Unresolved reference 'BydNavigationOutputs'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:863:19 Unresolved reference 'ClusterMapPresentation'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:866:19 Unresolved reference 'ClusterMapPresentation'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:871:58 Unresolved reference 'DiLink51ClusterLayout'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:872:32 Unresolved reference 'DiLink51ClusterLayout'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:873:24 Unresolved reference 'DiLink51ClusterLayout'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:874:23 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:874:23 Not enough information to infer type argument for 'V'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:874:59 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:874:59 Not enough information to infer type argument for 'T'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:874:67 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:874:72 Unresolved reference 'setMapVisible'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:877:27 Unresolved reference 'ClusterMapPresentation'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:878:40 Unresolved reference 'ClusterMapPresentation'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:879:28 Unresolved reference 'ClusterMapPresentation'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:879:75 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:884:26 Unresolved reference 'setOnDismissListener'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:890:30 Unresolved reference 'setMapVisible'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:892:17 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:893:30 Unresolved reference 'show'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:904:16 Unresolved reference 'outputSurface'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:904:31 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:904:37 Inapplicable candidate(s): fun onClusterSurface(surface: Surface?): Unit
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:905:16 Unresolved reference 'setStreamActive'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:906:16 Unresolved reference 'setMapVisible'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:913:9 Unresolved reference 'ClusterActivityOutput'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:918:51 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:918:51 Not enough information to infer type argument for 'T'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:918:53 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:918:53 Not enough information to infer type argument for 'T'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:918:89 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:918:89 Not enough information to infer type argument for 'T'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:920:26 Unresolved reference 'setTurnCardOverlay'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:925:26 Unresolved reference 'setTurnCardOpacity'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:926:26 Unresolved reference 'setTurnCardNightMode'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:927:26 Unresolved reference 'setTurnCardGuidance'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:932:9 Unresolved reference 'ClusterActivityOutput'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:933:51 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:933:51 Not enough information to infer type argument for 'T'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:933:53 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:933:53 Not enough information to infer type argument for 'T'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:933:89 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:933:89 Not enough information to infer type argument for 'T'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:938:23 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:938:23 Not enough information to infer type argument for 'T'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:938:31 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:938:33 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:938:50 Unresolved reference 'dismiss'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:939:35 Unresolved reference 'BydNavigationOutputs'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:947:15 Unresolved reference 'DiLink51ClusterLayout'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:947:53 Unresolved reference 'AdbClusterRouter'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:953:17 Unresolved reference 'AdbClusterRouter'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:953:51 Unresolved reference 'ClusterActivityOutput'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:955:17 Unresolved reference 'ClusterActivityOutput'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:971:27 Unresolved reference 'ClusterMapPresentation'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:973:55 Unresolved reference 'name'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:987:13 Unresolved reference 'AdbClusterRouter'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:987:47 Unresolved reference 'ClusterActivityOutput'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:990:20 Unresolved reference 'DiLink4ClusterDisplay'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:993:67 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:993:72 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:994:46 Unresolved reference 'widthPixels'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:994:74 Unresolved reference 'heightPixels'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:995:76 Unresolved reference 'widthPixels'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:995:94 Unresolved reference 'heightPixels'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:995:123 Unresolved reference 'safeArea'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:995:150 Unresolved reference 'safeAreaDrawOutside'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:999:23 Unresolved reference 'ClusterMapPresentation'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:1001:24 Unresolved reference 'ClusterMapPresentation'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:1004:21 Unresolved reference 'DiLink51ClusterLayout'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:1005:32 Unresolved reference 'DiLink51ClusterLayout'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:1006:28 Unresolved reference 'DiLink51ClusterLayout'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:1006:65 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:1006:70 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:1007:54 Unresolved reference 'widthPixels'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:1007:82 Unresolved reference 'heightPixels'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:1011:21 Unresolved reference 'DiLink4ClusterDisplay'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:1011:59 Unresolved reference 'name'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:1012:28 Unresolved reference 'DiLink4ClusterDisplay'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:1017:23 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:1017:28 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:1017:59 Unresolved reference 'widthPixels'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:1017:87 Unresolved reference 'heightPixels'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:1077:13 Unresolved reference 'CarPlayCallKeys'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:1164:35 Unresolved reference 'BydNavigationOutputs'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:1165:14 Unresolved reference 'ClusterActivityOutput'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:1169:58 Unresolved reference 'isShowing'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:1169:92 Unresolved reference 'mapVisible'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:1170:26 Unresolved reference 'outputSurface'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:1171:65 Unresolved reference 'ClusterActivityOutput'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:1203:35 Unresolved reference 'BydNavigationOutputs'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:1204:25 Unresolved reference 'stop'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:1478:53 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:1479:39 Unresolved reference 'BydNavigationOutputs'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:1481:69 Unresolved reference 'batteryPercent'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:1481:97 Unresolved reference 'rangeKm'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:3424:52 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:3676:21 Unresolved reference 'ClusterActivityOutput'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:3692:21 Unresolved reference 'ClusterActivityOutput'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:3754:32 Unresolved reference 'AdbClusterRouter'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:3755:14 Unresolved reference 'DiLink4ClusterDisplay'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:3755:49 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:3755:52 Unresolved reference 'DiLink4ClusterDisplay'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:3833:47 Unresolved reference 'BydNavigationOutputs'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:3887:67 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:3888:43 Unresolved reference 'BydNavigationOutputs'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:4236:9 Unresolved reference 'ClusterActivityOutput'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:4517:23 Unresolved reference 'ClusterMapPresentation'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:4519:38 Unresolved reference 'setStreamActive'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayHostActivity.kt:4520:17 Unresolved reference 'ClusterActivityOutput'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayMediaKeys.kt:23:34 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayMediaKeys.kt:206:53 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayMediaKeys.kt:206:57 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayMediaKeys.kt:246:25 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayMediaKeys.kt:246:29 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayVideo.kt:12:34 Unresolved reference 'BydNavigationOutputs'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/CarPlayVideo.kt:56:59 Unresolved reference 'BydNavigationOutputs'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:43:34 Unresolved reference 'BydAdbAccess'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:44:34 Unresolved reference 'BydNavigationOutputs'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:45:34 Unresolved reference 'BydFieldSource'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:46:34 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:47:34 Unresolved reference 'BydVehicleCapabilities'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:48:34 Unresolved reference 'BydVehicleField'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:49:34 Unresolved reference 'BydVehicleFieldStore'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:50:34 Unresolved reference 'BydVehicleProbeOutcome'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:97:33 Unresolved reference 'BydAdbAccess'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:103:38 Unresolved reference 'BydVehicleProbeOutcome'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:120:44 Unresolved reference 'BydVehicleCapabilities'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:122:52 Unresolved reference 'BydVehicleCapabilities'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:123:47 Unresolved reference 'BydVehicleField'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:123:66 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:124:39 Unresolved reference 'BydAdbAccess'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:131:22 Unresolved reference 'BydVehicleProbeOutcome'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:132:28 Unresolved reference 'BydVehicleCapabilities'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:133:29 Unresolved reference 'BydVehicleField'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:133:48 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:139:21 Unresolved reference 'BydAdbAccess'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:140:22 Unresolved reference 'BydVehicleProbeOutcome'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:141:28 Unresolved reference 'BydVehicleCapabilities'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:142:29 Unresolved reference 'BydVehicleField'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:142:48 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:184:35 Unresolved reference 'BydNavigationOutputs'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:670:22 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:678:17 Unresolved reference 'ClusterActivityOutput'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:682:30 Unresolved reference 'AdbClusterRouter'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:685:84 Unresolved reference 'ClusterActivityOutput'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:687:57 Unresolved reference 'BydOemClusterNavi'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:688:55 Unresolved reference 'BydOemClusterHold'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:690:79 Unresolved reference 'it'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:691:35 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:692:21 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:692:63 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:693:21 Unresolved reference 'ClusterActivityOutput'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:697:34 Unresolved reference 'ClusterMapPresentation'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:698:47 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:698:51 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:698:53 Unresolved reference 'ClusterMapPresentation'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:700:17 Unresolved reference 'DiLink4ClusterDisplay'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:700:62 Unresolved reference 'name'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:700:80 Unresolved reference 'x'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:700:95 Unresolved reference 'y'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:741:25 Unresolved reference 'DiLink51ClusterLayout'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:742:41 Unresolved reference 'DiLink51ClusterLayout'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:745:29 Unresolved reference 'DiLink51ClusterLayout'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:749:39 Unresolved reference 'DiLink51ClusterMonitor'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:754:42 Unresolved reference 'DiLink51ClusterLayout'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:755:93 Unresolved reference 'it'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:755:135 Unresolved reference 'DiLink51ClusterLayout'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:756:33 Unresolved reference 'DiLink51ClusterLayout'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:756:71 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:761:41 Unresolved reference 'DiLink51ClusterLayout'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:762:95 Unresolved reference 'it'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:762:140 Unresolved reference 'DiLink51ClusterLayout'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:763:29 Unresolved reference 'DiLink51ClusterLayout'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:763:70 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:788:37 Unresolved reference 'DiLink51ClusterLayout'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:863:33 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:864:33 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:873:13 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:876:43 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:876:104 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:877:17 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:879:21 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:879:56 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1469:32 Unresolved reference 'DiLink51ClusterMonitor'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1477:21 Unresolved reference 'DiLink51ClusterMonitor'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1479:21 Unresolved reference 'DiLink51ClusterLayout'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1699:13 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1700:13 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1702:13 Unresolved reference 'BydNavigationOutputs'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1705:13 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1706:13 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1707:13 Unresolved reference 'BydNavigationOutputs'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1711:13 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1712:13 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1716:13 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1717:13 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1719:13 Unresolved reference 'BydNavigationOutputs'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1724:26 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1754:54 Smart cast to 'TypeVariable(T)?' is impossible, because 'adbAccessState' is a mutable property that could be mutated concurrently.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1754:54 Unresolved reference 'BydAdbAccess.State'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1756:87 Unresolved reference 'error'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1758:40 Unresolved reference 'BydAdbAccess.State'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1758:58 Unresolved reference 'BydAdbAccess'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1767:30 Unresolved reference 'error'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1767:37 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1767:41 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1771:38 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1771:38 Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun <T> Collection<T>.isNotEmpty(): Boolean
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1784:94 Unresolved reference 'error'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1785:38 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1785:38 Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun <T> Collection<T>.isNotEmpty(): Boolean
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1786:31 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1786:37 Unresolved reference 'BydAdbAccess'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1786:70 Unresolved reference 'BydAdbAccess'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1786:98 Unresolved reference 'BydAdbAccess'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1788:47 Unresolved reference 'BydAdbAccess'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1809:54 Smart cast to 'TypeVariable(T)?' is impossible, because 'adbAccessState' is a mutable property that could be mutated concurrently.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1809:54 Unresolved reference 'BydAdbAccess.State'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1811:63 Unresolved reference 'error'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1812:40 Unresolved reference 'BydAdbAccess.State'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1812:58 Unresolved reference 'BydAdbAccess'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1816:40 Unresolved reference 'BydAdbAccess'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1817:35 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1817:35 Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun <T, R> T.let(block: (T) -> R): R
+    [R|Contract description]
+     <
+        CallsInPlace(block, EXACTLY_ONCE)
+    >
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1817:39 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1819:30 Unresolved reference 'error'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1819:37 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1819:41 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1832:72 Unresolved reference 'BydAdbAccess'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1837:30 Unresolved reference 'batteryPercent'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1837:46 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1837:52 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1838:20 Unresolved reference 'rangeKm'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1838:29 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1838:33 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1840:59 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1841:17 Argument type mismatch: actual type is 'R? (of fun <T, R> T.let)', but 'String?' was expected.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1841:24 Unresolved reference 'speedKmh'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1841:34 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1841:38 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1842:13 Argument type mismatch: actual type is 'Int', but 'Int' was expected.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1842:52 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1843:17 Argument type mismatch: actual type is 'R? (of fun <T, R> T.let)', but 'String?' was expected.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1843:24 Unresolved reference 'gear'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1843:30 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1843:34 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1843:84 Unresolved reference 'letter'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1844:13 Argument type mismatch: actual type is 'Int', but 'Int' was expected.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1845:13 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1845:13 Argument type mismatch: actual type is 'Boolean', but 'Boolean' was expected.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1845:59 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1856:13 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1857:17 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1861:40 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1861:40 Not enough information to infer type argument for 'T'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1869:13 Unresolved reference 'BydVehicleFieldStore'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1873:9 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1874:13 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1878:36 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1878:36 Not enough information to infer type argument for 'T'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1887:49 Unresolved reference 'BydVehicleCapabilities'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1888:9 Unresolved reference 'BydVehicleFieldStore'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1888:65 Unresolved reference 'capabilities'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1890:52 Unresolved reference 'BydVehicleField'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1890:87 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1890:87 Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun <T, R> Iterable<T>.map(transform: (T) -> R): List<R>
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1890:93 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1891:19 'when' expression must be exhaustive. Add an 'else' branch.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1892:13 Unresolved reference 'BydVehicleField'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1893:13 Unresolved reference 'BydVehicleField'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1894:13 Unresolved reference 'BydVehicleField'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1894:34 Unresolved reference 'BydVehicleField'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1894:57 Unresolved reference 'BydVehicleField'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1896:13 Unresolved reference 'BydVehicleField'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1898:7 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1898:7 Not enough information to infer type argument for 'T'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1898:18 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1898:18 Not enough information to infer type argument for 'T'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1903:21 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1904:13 Unresolved reference 'BydVehicleFieldStore'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1905:11 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1905:11 Not enough information to infer type argument for 'T'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1906:27 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1911:36 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1911:36 Not enough information to infer type argument for 'T'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1912:38 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1912:44 Unresolved reference 'BydVehicleProbeOutcome'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1912:67 Unresolved reference 'BydAdbAccess'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1916:75 Unresolved reference 'BydVehicleCapabilities'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1917:42 Unresolved reference 'fields'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1917:64 Unresolved reference 'it'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1917:86 Unresolved reference 'BydFieldSource'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1918:55 Unresolved reference 'catalogAvailable'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1920:34 Unresolved reference 'catalogAvailable'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1922:34 Unresolved reference 'result'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1922:41 Unresolved reference 'BydVehicleField'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1925:92 Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun Double.roundToInt(): Int
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1930:33 Unresolved reference 'result'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1930:40 Unresolved reference 'BydVehicleField'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1933:100 Unresolved reference 'toInt'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1939:26 Unresolved reference 'batterySupported'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1940:45 Unresolved reference 'result'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1940:52 Unresolved reference 'BydVehicleField'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1941:43 Unresolved reference 'result'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1941:50 Unresolved reference 'BydVehicleField'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1942:39 Unresolved reference 'result'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1942:46 Unresolved reference 'BydVehicleField'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1947:34 Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun Double.roundToInt(): Int
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1947:59 Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun Double.roundToInt(): Int
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1950:34 Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun Double.roundToInt(): Int
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1950:59 Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun Double.roundToInt(): Int
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1955:37 Unresolved reference 'result'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1955:44 Unresolved reference 'BydVehicleField'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1958:101 Unresolved reference 'toInt'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1965:75 Unresolved reference 'BydVehicleCapabilities'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1966:50 Unresolved reference 'batterySupported'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1969:17 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1970:17 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1974:87 Overload resolution ambiguity between candidates:
+fun <ERROR TYPE REF: Symbol not found for DiLink51ClusterLayout>.localizedLabel(context: Context): String
+fun <ERROR TYPE REF: Symbol not found for DiLink51ClusterLayout>.localizedLabel(context: Context): String
+fun <ERROR TYPE REF: Symbol not found for BydClusterNaviMode>.localizedLabel(context: Context): String
+fun EvChargingConnectors.localizedLabel(context: Context): String
+fun <ERROR TYPE REF: Symbol not found for com.shilapi.xcertplay.hud.BydOemClusterHold>.localizedLabel(context: Context): String
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1975:36 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1976:17 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1978:29 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1980:35 Unresolved reference 'it'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1980:41 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1981:79 Unresolved reference 'it'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1982:38 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1983:17 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1983:61 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1986:50 Unresolved reference 'motionSupported'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1989:17 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1990:17 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1994:50 Unresolved reference 'gearSupported'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1997:17 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:1998:17 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2007:20 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2020:22 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2030:23 Unresolved reference 'BydVehicleSettingsBackendProvider'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2032:26 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2032:26 Not enough information to infer type argument for 'R'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2033:17 Not enough information to infer type argument for 'K'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2034:21 Unresolved reference 'BydAdbAccess'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2049:42 Unresolved reference 'state'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2051:50 Unresolved reference 'BydAdbAccess'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2056:71 Unresolved reference 'state'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2056:80 Unresolved reference 'BydAdbAccess'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2072:34 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2079:36 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2079:36 Not enough information to infer type argument for 'T'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2082:23 Unresolved reference 'BydVehicleSettingsBackendProvider'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2087:31 Unresolved reference 'BydAdbAccess'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2088:41 Unresolved reference 'BydVehicleProbeOutcome'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2098:45 Unresolved reference 'BydAdbAccess'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2106:45 Unresolved reference 'BydAdbAccess'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2115:37 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2116:38 Unresolved reference 'BydVehicleFieldStore'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2122:43 Unresolved reference 'BydVehicleProbeOutcome'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2126:45 Unresolved reference 'saved'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2127:45 Unresolved reference 'snapshotChanged'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2132:47 Unresolved reference 'BydVehicleProbeOutcome'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2134:62 Unresolved reference 'lostFields'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2142:21 Unresolved reference 'BydVehicleProbeOutcome'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2143:25 Unresolved reference 'BydAdbAccess'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2159:64 Unresolved reference 'copy'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2162:64 Unresolved reference 'copy'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2168:50 Unresolved reference 'access'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2170:42 Unresolved reference 'capabilities'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2172:21 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2174:42 Unresolved reference 'capabilities'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2177:66 Unresolved reference 'access'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2178:55 Unresolved reference 'capabilities'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2179:52 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2179:52 Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun <T> Iterable<T>.joinToString(separator: CharSequence = ..., prefix: CharSequence = ..., postfix: CharSequence = ..., limit: Int = ..., truncated: CharSequence = ..., transform: ((T) -> CharSequence)? = ...): String
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2180:55 Unresolved reference 'error'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2195:14 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2196:21 Unresolved reference 'BydVehicleFieldStore'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2212:23 Unresolved reference 'BydVehicleSettingsBackendProvider'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2217:30 Unresolved reference 'BydVehicleProbeOutcome'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2218:36 Unresolved reference 'BydVehicleCapabilities'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2219:37 Unresolved reference 'BydVehicleField'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2219:56 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2221:48 Unresolved reference 'BydAdbAccess'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2222:37 Unresolved reference 'BydAdbAccess'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2237:48 Unresolved reference 'BydAdbAccess'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2238:41 Unresolved reference 'BydAdbAccess'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2254:49 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2254:55 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2257:38 Unresolved reference 'BydVehicleFieldStore'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2263:45 Unresolved reference 'saved'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2264:45 Unresolved reference 'snapshotChanged'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2270:62 Unresolved reference 'lostFields'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2271:47 Unresolved reference 'BydVehicleProbeOutcome'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2293:54 Unresolved reference 'access'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2293:78 Unresolved reference 'state'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2300:43 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2300:43 Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun <T> Collection<T>.isNotEmpty(): Boolean
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2309:56 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2309:56 Not enough information to infer type argument for 'T'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2316:54 Unresolved reference 'capabilities'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2317:55 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2317:55 Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun <T> Iterable<T>.joinToString(separator: CharSequence = ..., prefix: CharSequence = ..., postfix: CharSequence = ..., limit: Int = ..., truncated: CharSequence = ..., transform: ((T) -> CharSequence)? = ...): String
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2319:54 Unresolved reference 'error'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2331:14 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2344:8 Unresolved reference 'BydVehicleCapabilities'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2344:34 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2350:9 Unresolved reference 'BydVehicleFieldStore'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2362:23 Unresolved reference 'BydVehicleCapabilities'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2363:17 Unresolved reference 'BydAdbAccess'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2365:13 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2365:70 Unresolved reference 'batterySupported'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2366:21 Unresolved reference 'batteryPercent'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2366:54 Unresolved reference 'rangeKm'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2367:13 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2367:73 Unresolved reference 'motionSupported'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2368:21 Unresolved reference 'speedKmh'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2368:48 Unresolved reference 'gear'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2369:13 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2369:71 Unresolved reference 'gearSupported'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2369:104 Unresolved reference 'gear'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2373:42 Unresolved reference 'BydAdbAccess'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2373:72 'when' expression must be exhaustive. Add an 'else' branch.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2374:9 Unresolved reference 'BydAdbAccess'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2375:9 Unresolved reference 'BydAdbAccess'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2376:9 Unresolved reference 'BydAdbAccess'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2377:9 Unresolved reference 'BydAdbAccess'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2391:43 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2392:9 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2392:55 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2401:16 Unresolved reference 'DiLink4ClusterDisplay'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2421:16 Unresolved reference 'DiLink4ClusterDisplay'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2450:34 Unresolved reference 'ClusterActivityOutput'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2454:13 Unresolved reference 'ClusterActivityOutput'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2460:9 Unresolved reference 'ClusterActivityOutput'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2788:73 Overload resolution ambiguity between candidates:
+fun CarPlaySize.localizedLabel(context: Context): String
+fun <ERROR TYPE REF: Symbol not found for DiLink51ClusterLayout>.localizedLabel(context: Context): String
+fun <ERROR TYPE REF: Symbol not found for DiLink51ClusterLayout>.localizedLabel(context: Context): String
+fun <ERROR TYPE REF: Symbol not found for BydClusterNaviMode>.localizedLabel(context: Context): String
+fun <ERROR TYPE REF: Symbol not found for com.shilapi.xcertplay.hud.BydOemClusterHold>.localizedLabel(context: Context): String
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2950:84 Unresolved reference 'ClusterActivityOutput'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2987:32 Unresolved reference 'ClusterMapPresentation'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2991:59 Unresolved reference 'ClusterActivityOutput'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2991:108 Unresolved reference 'ClusterActivityOutput'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2992:21 Unresolved reference 'AdbClusterRouter'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2992:82 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2993:58 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:2997:32 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:3001:37 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:3003:40 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:3004:43 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:3005:44 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:3007:43 Unresolved reference 'BydVehicleFieldStore'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:3012:56 Unresolved reference 'catalogAvailable'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:3012:103 Unresolved reference 'detectedAtMillis'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:3013:66 Unresolved reference 'firmwareKey'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:3014:52 Unresolved reference 'BydVehicleFieldStore'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:3016:39 Unresolved reference 'BydVehicleField'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:3016:55 Method 'iterator()' is ambiguous for this expression. Applicable candidates:
+fun <T> Enumeration<T>.iterator(): Iterator<T>
+fun <T> Iterator<T>.iterator(): Iterator<T>
+fun <K, V> Map<out K, V>.iterator(): Iterator<Map.Entry<K, V>>
+fun <K, V> MutableMap<K, V>.iterator(): MutableIterator<MutableMap.MutableEntry<K, V>>
+fun CharSequence.iterator(): CharIterator
+fun BufferedInputStream.iterator(): ByteIterator
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:3017:57 Unresolved reference 'result'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:3019:34 Argument type mismatch: actual type is 'R? (of fun <T, R> T.let)', but 'K? (of fun <K> ELVIS_CALL)' was expected.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:3019:34 Argument type mismatch: actual type is 'K (of fun <K> ELVIS_CALL)', but 'Any?' was expected.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:3019:49 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:3019:53 Cannot infer type for this parameter. Specify it explicitly.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:3019:64 Unresolved reference 'transaction'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:3019:86 Unresolved reference 'device'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:3019:103 Unresolved reference 'fid'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:3019:120 Unresolved reference 'source'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt:3020:40 Argument type mismatch: actual type is 'String', but 'K (of fun <K> ELVIS_CALL)' was expected.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/DiPlaySessionService.kt:67:35 Unresolved reference 'BydNavigationOutputs'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/HomeScreenMonitor.kt:48:13 Unresolved reference 'DiLink51ClusterMonitor'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/HomeScreenMonitor.kt:132:52 Unresolved reference 'DiLink51ClusterMonitor'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/LocalizedOptions.kt:6:34 Unresolved reference 'BydClusterNaviMode'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/LocalizedOptions.kt:16:14 Unresolved reference 'DiLink51ClusterLayout'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/LocalizedOptions.kt:16:103 'when' expression must be exhaustive. Add an 'else' branch.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/LocalizedOptions.kt:16:109 Unresolved reference 'DiLink51ClusterLayout.Theme'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/LocalizedOptions.kt:17:5 Unresolved reference 'DiLink51ClusterLayout'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/LocalizedOptions.kt:18:5 Unresolved reference 'DiLink51ClusterLayout'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/LocalizedOptions.kt:19:5 Unresolved reference 'DiLink51ClusterLayout'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/LocalizedOptions.kt:22:14 Unresolved reference 'DiLink51ClusterLayout'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/LocalizedOptions.kt:22:106 'when' expression must be exhaustive. Add an 'else' branch.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/LocalizedOptions.kt:22:112 Unresolved reference 'DiLink51ClusterLayout.Contrast'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/LocalizedOptions.kt:23:5 Unresolved reference 'DiLink51ClusterLayout'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/LocalizedOptions.kt:24:5 Unresolved reference 'DiLink51ClusterLayout'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/LocalizedOptions.kt:25:5 Unresolved reference 'DiLink51ClusterLayout'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/LocalizedOptions.kt:28:14 Unresolved reference 'BydClusterNaviMode'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/LocalizedOptions.kt:28:94 'when' expression must be exhaustive. Add an 'else' branch.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/LocalizedOptions.kt:28:100 Unresolved reference 'BydClusterNaviMode'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/LocalizedOptions.kt:29:5 Unresolved reference 'BydClusterNaviMode'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/LocalizedOptions.kt:30:5 Unresolved reference 'BydClusterNaviMode'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/LocalizedOptions.kt:31:5 Unresolved reference 'BydClusterNaviMode'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/LocalizedOptions.kt:32:5 Unresolved reference 'BydClusterNaviMode'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/LocalizedOptions.kt:48:40 Unresolved reference 'BydOemClusterHold'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/LocalizedOptions.kt:48:119 'when' expression must be exhaustive. Add an 'else' branch.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/LocalizedOptions.kt:48:125 Unresolved reference 'com.shilapi.xcertplay.hud.BydOemClusterHold'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/LocalizedOptions.kt:49:31 Unresolved reference 'BydOemClusterHold'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/LocalizedOptions.kt:50:31 Unresolved reference 'BydOemClusterHold'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/LocalizedOptions.kt:51:31 Unresolved reference 'BydOemClusterHold'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/WheelKeyService.kt:23:34 Unresolved reference 'BydNavigationOutputs'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/WheelKeyService.kt:24:34 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/WheelKeyService.kt:84:9 Unresolved reference 'CarPlayCallKeys'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/WheelKeyService.kt:118:13 Unresolved reference 'CarPlayCallKeys'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/WheelKeyService.kt:119:13 Unresolved reference 'BydOutputSettings'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/WheelKeyService.kt:230:9 Unresolved reference 'BydNavigationOutputs'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/WheelKeyService.kt:270:13 Unresolved reference 'BydNavigationOutputs'.
+e: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/common/src/main/java/com/shilapi/xcertplay/WheelKeyService.kt:272:13 Unresolved reference 'BydNavigationOutputs'.
+
+[Incubating] Problems report is available at: file:///D:/Development/DiAuto-DiPlay/CarPlay-CS11/build/reports/problems/problems-report.html
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':common:compileDebugKotlin' (registered by plugin 'com.android.internal.library').
+> A failure occurred while executing org.jetbrains.kotlin.compilerRunner.GradleCompilerRunnerWithWorkers$GradleKotlinCompilerWorkAction
+   > Compilation error. See log for more details
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights from a Build Scan (powered by Develocity).
+> Get more help at https://help.gradle.org.
+
+Deprecated Gradle features were used in this build, making it incompatible with Gradle 10.
+
+You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins.
+
+For more on this, please refer to https://docs.gradle.org/9.5.0/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
+
+BUILD FAILED in 7s
+14 actionable tasks: 1 executed, 13 up-to-date

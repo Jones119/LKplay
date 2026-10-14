@@ -1,0 +1,1615 @@
+
+Cmd line: com.shihab.diplay.hudtest
+
+
+
+JNI: CheckJNI is off; workarounds are off; pins=9; globals=329 (plus 2 weak)
+
+
+
+DALVIK THREADS:
+
+(mutexes: tll=0 tsl=0 tscl=0 ghl=0)
+
+
+
+"main" prio=5 tid=1 NATIVE
+
+  | group="main" sCount=1 dsCount=0 obj=0x42027ca8 self=0x420164f8
+
+  | sysTid=19791 nice=0 sched=0/0 cgrp=apps handle=1074090324
+
+  | state=S schedstat=( 0 0 0 ) utm=4785 stm=1275 core=0
+
+  #00  pc 00021834  /system/lib/libc.so (epoll_wait+12)
+
+  #01  pc 00010687  /system/lib/libutils.so (android::Looper::pollInner(int)+98)
+
+  #02  pc 000108b1  /system/lib/libutils.so (android::Looper::pollOnce(int, int*, int*, void**)+92)
+
+  #03  pc 0006a8f1  /system/lib/libandroid_runtime.so (android::NativeMessageQueue::pollOnce(_JNIEnv*, int)+22)
+
+  #04  pc 0001dbcc  /system/lib/libdvm.so (dvmPlatformInvoke+112)
+
+  #05  pc 0004e123  /system/lib/libdvm.so (dvmCallJNIMethod(unsigned int const*, JValue*, Method const*, Thread*)+398)
+
+  #06  pc 00000214  /dev/ashmem/dalvik-jit-code-cache (deleted)
+
+  at android.os.MessageQueue.nativePollOnce(Native Method)
+
+  at android.os.MessageQueue.next(MessageQueue.java:138)
+
+  at android.os.Looper.loop(Looper.java:123)
+
+  at android.app.ActivityThread.main(ActivityThread.java:5013)
+
+  at java.lang.reflect.Method.invokeNative(Native Method)
+
+  at java.lang.reflect.Method.invoke(Method.java:515)
+
+  at com.android.internal.os.ZygoteInit$MethodAndArgsCaller.run(ZygoteInit.java:809)
+
+  at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:625)
+
+  at dalvik.system.NativeStart.main(Native Method)
+
+
+
+"AudioTrack" prio=10 tid=45 NATIVE
+
+  | group="main" sCount=1 dsCount=0 obj=0x429c05c0 self=0x6c152d78
+
+  | sysTid=19939 nice=-16 sched=0/0 cgrp=apps handle=-2064093496
+
+  | state=S schedstat=( 0 0 0 ) utm=1 stm=1 core=3
+
+  #00  pc 00021a00  /system/lib/libc.so (__futex_syscall3+12)
+
+  #01  pc 0000ef9c  /system/lib/libc.so (__pthread_cond_timedwait_relative+48)
+
+  #02  pc 000488bd  /system/lib/libmedia.so (android::AudioTrack::AudioTrackThread::threadLoop()+116)
+
+  #03  pc 0000ea25  /system/lib/libutils.so (android::Thread::_threadLoop(void*)+104)
+
+  #04  pc 0004d595  /system/lib/libandroid_runtime.so (android::AndroidRuntime::javaThreadShell(void*)+68)
+
+  #05  pc 0000e5c7  /system/lib/libutils.so
+
+  #06  pc 0000d248  /system/lib/libc.so (__thread_entry+72)
+
+  #07  pc 0000d3e0  /system/lib/libc.so (pthread_create+240)
+
+  at dalvik.system.NativeStart.run(Native Method)
+
+
+
+"OMXCallbackDisp" prio=6 tid=44 NATIVE
+
+  | group="main" sCount=1 dsCount=0 obj=0x4247fff0 self=0x6be8c170
+
+  | sysTid=19938 nice=-2 sched=0/0 cgrp=apps handle=1810436008
+
+  | state=S schedstat=( 0 0 0 ) utm=175 stm=182 core=1
+
+  #00  pc 000219fc  /system/lib/libc.so (__futex_syscall3+8)
+
+  #01  pc 0000ef9c  /system/lib/libc.so (__pthread_cond_timedwait_relative+48)
+
+  #02  pc 0000effc  /system/lib/libc.so (__pthread_cond_timedwait+64)
+
+  #03  pc 0000eaad  /system/lib/libstagefright_omx.so (android::OMX::CallbackDispatcher::loop()+40)
+
+  #04  pc 0000ea95  /system/lib/libutils.so (android::Thread::_threadLoop(void*)+216)
+
+  #05  pc 0004d595  /system/lib/libandroid_runtime.so (android::AndroidRuntime::javaThreadShell(void*)+68)
+
+  #06  pc 0000e5c7  /system/lib/libutils.so
+
+  #07  pc 0000d248  /system/lib/libc.so (__thread_entry+72)
+
+  #08  pc 0000d3e0  /system/lib/libc.so (pthread_create+240)
+
+  at dalvik.system.NativeStart.run(Native Method)
+
+
+
+"carplay-audio" daemon prio=5 tid=43 SUSPENDED
+
+  | group="main" sCount=1 dsCount=0 obj=0x423aa1f0 self=0x6be707c8
+
+  | sysTid=19935 nice=-19 sched=0/0 cgrp=apps handle=1813479432
+
+  | state=S schedstat=( 0 0 0 ) utm=3068 stm=1096 core=1
+
+  #00  pc 000219fc  /system/lib/libc.so (__futex_syscall3+8)
+
+  #01  pc 0000ef9c  /system/lib/libc.so (__pthread_cond_timedwait_relative+48)
+
+  #02  pc 0000effc  /system/lib/libc.so (__pthread_cond_timedwait+64)
+
+  #03  pc 000536b3  /system/lib/libdvm.so
+
+  #04  pc 00053c75  /system/lib/libdvm.so (dvmChangeStatus(Thread*, ThreadStatus)+34)
+
+  #05  pc 00052dd5  /system/lib/libdvm.so
+
+  #06  pc 0006764d  /system/lib/libdvm.so
+
+  #07  pc 00000834  /dev/ashmem/dalvik-jit-code-cache (deleted)
+
+  at java.lang.Object.wait(Native Method)
+
+  at java.lang.Thread.parkFor(Thread.java:1205)
+
+  at sun.misc.Unsafe.park(Unsafe.java:325)
+
+  at java.util.concurrent.locks.LockSupport.parkNanos(LockSupport.java:197)
+
+  at java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.awaitNanos(AbstractQueuedSynchronizer.java:2056)
+
+  at java.util.concurrent.LinkedBlockingQueue.poll(LinkedBlockingQueue.java:435)
+
+  at com.shilapi.xcertplay.media.AudioRenderer.run(AndroidMediaSink.kt:1030)
+
+  at com.shilapi.xcertplay.media.AudioRenderer.thread$lambda$0(AndroidMediaSink.kt:975)
+
+  at com.shilapi.xcertplay.media.AudioRenderer$$ExternalSyntheticLambda0.run(D8$$SyntheticClass:0)
+
+  at java.lang.Thread.run(Thread.java:841)
+
+
+
+"airplay-rtcp-rx" daemon prio=5 tid=29 NATIVE
+
+  | group="main" sCount=1 dsCount=0 obj=0x42ae2da8 self=0x68af1e90
+
+  | sysTid=19933 nice=0 sched=0/0 cgrp=apps handle=1810624528
+
+  | state=S schedstat=( 0 0 0 ) utm=0 stm=0 core=3
+
+  #00  pc 00021414  /system/lib/libc.so (recvfrom+16)
+
+  #01  pc 0001d7cb  /system/lib/libjavacore.so
+
+  #02  pc 0001dbcc  /system/lib/libdvm.so (dvmPlatformInvoke+112)
+
+  #03  pc 0004e123  /system/lib/libdvm.so (dvmCallJNIMethod(unsigned int const*, JValue*, Method const*, Thread*)+398)
+
+  #04  pc 00026fe0  /system/lib/libdvm.so
+
+  #05  pc 0002dfa0  /system/lib/libdvm.so (dvmMterpStd(Thread*)+76)
+
+  #06  pc 0002b638  /system/lib/libdvm.so (dvmInterpret(Thread*, Method const*, JValue*)+184)
+
+  #07  pc 0006057d  /system/lib/libdvm.so (dvmCallMethodV(Thread*, Method const*, Object*, bool, JValue*, std::__va_list)+336)
+
+  #08  pc 000605a1  /system/lib/libdvm.so (dvmCallMethod(Thread*, Method const*, Object*, JValue*, ...)+20)
+
+  #09  pc 00055287  /system/lib/libdvm.so
+
+  #10  pc 0000d248  /system/lib/libc.so (__thread_entry+72)
+
+  #11  pc 0000d3e0  /system/lib/libc.so (pthread_create+240)
+
+  at libcore.io.Posix.recvfromBytes(Native Method)
+
+  at libcore.io.Posix.recvfrom(Posix.java:141)
+
+  at libcore.io.BlockGuardOs.recvfrom(BlockGuardOs.java:164)
+
+  at libcore.io.IoBridge.recvfrom(IoBridge.java:506)
+
+  at java.net.PlainDatagramSocketImpl.doRecv(PlainDatagramSocketImpl.java:161)
+
+  at java.net.PlainDatagramSocketImpl.receive(PlainDatagramSocketImpl.java:169)
+
+  at java.net.DatagramSocket.receive(DatagramSocket.java:250)
+
+  at com.shilapi.xcertplay.airplay.AudioStream.runControl(AudioStream.kt:181)
+
+  at com.shilapi.xcertplay.airplay.AudioStream.listen$lambda$6(AudioStream.kt:74)
+
+  at com.shilapi.xcertplay.airplay.AudioStream$$ExternalSyntheticLambda3.run(D8$$SyntheticClass:0)
+
+  at java.lang.Thread.run(Thread.java:841)
+
+
+
+"airplay-audio-rx" daemon prio=5 tid=27 NATIVE
+
+  | group="main" sCount=1 dsCount=0 obj=0x42ae2b08 self=0x84f6d498
+
+  | sysTid=19932 nice=-19 sched=0/0 cgrp=apps handle=1810242936
+
+  | state=S schedstat=( 0 0 0 ) utm=1192 stm=155 core=2
+
+  #00  pc 00021414  /system/lib/libc.so (recvfrom+16)
+
+  #01  pc 0001d7cb  /system/lib/libjavacore.so
+
+  #02  pc 0001dbcc  /system/lib/libdvm.so (dvmPlatformInvoke+112)
+
+  #03  pc 0004e123  /system/lib/libdvm.so (dvmCallJNIMethod(unsigned int const*, JValue*, Method const*, Thread*)+398)
+
+  #04  pc 00000214  /dev/ashmem/dalvik-jit-code-cache (deleted)
+
+  at libcore.io.Posix.recvfromBytes(Native Method)
+
+  at libcore.io.Posix.recvfrom(Posix.java:141)
+
+  at libcore.io.BlockGuardOs.recvfrom(BlockGuardOs.java:164)
+
+  at libcore.io.IoBridge.recvfrom(IoBridge.java:506)
+
+  at java.net.PlainDatagramSocketImpl.doRecv(PlainDatagramSocketImpl.java:161)
+
+  at java.net.PlainDatagramSocketImpl.receive(PlainDatagramSocketImpl.java:169)
+
+  at java.net.DatagramSocket.receive(DatagramSocket.java:250)
+
+  at com.shilapi.xcertplay.airplay.AudioStream.runData(AudioStream.kt:97)
+
+  at com.shilapi.xcertplay.airplay.AudioStream.listen$lambda$4(AudioStream.kt:69)
+
+  at com.shilapi.xcertplay.airplay.AudioStream$$ExternalSyntheticLambda2.run(D8$$SyntheticClass:0)
+
+  at java.lang.Thread.run(Thread.java:841)
+
+
+
+"carplay-video-recovery" daemon prio=5 tid=42 WAIT
+
+  | group="main" sCount=1 dsCount=0 obj=0x42fc76f0 self=0x6c1a6078
+
+  | sysTid=19930 nice=0 sched=0/0 cgrp=apps handle=1756306504
+
+  | state=S schedstat=( 0 0 0 ) utm=1 stm=0 core=1
+
+  at java.lang.Object.wait(Native Method)
+
+  - waiting on <0x42c45430> (a java.lang.VMThread) held by tid=42 (carplay-video-recovery)
+
+  at java.lang.Thread.parkFor(Thread.java:1205)
+
+  at sun.misc.Unsafe.park(Unsafe.java:325)
+
+  at java.util.concurrent.locks.LockSupport.park(LockSupport.java:157)
+
+  at java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:2017)
+
+  at java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:410)
+
+  at java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1035)
+
+  at java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1097)
+
+  at java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:587)
+
+  at java.lang.Thread.run(Thread.java:841)
+
+
+
+"carplay-video" daemon prio=5 tid=41 SUSPENDED
+
+  | group="main" sCount=1 dsCount=0 obj=0x42c9ad40 self=0x68aedb70
+
+  | sysTid=19925 nice=-4 sched=0/0 cgrp=apps handle=1756291016
+
+  | state=S schedstat=( 0 0 0 ) utm=2997 stm=1100 core=0
+
+  #00  pc 000219fc  /system/lib/libc.so (__futex_syscall3+8)
+
+  #01  pc 0000ef9c  /system/lib/libc.so (__pthread_cond_timedwait_relative+48)
+
+  #02  pc 0000effc  /system/lib/libc.so (__pthread_cond_timedwait+64)
+
+  #03  pc 000536b3  /system/lib/libdvm.so
+
+  #04  pc 00053c75  /system/lib/libdvm.so (dvmChangeStatus(Thread*, ThreadStatus)+34)
+
+  #05  pc 00052dd5  /system/lib/libdvm.so
+
+  #06  pc 0006764d  /system/lib/libdvm.so
+
+  #07  pc 00000834  /dev/ashmem/dalvik-jit-code-cache (deleted)
+
+  at java.lang.Object.wait(Native Method)
+
+  at java.lang.Thread.parkFor(Thread.java:1205)
+
+  at sun.misc.Unsafe.park(Unsafe.java:325)
+
+  at java.util.concurrent.locks.LockSupport.parkNanos(LockSupport.java:197)
+
+  at java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.awaitNanos(AbstractQueuedSynchronizer.java:2056)
+
+  at java.util.concurrent.LinkedBlockingQueue.poll(LinkedBlockingQueue.java:435)
+
+  at com.shilapi.xcertplay.media.VideoDecodeQueue.poll(VideoDecodeQueue.kt:53)
+
+  at com.shilapi.xcertplay.media.VideoDecoder.run(AndroidMediaSink.kt:503)
+
+  at com.shilapi.xcertplay.media.VideoDecoder.thread$lambda$0(AndroidMediaSink.kt:472)
+
+  at com.shilapi.xcertplay.media.VideoDecoder$$ExternalSyntheticLambda3.run(D8$$SyntheticClass:0)
+
+  at java.lang.Thread.run(Thread.java:841)
+
+
+
+"airplay-screen" daemon prio=5 tid=40 NATIVE
+
+  | group="main" sCount=1 dsCount=0 obj=0x42af6010 self=0x6c189008
+
+  | sysTid=19924 nice=-4 sched=0/0 cgrp=apps handle=1813550176
+
+  | state=S schedstat=( 0 0 0 ) utm=972 stm=450 core=3
+
+  #00  pc 00021414  /system/lib/libc.so (recvfrom+16)
+
+  #01  pc 0001d7cb  /system/lib/libjavacore.so
+
+  #02  pc 0001dbcc  /system/lib/libdvm.so (dvmPlatformInvoke+112)
+
+  #03  pc 0004e123  /system/lib/libdvm.so (dvmCallJNIMethod(unsigned int const*, JValue*, Method const*, Thread*)+398)
+
+  #04  pc 00000214  /dev/ashmem/dalvik-jit-code-cache (deleted)
+
+  at libcore.io.Posix.recvfromBytes(Native Method)
+
+  at libcore.io.Posix.recvfrom(Posix.java:141)
+
+  at libcore.io.BlockGuardOs.recvfrom(BlockGuardOs.java:164)
+
+  at libcore.io.IoBridge.recvfrom(IoBridge.java:506)
+
+  at java.net.PlainSocketImpl.read(PlainSocketImpl.java:488)
+
+  at java.net.PlainSocketImpl.access$000(PlainSocketImpl.java:46)
+
+  at java.net.PlainSocketImpl$PlainSocketInputStream.read(PlainSocketImpl.java:240)
+
+  at com.shilapi.xcertplay.airplay.ScreenStream.readFully(ScreenStream.kt:134)
+
+  at com.shilapi.xcertplay.airplay.ScreenStream.run(ScreenStream.kt:84)
+
+  at com.shilapi.xcertplay.airplay.ScreenStream.accept(ScreenStream.kt:71)
+
+  at com.shilapi.xcertplay.airplay.ScreenStream.listen$lambda$1(ScreenStream.kt:46)
+
+  at com.shilapi.xcertplay.airplay.ScreenStream$$ExternalSyntheticLambda1.run(D8$$SyntheticClass:0)
+
+  at java.lang.Thread.run(Thread.java:841)
+
+
+
+"pool-10-thread-1" prio=5 tid=39 TIMED_WAIT
+
+  | group="main" sCount=1 dsCount=0 obj=0x42c196c0 self=0x6c198948
+
+  | sysTid=19923 nice=0 sched=0/0 cgrp=apps handle=1813445184
+
+  | state=S schedstat=( 0 0 0 ) utm=2482 stm=254 core=0
+
+  at java.lang.Object.wait(Native Method)
+
+  - waiting on <0x42c17a90> (a java.lang.Object)
+
+  at com.shilapi.xcertplay.transport.Iap2LinkChannel.waitFor(Iap2LinkChannel.kt:331)
+
+  at com.shilapi.xcertplay.transport.Iap2LinkChannel.recvControl(Iap2LinkChannel.kt:101)
+
+  at com.shilapi.xcertplay.transport.Iap2CsmChannel.recv(Iap2CsmChannel.kt:105)
+
+  at com.shilapi.xcertplay.iap2.session.Iap2Session.recv(Iap2Session.kt:69)
+
+  at com.shilapi.xcertplay.transport.Iap2WirelessControlClient.run(Iap2WirelessControlClient.kt:93)
+
+  at com.shilapi.xcertplay.transport.Iap2WirelessControlClient.run$default(Iap2WirelessControlClient.kt:23)
+
+  at com.shilapi.xcertplay.orchestration.CarPlayController.startWirelessTunnelControl$lambda$79(CarPlayController.kt:1226)
+
+  at com.shilapi.xcertplay.orchestration.CarPlayController$$ExternalSyntheticLambda67.run(D8$$SyntheticClass:0)
+
+  at java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1112)
+
+  at java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:587)
+
+  at java.lang.Thread.run(Thread.java:841)
+
+
+
+"xcertplay-iap2-link" daemon prio=5 tid=38 TIMED_WAIT
+
+  | group="main" sCount=1 dsCount=0 obj=0x42c17c00 self=0x66ea1698
+
+  | sysTid=19922 nice=0 sched=0/0 cgrp=apps handle=-2064120600
+
+  | state=S schedstat=( 0 0 0 ) utm=183 stm=47 core=2
+
+  at java.lang.Object.wait(Native Method)
+
+  - waiting on <0x42c7f138> (a java.lang.Object)
+
+  at com.shilapi.xcertplay.airplay.AirPlayIapTunnelStream.recv(AirPlayIapTunnelStream.kt:84)
+
+  at com.shilapi.xcertplay.transport.Iap2LinkChannel.runPump(Iap2LinkChannel.kt:161)
+
+  at com.shilapi.xcertplay.transport.Iap2LinkChannel.$r8$lambda$-LjQ5J-apz8Fj4gfh24az_RCsoc(Iap2LinkChannel.kt:-1)
+
+  at com.shilapi.xcertplay.transport.Iap2LinkChannel$$ExternalSyntheticLambda1.run(D8$$SyntheticClass:0)
+
+  at java.lang.Thread.run(Thread.java:841)
+
+
+
+"airplay-iap-tunnel" daemon prio=5 tid=37 SUSPENDED
+
+  | group="main" sCount=1 dsCount=0 obj=0x42c802f0 self=0x6c15e3f8
+
+  | sysTid=19921 nice=0 sched=0/0 cgrp=apps handle=1810526976
+
+  | state=S schedstat=( 0 0 0 ) utm=157 stm=50 core=3
+
+  #00  pc 000219fc  /system/lib/libc.so (__futex_syscall3+8)
+
+  #01  pc 0000ef9c  /system/lib/libc.so (__pthread_cond_timedwait_relative+48)
+
+  #02  pc 0000effc  /system/lib/libc.so (__pthread_cond_timedwait+64)
+
+  #03  pc 000536b3  /system/lib/libdvm.so
+
+  #04  pc 00053c75  /system/lib/libdvm.so (dvmChangeStatus(Thread*, ThreadStatus)+34)
+
+  #05  pc 00049507  /system/lib/libdvm.so
+
+  #06  pc 0004b1c7  /system/lib/libdvm.so
+
+  #07  pc 0001262d  /system/lib/libjavacore.so
+
+  #08  pc 000194b5  /system/lib/libjavacore.so
+
+  #09  pc 0001d81b  /system/lib/libjavacore.so
+
+  #10  pc 0001dbcc  /system/lib/libdvm.so (dvmPlatformInvoke+112)
+
+  #11  pc 0004e123  /system/lib/libdvm.so (dvmCallJNIMethod(unsigned int const*, JValue*, Method const*, Thread*)+398)
+
+  #12  pc 00000214  /dev/ashmem/dalvik-jit-code-cache (deleted)
+
+  at libcore.io.Posix.recvfromBytes(Native Method)
+
+  at libcore.io.Posix.recvfrom(Posix.java:141)
+
+  at libcore.io.BlockGuardOs.recvfrom(BlockGuardOs.java:164)
+
+  at libcore.io.IoBridge.recvfrom(IoBridge.java:506)
+
+  at java.net.PlainSocketImpl.read(PlainSocketImpl.java:488)
+
+  at java.net.PlainSocketImpl.access$000(PlainSocketImpl.java:46)
+
+  at java.net.PlainSocketImpl$PlainSocketInputStream.read(PlainSocketImpl.java:240)
+
+  at java.io.InputStream.read(InputStream.java:162)
+
+  at com.shilapi.xcertplay.airplay.IapTunnel.run(IapTunnel.kt:140)
+
+  at com.shilapi.xcertplay.airplay.IapTunnel.accept(IapTunnel.kt:127)
+
+  at com.shilapi.xcertplay.airplay.IapTunnel.listen$lambda$6$lambda$4(IapTunnel.kt:72)
+
+  at com.shilapi.xcertplay.airplay.IapTunnel$$ExternalSyntheticLambda0.run(D8$$SyntheticClass:0)
+
+  at java.lang.Thread.run(Thread.java:841)
+
+
+
+"pool-2-thread-1" prio=5 tid=36 WAIT
+
+  | group="main" sCount=1 dsCount=0 obj=0x42f6a280 self=0x84f6f330
+
+  | sysTid=19920 nice=0 sched=0/0 cgrp=apps handle=1756279936
+
+  | state=S schedstat=( 0 0 0 ) utm=1 stm=0 core=2
+
+  at java.lang.Object.wait(Native Method)
+
+  - waiting on <0x42f6a3c8> (a java.lang.VMThread) held by tid=36 (pool-2-thread-1)
+
+  at java.lang.Thread.parkFor(Thread.java:1205)
+
+  at sun.misc.Unsafe.park(Unsafe.java:325)
+
+  at java.util.concurrent.locks.LockSupport.park(LockSupport.java:157)
+
+  at java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:2017)
+
+  at java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:410)
+
+  at java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1035)
+
+  at java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1097)
+
+  at java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:587)
+
+  at java.lang.Thread.run(Thread.java:841)
+
+
+
+"pool-9-thread-1" prio=5 tid=26 WAIT
+
+  | group="main" sCount=1 dsCount=0 obj=0x42c56b88 self=0x6c16aeb8
+
+  | sysTid=19919 nice=0 sched=0/0 cgrp=apps handle=1727740032
+
+  | state=S schedstat=( 0 0 0 ) utm=738 stm=105 core=3
+
+  at java.lang.Object.wait(Native Method)
+
+  - waiting on <0x42c56f58> (a java.lang.VMThread) held by tid=26 (pool-9-thread-1)
+
+  at java.lang.Thread.parkFor(Thread.java:1205)
+
+  at sun.misc.Unsafe.park(Unsafe.java:325)
+
+  at java.util.concurrent.locks.LockSupport.park(LockSupport.java:157)
+
+  at java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:2017)
+
+  at java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:410)
+
+  at java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1035)
+
+  at java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1097)
+
+  at java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:587)
+
+  at java.lang.Thread.run(Thread.java:841)
+
+
+
+"airplay-keepalive" daemon prio=5 tid=35 NATIVE
+
+  | group="main" sCount=1 dsCount=0 obj=0x42a99090 self=0x6bebb508
+
+  | sysTid=19914 nice=0 sched=0/0 cgrp=apps handle=1813249984
+
+  | state=S schedstat=( 0 0 0 ) utm=0 stm=0 core=1
+
+  #00  pc 00021414  /system/lib/libc.so (recvfrom+16)
+
+  #01  pc 0001d7cb  /system/lib/libjavacore.so
+
+  #02  pc 0001dbcc  /system/lib/libdvm.so (dvmPlatformInvoke+112)
+
+  #03  pc 0004e123  /system/lib/libdvm.so (dvmCallJNIMethod(unsigned int const*, JValue*, Method const*, Thread*)+398)
+
+  #04  pc 00026fe0  /system/lib/libdvm.so
+
+  #05  pc 0002dfa0  /system/lib/libdvm.so (dvmMterpStd(Thread*)+76)
+
+  #06  pc 0002b638  /system/lib/libdvm.so (dvmInterpret(Thread*, Method const*, JValue*)+184)
+
+  #07  pc 0006057d  /system/lib/libdvm.so (dvmCallMethodV(Thread*, Method const*, Object*, bool, JValue*, std::__va_list)+336)
+
+  #08  pc 000605a1  /system/lib/libdvm.so (dvmCallMethod(Thread*, Method const*, Object*, JValue*, ...)+20)
+
+  #09  pc 00055287  /system/lib/libdvm.so
+
+  #10  pc 0000d248  /system/lib/libc.so (__thread_entry+72)
+
+  #11  pc 0000d3e0  /system/lib/libc.so (pthread_create+240)
+
+  at libcore.io.Posix.recvfromBytes(Native Method)
+
+  at libcore.io.Posix.recvfrom(Posix.java:141)
+
+  at libcore.io.BlockGuardOs.recvfrom(BlockGuardOs.java:164)
+
+  at libcore.io.IoBridge.recvfrom(IoBridge.java:506)
+
+  at java.net.PlainDatagramSocketImpl.doRecv(PlainDatagramSocketImpl.java:161)
+
+  at java.net.PlainDatagramSocketImpl.receive(PlainDatagramSocketImpl.java:169)
+
+  at java.net.DatagramSocket.receive(DatagramSocket.java:250)
+
+  at com.shilapi.xcertplay.airplay.AirPlaySession.runKeepAlive(AirPlaySession.kt:839)
+
+  at com.shilapi.xcertplay.airplay.AirPlaySession.openKeepAlive$lambda$32(AirPlaySession.kt:828)
+
+  at com.shilapi.xcertplay.airplay.AirPlaySession$$ExternalSyntheticLambda4.run(D8$$SyntheticClass:0)
+
+  at java.lang.Thread.run(Thread.java:841)
+
+
+
+"airplay-event-accept" daemon prio=5 tid=34 NATIVE
+
+  | group="main" sCount=1 dsCount=0 obj=0x42a55750 self=0x6be5e208
+
+  | sysTid=19913 nice=0 sched=0/0 cgrp=apps handle=1813682368
+
+  | state=S schedstat=( 0 0 0 ) utm=90 stm=22 core=3
+
+  #00  pc 00021414  /system/lib/libc.so (recvfrom+16)
+
+  #01  pc 0001d7cb  /system/lib/libjavacore.so
+
+  #02  pc 0001dbcc  /system/lib/libdvm.so (dvmPlatformInvoke+112)
+
+  #03  pc 0004e123  /system/lib/libdvm.so (dvmCallJNIMethod(unsigned int const*, JValue*, Method const*, Thread*)+398)
+
+  #04  pc 00000214  /dev/ashmem/dalvik-jit-code-cache (deleted)
+
+  at libcore.io.Posix.recvfromBytes(Native Method)
+
+  at libcore.io.Posix.recvfrom(Posix.java:141)
+
+  at libcore.io.BlockGuardOs.recvfrom(BlockGuardOs.java:164)
+
+  at libcore.io.IoBridge.recvfrom(IoBridge.java:506)
+
+  at java.net.PlainSocketImpl.read(PlainSocketImpl.java:488)
+
+  at java.net.PlainSocketImpl.access$000(PlainSocketImpl.java:46)
+
+  at java.net.PlainSocketImpl$PlainSocketInputStream.read(PlainSocketImpl.java:240)
+
+  at java.io.BufferedInputStream.read(BufferedInputStream.java:283)
+
+  at java.io.InputStream.read(InputStream.java:162)
+
+  at com.shilapi.xcertplay.airplay.AirPlaySession.runEventRead(AirPlaySession.kt:924)
+
+  at com.shilapi.xcertplay.airplay.AirPlaySession.acceptEvent(AirPlaySession.kt:907)
+
+  at com.shilapi.xcertplay.airplay.AirPlaySession.openEvent$lambda$34(AirPlaySession.kt:850)
+
+  at com.shilapi.xcertplay.airplay.AirPlaySession$$ExternalSyntheticLambda5.invoke(D8$$SyntheticClass:0)
+
+  at com.shilapi.xcertplay.airplay.AirPlaySession.spawnEvent$lambda$38(AirPlaySession.kt:968)
+
+  at com.shilapi.xcertplay.airplay.AirPlaySession$$ExternalSyntheticLambda8.run(D8$$SyntheticClass:0)
+
+  at java.lang.Thread.run(Thread.java:841)
+
+
+
+"airplay-ntp-tx" daemon prio=5 tid=33 TIMED_WAIT
+
+  | group="main" sCount=1 dsCount=0 obj=0x42f7d720 self=0x6c140480
+
+  | sysTid=19912 nice=0 sched=0/0 cgrp=apps handle=1810430224
+
+  | state=S schedstat=( 0 0 0 ) utm=36 stm=20 core=0
+
+  at java.lang.VMThread.sleep(Native Method)
+
+  at java.lang.Thread.sleep(Thread.java:1013)
+
+  at java.lang.Thread.sleep(Thread.java:995)
+
+  at com.shilapi.xcertplay.airplay.NtpClock.runSender(NtpClock.kt:74)
+
+  at com.shilapi.xcertplay.airplay.NtpClock.$r8$lambda$1wZbRUVhnIUXDG_EahIUg9stL8Y(NtpClock.kt:-1)
+
+  at com.shilapi.xcertplay.airplay.NtpClock$$ExternalSyntheticLambda0.run(D8$$SyntheticClass:0)
+
+  at java.lang.Thread.run(Thread.java:841)
+
+
+
+"airplay-ntp-rx" daemon prio=5 tid=32 NATIVE
+
+  | group="main" sCount=1 dsCount=0 obj=0x42a052d0 self=0x84f97510
+
+  | sysTid=19911 nice=0 sched=0/0 cgrp=apps handle=1813174920
+
+  | state=S schedstat=( 0 0 0 ) utm=47 stm=9 core=2
+
+  #00  pc 00021414  /system/lib/libc.so (recvfrom+16)
+
+  #01  pc 0001d7cb  /system/lib/libjavacore.so
+
+  #02  pc 0001dbcc  /system/lib/libdvm.so (dvmPlatformInvoke+112)
+
+  #03  pc 0004e123  /system/lib/libdvm.so (dvmCallJNIMethod(unsigned int const*, JValue*, Method const*, Thread*)+398)
+
+  #04  pc 00000214  /dev/ashmem/dalvik-jit-code-cache (deleted)
+
+  at libcore.io.Posix.recvfromBytes(Native Method)
+
+  at libcore.io.Posix.recvfrom(Posix.java:141)
+
+  at libcore.io.BlockGuardOs.recvfrom(BlockGuardOs.java:164)
+
+  at libcore.io.IoBridge.recvfrom(IoBridge.java:506)
+
+  at java.net.PlainDatagramSocketImpl.doRecv(PlainDatagramSocketImpl.java:161)
+
+  at java.net.PlainDatagramSocketImpl.receive(PlainDatagramSocketImpl.java:169)
+
+  at java.net.DatagramSocket.receive(DatagramSocket.java:250)
+
+  at com.shilapi.xcertplay.airplay.NtpClock.runReceiver(NtpClock.kt:105)
+
+  at com.shilapi.xcertplay.airplay.NtpClock.$r8$lambda$w__6eEbkNih8Q3cBL-MJ5BTLpEM(NtpClock.kt:-1)
+
+  at com.shilapi.xcertplay.airplay.NtpClock$$ExternalSyntheticLambda1.run(D8$$SyntheticClass:0)
+
+  at java.lang.Thread.run(Thread.java:841)
+
+
+
+"airplay-control" daemon prio=5 tid=31 NATIVE
+
+  | group="main" sCount=1 dsCount=0 obj=0x429d44c0 self=0x68af2440
+
+  | sysTid=19910 nice=0 sched=0/0 cgrp=apps handle=1813378448
+
+  | state=S schedstat=( 0 0 0 ) utm=964 stm=65 core=2
+
+  #00  pc 00021414  /system/lib/libc.so (recvfrom+16)
+
+  #01  pc 0001d7cb  /system/lib/libjavacore.so
+
+  #02  pc 0001dbcc  /system/lib/libdvm.so (dvmPlatformInvoke+112)
+
+  #03  pc 0004e123  /system/lib/libdvm.so (dvmCallJNIMethod(unsigned int const*, JValue*, Method const*, Thread*)+398)
+
+  #04  pc 00026fe0  /system/lib/libdvm.so
+
+  #05  pc 0002dfa0  /system/lib/libdvm.so (dvmMterpStd(Thread*)+76)
+
+  #06  pc 0002b638  /system/lib/libdvm.so (dvmInterpret(Thread*, Method const*, JValue*)+184)
+
+  #07  pc 0006057d  /system/lib/libdvm.so (dvmCallMethodV(Thread*, Method const*, Object*, bool, JValue*, std::__va_list)+336)
+
+  #08  pc 000605a1  /system/lib/libdvm.so (dvmCallMethod(Thread*, Method const*, Object*, JValue*, ...)+20)
+
+  #09  pc 00055287  /system/lib/libdvm.so
+
+  #10  pc 0000d248  /system/lib/libc.so (__thread_entry+72)
+
+  #11  pc 0000d3e0  /system/lib/libc.so (pthread_create+240)
+
+  at libcore.io.Posix.recvfromBytes(Native Method)
+
+  at libcore.io.Posix.recvfrom(Posix.java:141)
+
+  at libcore.io.BlockGuardOs.recvfrom(BlockGuardOs.java:164)
+
+  at libcore.io.IoBridge.recvfrom(IoBridge.java:506)
+
+  at java.net.PlainSocketImpl.read(PlainSocketImpl.java:488)
+
+  at java.net.PlainSocketImpl.access$000(PlainSocketImpl.java:46)
+
+  at java.net.PlainSocketImpl$PlainSocketInputStream.read(PlainSocketImpl.java:240)
+
+  at java.io.BufferedInputStream.read(BufferedInputStream.java:283)
+
+  at java.io.InputStream.read(InputStream.java:162)
+
+  at com.shilapi.xcertplay.airplay.AirPlaySession.runControl(AirPlaySession.kt:451)
+
+  at com.shilapi.xcertplay.airplay.AirPlaySession.$r8$lambda$Yf9uU7H1o486nkujye7px7VmqRs(AirPlaySession.kt:-1)
+
+  at com.shilapi.xcertplay.airplay.AirPlaySession$$ExternalSyntheticLambda3.run(D8$$SyntheticClass:0)
+
+  at java.lang.Thread.run(Thread.java:841)
+
+
+
+"diplay-first-tcp-timeout" daemon prio=5 tid=30 WAIT
+
+  | group="main" sCount=1 dsCount=0 obj=0x42d1a420 self=0x6c1ec110
+
+  | sysTid=19909 nice=0 sched=0/0 cgrp=apps handle=1813955944
+
+  | state=S schedstat=( 0 0 0 ) utm=0 stm=0 core=3
+
+  at java.lang.Object.wait(Native Method)
+
+  - waiting on <0x42d1a518> (a java.lang.VMThread) held by tid=30 (diplay-first-tcp-timeout)
+
+  at java.lang.Thread.parkFor(Thread.java:1205)
+
+  at sun.misc.Unsafe.park(Unsafe.java:325)
+
+  at java.util.concurrent.locks.LockSupport.park(LockSupport.java:157)
+
+  at java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:2017)
+
+  at java.util.concurrent.ScheduledThreadPoolExecutor$DelayedWorkQueue.take(ScheduledThreadPoolExecutor.java:1050)
+
+  at java.util.concurrent.ScheduledThreadPoolExecutor$DelayedWorkQueue.take(ScheduledThreadPoolExecutor.java:778)
+
+  at java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1035)
+
+  at java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1097)
+
+  at java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:587)
+
+  at java.lang.Thread.run(Thread.java:841)
+
+
+
+"carplay-bonjour" daemon prio=5 tid=25 TIMED_WAIT
+
+  | group="main" sCount=1 dsCount=0 obj=0x42a85f98 self=0x6c14dd88
+
+  | sysTid=19900 nice=0 sched=0/0 cgrp=apps handle=1813566200
+
+  | state=S schedstat=( 0 0 0 ) utm=12 stm=6 core=1
+
+  at java.lang.Object.wait(Native Method)
+
+  - waiting on <0x42f715d8> (a java.lang.VMThread) held by tid=25 (carplay-bonjour)
+
+  at java.lang.Thread.parkFor(Thread.java:1205)
+
+  at sun.misc.Unsafe.park(Unsafe.java:325)
+
+  at java.util.concurrent.locks.LockSupport.parkNanos(LockSupport.java:197)
+
+  at java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.awaitNanos(AbstractQueuedSynchronizer.java:2056)
+
+  at java.util.concurrent.LinkedBlockingQueue.poll(LinkedBlockingQueue.java:435)
+
+  at com.shilapi.xcertplay.network.CarPlayBonjour.runWorker(CarPlayBonjour.kt:403)
+
+  at com.shilapi.xcertplay.network.CarPlayBonjour.$r8$lambda$pU_UcFVzRmZP9N2rFqlRYiFBIkA(CarPlayBonjour.kt:-1)
+
+  at com.shilapi.xcertplay.network.CarPlayBonjour$$ExternalSyntheticLambda3.run(D8$$SyntheticClass:0)
+
+  at java.lang.Thread.run(Thread.java:841)
+
+
+
+"JmDNS(carplay-a404509bb4a5).State.Timer" prio=5 tid=24 TIMED_WAIT
+
+  | group="main" sCount=1 dsCount=0 obj=0x42bc99a8 self=0x6beb1098
+
+  | sysTid=19899 nice=0 sched=0/0 cgrp=apps handle=1808410872
+
+  | state=S schedstat=( 0 0 0 ) utm=0 stm=0 core=0
+
+  at java.lang.Object.wait(Native Method)
+
+  - waiting on <0x42bc99a8> (a java.util.Timer$TimerImpl)
+
+  at java.lang.Object.wait(Object.java:401)
+
+  at java.util.Timer$TimerImpl.run(Timer.java:238)
+
+
+
+"JmDNS(carplay-a404509bb4a5).Timer" daemon prio=5 tid=23 TIMED_WAIT
+
+  | group="main" sCount=1 dsCount=0 obj=0x42bcc4c8 self=0x6c163258
+
+  | sysTid=19898 nice=0 sched=0/0 cgrp=apps handle=1756324656
+
+  | state=T schedstat=( 0 0 0 ) utm=0 stm=0 core=0
+
+  at java.lang.Object.wait(Native Method)
+
+  - waiting on <0x42bcc4c8> (a java.util.Timer$TimerImpl)
+
+  at java.lang.Object.wait(Object.java:401)
+
+  at java.util.Timer$TimerImpl.run(Timer.java:238)
+
+
+
+"SocketListener(carplay-a404509bb4a5)" daemon prio=5 tid=22 NATIVE
+
+  | group="main" sCount=1 dsCount=0 obj=0x42c02690 self=0x6c16f168
+
+  | sysTid=19897 nice=0 sched=0/0 cgrp=apps handle=1810568656
+
+  | state=S schedstat=( 0 0 0 ) utm=3 stm=0 core=3
+
+  #00  pc 00021414  /system/lib/libc.so (recvfrom+16)
+
+  #01  pc 0001d7cb  /system/lib/libjavacore.so
+
+  #02  pc 0001dbcc  /system/lib/libdvm.so (dvmPlatformInvoke+112)
+
+  #03  pc 0004e123  /system/lib/libdvm.so (dvmCallJNIMethod(unsigned int const*, JValue*, Method const*, Thread*)+398)
+
+  #04  pc 00026fe0  /system/lib/libdvm.so
+
+  #05  pc 0002dfa0  /system/lib/libdvm.so (dvmMterpStd(Thread*)+76)
+
+  #06  pc 0002b638  /system/lib/libdvm.so (dvmInterpret(Thread*, Method const*, JValue*)+184)
+
+  #07  pc 0006057d  /system/lib/libdvm.so (dvmCallMethodV(Thread*, Method const*, Object*, bool, JValue*, std::__va_list)+336)
+
+  #08  pc 000605a1  /system/lib/libdvm.so (dvmCallMethod(Thread*, Method const*, Object*, JValue*, ...)+20)
+
+  #09  pc 00055287  /system/lib/libdvm.so
+
+  #10  pc 0000d248  /system/lib/libc.so (__thread_entry+72)
+
+  #11  pc 0000d3e0  /system/lib/libc.so (pthread_create+240)
+
+  at libcore.io.Posix.recvfromBytes(Native Method)
+
+  at libcore.io.Posix.recvfrom(Posix.java:141)
+
+  at libcore.io.BlockGuardOs.recvfrom(BlockGuardOs.java:164)
+
+  at libcore.io.IoBridge.recvfrom(IoBridge.java:506)
+
+  at java.net.PlainDatagramSocketImpl.doRecv(PlainDatagramSocketImpl.java:161)
+
+  at java.net.PlainDatagramSocketImpl.receive(PlainDatagramSocketImpl.java:169)
+
+  at java.net.DatagramSocket.receive(DatagramSocket.java:250)
+
+  at javax.jmdns.impl.SocketListener.run(SocketListener.java:60)
+
+
+
+"airplay-accept" daemon prio=5 tid=21 NATIVE
+
+  | group="main" sCount=1 dsCount=0 obj=0x42abab88 self=0x6c166b08
+
+  | sysTid=19895 nice=0 sched=0/0 cgrp=apps handle=1810564480
+
+  | state=S schedstat=( 0 0 0 ) utm=4 stm=2 core=3
+
+  #00  pc 00021374  /system/lib/libc.so (accept+8)
+
+  #01  pc 0001e165  /system/lib/libjavacore.so
+
+  #02  pc 0001dbcc  /system/lib/libdvm.so (dvmPlatformInvoke+112)
+
+  #03  pc 0004e123  /system/lib/libdvm.so (dvmCallJNIMethod(unsigned int const*, JValue*, Method const*, Thread*)+398)
+
+  #04  pc 00026fe0  /system/lib/libdvm.so
+
+  #05  pc 0002dfa0  /system/lib/libdvm.so (dvmMterpStd(Thread*)+76)
+
+  #06  pc 0002b638  /system/lib/libdvm.so (dvmInterpret(Thread*, Method const*, JValue*)+184)
+
+  #07  pc 0006057d  /system/lib/libdvm.so (dvmCallMethodV(Thread*, Method const*, Object*, bool, JValue*, std::__va_list)+336)
+
+  #08  pc 000605a1  /system/lib/libdvm.so (dvmCallMethod(Thread*, Method const*, Object*, JValue*, ...)+20)
+
+  #09  pc 00055287  /system/lib/libdvm.so
+
+  #10  pc 0000d248  /system/lib/libc.so (__thread_entry+72)
+
+  #11  pc 0000d3e0  /system/lib/libc.so (pthread_create+240)
+
+  at libcore.io.Posix.accept(Native Method)
+
+  at libcore.io.BlockGuardOs.accept(BlockGuardOs.java:55)
+
+  at java.net.PlainSocketImpl.accept(PlainSocketImpl.java:98)
+
+  at java.net.ServerSocket.implAccept(ServerSocket.java:203)
+
+  at java.net.ServerSocket.accept(ServerSocket.java:128)
+
+  at com.shilapi.xcertplay.network.CarPlayVpnService.acceptLoop(CarPlayVpnService.kt:256)
+
+  at com.shilapi.xcertplay.network.CarPlayVpnService.startAirPlayServer$lambda$7$lambda$5(CarPlayVpnService.kt:241)
+
+  at com.shilapi.xcertplay.network.CarPlayVpnService$$ExternalSyntheticLambda2.run(D8$$SyntheticClass:0)
+
+  at java.lang.Thread.run(Thread.java:841)
+
+
+
+"pool-8-thread-1" prio=5 tid=17 WAIT
+
+  | group="main" sCount=1 dsCount=0 obj=0x422faf78 self=0x6c1a3cd8
+
+  | sysTid=19894 nice=0 sched=0/0 cgrp=apps handle=1813659952
+
+  | state=S schedstat=( 0 0 0 ) utm=99 stm=5 core=1
+
+  at java.lang.Object.wait(Native Method)
+
+  - waiting on <0x423b9790> (a java.lang.VMThread) held by tid=17 (pool-8-thread-1)
+
+  at java.lang.Thread.parkFor(Thread.java:1205)
+
+  at sun.misc.Unsafe.park(Unsafe.java:325)
+
+  at java.util.concurrent.locks.LockSupport.park(LockSupport.java:157)
+
+  at java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:2017)
+
+  at java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:410)
+
+  at java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1035)
+
+  at java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1097)
+
+  at java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:587)
+
+  at java.lang.Thread.run(Thread.java:841)
+
+
+
+"pool-1-thread-1" prio=5 tid=20 WAIT
+
+  | group="main" sCount=1 dsCount=0 obj=0x423ef2d0 self=0x68aec498
+
+  | sysTid=19892 nice=0 sched=0/0 cgrp=apps handle=1756283392
+
+  | state=S schedstat=( 0 0 0 ) utm=0 stm=0 core=3
+
+  at java.lang.Object.wait(Native Method)
+
+  - waiting on <0x423d59a8> (a java.lang.VMThread) held by tid=20 (pool-1-thread-1)
+
+  at java.lang.Thread.parkFor(Thread.java:1205)
+
+  at sun.misc.Unsafe.park(Unsafe.java:325)
+
+  at java.util.concurrent.locks.LockSupport.park(LockSupport.java:157)
+
+  at java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:2017)
+
+  at java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:410)
+
+  at java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1035)
+
+  at java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1097)
+
+  at java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:587)
+
+  at java.lang.Thread.run(Thread.java:841)
+
+
+
+"diplay-now-playing-artwork" daemon prio=5 tid=28 WAIT
+
+  | group="main" sCount=1 dsCount=0 obj=0x42adeca0 self=0x6c132f28
+
+  | sysTid=19861 nice=0 sched=0/0 cgrp=apps handle=1813197960
+
+  | state=S schedstat=( 0 0 0 ) utm=71 stm=4 core=1
+
+  at java.lang.Object.wait(Native Method)
+
+  - waiting on <0x42a0f900> (a java.lang.VMThread) held by tid=28 (diplay-now-playing-artwork)
+
+  at java.lang.Thread.parkFor(Thread.java:1205)
+
+  at sun.misc.Unsafe.park(Unsafe.java:325)
+
+  at java.util.concurrent.locks.LockSupport.park(LockSupport.java:157)
+
+  at java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:2017)
+
+  at java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:410)
+
+  at java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1035)
+
+  at java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1097)
+
+  at java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:587)
+
+  at java.lang.Thread.run(Thread.java:841)
+
+
+
+"WifiManager" prio=5 tid=19 NATIVE
+
+  | group="main" sCount=1 dsCount=0 obj=0x42ad8170 self=0x6c17d098
+
+  | sysTid=19846 nice=0 sched=0/0 cgrp=apps handle=1813501552
+
+  | state=S schedstat=( 0 0 0 ) utm=0 stm=0 core=1
+
+  #00  pc 00021834  /system/lib/libc.so (epoll_wait+12)
+
+  #01  pc 00010687  /system/lib/libutils.so (android::Looper::pollInner(int)+98)
+
+  #02  pc 000108b1  /system/lib/libutils.so (android::Looper::pollOnce(int, int*, int*, void**)+92)
+
+  #03  pc 0006a8f1  /system/lib/libandroid_runtime.so (android::NativeMessageQueue::pollOnce(_JNIEnv*, int)+22)
+
+  #04  pc 0001dbcc  /system/lib/libdvm.so (dvmPlatformInvoke+112)
+
+  #05  pc 0004e123  /system/lib/libdvm.so (dvmCallJNIMethod(unsigned int const*, JValue*, Method const*, Thread*)+398)
+
+  #06  pc 00000214  /dev/ashmem/dalvik-jit-code-cache (deleted)
+
+  at android.os.MessageQueue.nativePollOnce(Native Method)
+
+  at android.os.MessageQueue.next(MessageQueue.java:138)
+
+  at android.os.Looper.loop(Looper.java:123)
+
+  at android.os.HandlerThread.run(HandlerThread.java:61)
+
+
+
+"diplay-media-audio" prio=5 tid=18 NATIVE
+
+  | group="main" sCount=1 dsCount=0 obj=0x424ba618 self=0x84f7fb68
+
+  | sysTid=19844 nice=0 sched=0/0 cgrp=apps handle=-2064145552
+
+  | state=S schedstat=( 0 0 0 ) utm=55 stm=7 core=0
+
+  #00  pc 00021834  /system/lib/libc.so (epoll_wait+12)
+
+  #01  pc 00010687  /system/lib/libutils.so (android::Looper::pollInner(int)+98)
+
+  #02  pc 000108b1  /system/lib/libutils.so (android::Looper::pollOnce(int, int*, int*, void**)+92)
+
+  #03  pc 0006a8f1  /system/lib/libandroid_runtime.so (android::NativeMessageQueue::pollOnce(_JNIEnv*, int)+22)
+
+  #04  pc 0001dbcc  /system/lib/libdvm.so (dvmPlatformInvoke+112)
+
+  #05  pc 0004e123  /system/lib/libdvm.so (dvmCallJNIMethod(unsigned int const*, JValue*, Method const*, Thread*)+398)
+
+  #06  pc 00000214  /dev/ashmem/dalvik-jit-code-cache (deleted)
+
+  at android.os.MessageQueue.nativePollOnce(Native Method)
+
+  at android.os.MessageQueue.next(MessageQueue.java:138)
+
+  at android.os.Looper.loop(Looper.java:123)
+
+  at android.os.HandlerThread.run(HandlerThread.java:61)
+
+
+
+"diplay-diagnostic-writer" daemon prio=5 tid=16 WAIT
+
+  | group="main" sCount=1 dsCount=0 obj=0x429f46c0 self=0x84f5ca48
+
+  | sysTid=19842 nice=0 sched=0/0 cgrp=apps handle=-2064265568
+
+  | state=S schedstat=( 0 0 0 ) utm=6 stm=1 core=2
+
+  at java.lang.Object.wait(Native Method)
+
+  - waiting on <0x429f4640> (a java.lang.Object)
+
+  at java.lang.Object.wait(Object.java:364)
+
+  at com.shilapi.xcertplay.BoundedDiagnosticWriter.drain(BoundedDiagnosticWriter.kt:43)
+
+  at com.shilapi.xcertplay.BoundedDiagnosticWriter.$r8$lambda$B6NAQa_RHj0RktdZjdKlJwCYb9A(BoundedDiagnosticWriter.kt:-1)
+
+  at com.shilapi.xcertplay.BoundedDiagnosticWriter$$ExternalSyntheticLambda0.run(D8$$SyntheticClass:0)
+
+  at java.lang.Thread.run(Thread.java:841)
+
+
+
+"DiPlayWifiScan" daemon prio=5 tid=15 WAIT
+
+  | group="main" sCount=1 dsCount=0 obj=0x429ed278 self=0x84f5e108
+
+  | sysTid=19840 nice=0 sched=0/0 cgrp=apps handle=-2064202400
+
+  | state=S schedstat=( 0 0 0 ) utm=0 stm=0 core=2
+
+  at java.lang.Object.wait(Native Method)
+
+  - waiting on <0x429ed350> (a java.lang.VMThread) held by tid=15 (DiPlayWifiScan)
+
+  at java.lang.Thread.parkFor(Thread.java:1205)
+
+  at sun.misc.Unsafe.park(Unsafe.java:325)
+
+  at java.util.concurrent.locks.LockSupport.park(LockSupport.java:157)
+
+  at java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:2017)
+
+  at java.util.concurrent.ScheduledThreadPoolExecutor$DelayedWorkQueue.take(ScheduledThreadPoolExecutor.java:1050)
+
+  at java.util.concurrent.ScheduledThreadPoolExecutor$DelayedWorkQueue.take(ScheduledThreadPoolExecutor.java:778)
+
+  at java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1035)
+
+  at java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1097)
+
+  at java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:587)
+
+  at java.lang.Thread.run(Thread.java:841)
+
+
+
+"pool-3-thread-1" prio=5 tid=14 WAIT
+
+  | group="main" sCount=1 dsCount=0 obj=0x42422468 self=0x68afc3a0
+
+  | sysTid=19825 nice=0 sched=0/0 cgrp=apps handle=1756402976
+
+  | state=S schedstat=( 0 0 0 ) utm=0 stm=1 core=0
+
+  at java.lang.Object.wait(Native Method)
+
+  - waiting on <0x4248cd28> (a java.lang.VMThread) held by tid=14 (pool-3-thread-1)
+
+  at java.lang.Thread.parkFor(Thread.java:1205)
+
+  at sun.misc.Unsafe.park(Unsafe.java:325)
+
+  at java.util.concurrent.locks.LockSupport.park(LockSupport.java:157)
+
+  at java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:2017)
+
+  at java.util.concurrent.LinkedBlockingQueue.take(LinkedBlockingQueue.java:410)
+
+  at java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1035)
+
+  at java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1097)
+
+  at java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:587)
+
+  at java.lang.Thread.run(Thread.java:841)
+
+
+
+"diplay-widget" prio=5 tid=13 NATIVE
+
+  | group="main" sCount=1 dsCount=0 obj=0x42303d28 self=0x66d6c9a0
+
+  | sysTid=19822 nice=0 sched=0/0 cgrp=apps handle=1725353464
+
+  | state=S schedstat=( 0 0 0 ) utm=22 stm=18 core=2
+
+  #00  pc 00021834  /system/lib/libc.so (epoll_wait+12)
+
+  #01  pc 00010687  /system/lib/libutils.so (android::Looper::pollInner(int)+98)
+
+  #02  pc 000108b1  /system/lib/libutils.so (android::Looper::pollOnce(int, int*, int*, void**)+92)
+
+  #03  pc 0006a8f1  /system/lib/libandroid_runtime.so (android::NativeMessageQueue::pollOnce(_JNIEnv*, int)+22)
+
+  #04  pc 0001dbcc  /system/lib/libdvm.so (dvmPlatformInvoke+112)
+
+  #05  pc 0004e123  /system/lib/libdvm.so (dvmCallJNIMethod(unsigned int const*, JValue*, Method const*, Thread*)+398)
+
+  #06  pc 00000214  /dev/ashmem/dalvik-jit-code-cache (deleted)
+
+  at android.os.MessageQueue.nativePollOnce(Native Method)
+
+  at android.os.MessageQueue.next(MessageQueue.java:138)
+
+  at android.os.Looper.loop(Looper.java:123)
+
+  at android.os.HandlerThread.run(HandlerThread.java:61)
+
+
+
+"Binder_4" prio=5 tid=12 NATIVE
+
+  | group="main" sCount=1 dsCount=0 obj=0x42393ac8 self=0x66cd8360
+
+  | sysTid=19816 nice=0 sched=0/0 cgrp=apps handle=1725454128
+
+  | state=S schedstat=( 0 0 0 ) utm=26 stm=49 core=3
+
+  #00  pc 00020660  /system/lib/libc.so (__ioctl+8)
+
+  #01  pc 0002d237  /system/lib/libc.so (ioctl+14)
+
+  #02  pc 0001d3ed  /system/lib/libbinder.so (android::IPCThreadState::talkWithDriver(bool)+140)
+
+  #03  pc 0001daf7  /system/lib/libbinder.so (android::IPCThreadState::getAndExecuteCommand()+6)
+
+  #04  pc 0001db8d  /system/lib/libbinder.so (android::IPCThreadState::joinThreadPool(bool)+48)
+
+  #05  pc 000219f5  /system/lib/libbinder.so
+
+  #06  pc 0000ea95  /system/lib/libutils.so (android::Thread::_threadLoop(void*)+216)
+
+  #07  pc 0004d595  /system/lib/libandroid_runtime.so (android::AndroidRuntime::javaThreadShell(void*)+68)
+
+  #08  pc 0000e5c7  /system/lib/libutils.so
+
+  #09  pc 0000d248  /system/lib/libc.so (__thread_entry+72)
+
+  #10  pc 0000d3e0  /system/lib/libc.so (pthread_create+240)
+
+  at dalvik.system.NativeStart.run(Native Method)
+
+
+
+"Binder_3" prio=5 tid=11 NATIVE
+
+  | group="main" sCount=1 dsCount=0 obj=0x42392f38 self=0x66d84830
+
+  | sysTid=19810 nice=0 sched=0/0 cgrp=apps handle=1725463376
+
+  | state=S schedstat=( 0 0 0 ) utm=25 stm=51 core=3
+
+  #00  pc 00020660  /system/lib/libc.so (__ioctl+8)
+
+  #01  pc 0002d237  /system/lib/libc.so (ioctl+14)
+
+  #02  pc 0001d3ed  /system/lib/libbinder.so (android::IPCThreadState::talkWithDriver(bool)+140)
+
+  #03  pc 0001daf7  /system/lib/libbinder.so (android::IPCThreadState::getAndExecuteCommand()+6)
+
+  #04  pc 0001db8d  /system/lib/libbinder.so (android::IPCThreadState::joinThreadPool(bool)+48)
+
+  #05  pc 000219f5  /system/lib/libbinder.so
+
+  #06  pc 0000ea95  /system/lib/libutils.so (android::Thread::_threadLoop(void*)+216)
+
+  #07  pc 0004d595  /system/lib/libandroid_runtime.so (android::AndroidRuntime::javaThreadShell(void*)+68)
+
+  #08  pc 0000e5c7  /system/lib/libutils.so
+
+  #09  pc 0000d248  /system/lib/libc.so (__thread_entry+72)
+
+  #10  pc 0000d3e0  /system/lib/libc.so (pthread_create+240)
+
+  at dalvik.system.NativeStart.run(Native Method)
+
+
+
+"Binder_2" prio=5 tid=10 NATIVE
+
+  | group="main" sCount=1 dsCount=0 obj=0x4229e4f0 self=0x66cd0758
+
+  | sysTid=19803 nice=0 sched=0/0 cgrp=apps handle=1724712208
+
+  | state=S schedstat=( 0 0 0 ) utm=26 stm=50 core=2
+
+  #00  pc 00020660  /system/lib/libc.so (__ioctl+8)
+
+  #01  pc 0002d237  /system/lib/libc.so (ioctl+14)
+
+  #02  pc 0001d3ed  /system/lib/libbinder.so (android::IPCThreadState::talkWithDriver(bool)+140)
+
+  #03  pc 0001daf7  /system/lib/libbinder.so (android::IPCThreadState::getAndExecuteCommand()+6)
+
+  #04  pc 0001db8d  /system/lib/libbinder.so (android::IPCThreadState::joinThreadPool(bool)+48)
+
+  #05  pc 000219f5  /system/lib/libbinder.so
+
+  #06  pc 0000ea95  /system/lib/libutils.so (android::Thread::_threadLoop(void*)+216)
+
+  #07  pc 0004d595  /system/lib/libandroid_runtime.so (android::AndroidRuntime::javaThreadShell(void*)+68)
+
+  #08  pc 0000e5c7  /system/lib/libutils.so
+
+  #09  pc 0000d248  /system/lib/libc.so (__thread_entry+72)
+
+  #10  pc 0000d3e0  /system/lib/libc.so (pthread_create+240)
+
+  at dalvik.system.NativeStart.run(Native Method)
+
+
+
+"Binder_1" prio=5 tid=9 NATIVE
+
+  | group="main" sCount=1 dsCount=0 obj=0x422a69c0 self=0x66ccfb98
+
+  | sysTid=19802 nice=0 sched=0/0 cgrp=apps handle=1724709200
+
+  | state=S schedstat=( 0 0 0 ) utm=26 stm=51 core=1
+
+  #00  pc 00020660  /system/lib/libc.so (__ioctl+8)
+
+  #01  pc 0002d237  /system/lib/libc.so (ioctl+14)
+
+  #02  pc 0001d3ed  /system/lib/libbinder.so (android::IPCThreadState::talkWithDriver(bool)+140)
+
+  #03  pc 0001daf7  /system/lib/libbinder.so (android::IPCThreadState::getAndExecuteCommand()+6)
+
+  #04  pc 0001db8d  /system/lib/libbinder.so (android::IPCThreadState::joinThreadPool(bool)+48)
+
+  #05  pc 000219f5  /system/lib/libbinder.so
+
+  #06  pc 0000ea95  /system/lib/libutils.so (android::Thread::_threadLoop(void*)+216)
+
+  #07  pc 0004d595  /system/lib/libandroid_runtime.so (android::AndroidRuntime::javaThreadShell(void*)+68)
+
+  #08  pc 0000e5c7  /system/lib/libutils.so
+
+  #09  pc 0000d248  /system/lib/libc.so (__thread_entry+72)
+
+  #10  pc 0000d3e0  /system/lib/libc.so (pthread_create+240)
+
+  at dalvik.system.NativeStart.run(Native Method)
+
+
+
+"FinalizerWatchdogDaemon" daemon prio=5 tid=8 TIMED_WAIT
+
+  | group="system" sCount=1 dsCount=0 obj=0x422ad2f8 self=0x6697fa58
+
+  | sysTid=19801 nice=0 sched=0/0 cgrp=apps handle=1721237168
+
+  | state=S schedstat=( 0 0 0 ) utm=0 stm=0 core=1
+
+  at java.lang.VMThread.sleep(Native Method)
+
+  at java.lang.Thread.sleep(Thread.java:1013)
+
+  at java.lang.Thread.sleep(Thread.java:995)
+
+  at java.lang.Daemons$FinalizerWatchdogDaemon.sleepFor(Daemons.java:248)
+
+  at java.lang.Daemons$FinalizerWatchdogDaemon.waitForFinalization(Daemons.java:258)
+
+  at java.lang.Daemons$FinalizerWatchdogDaemon.run(Daemons.java:212)
+
+  at java.lang.Thread.run(Thread.java:841)
+
+
+
+"FinalizerDaemon" daemon prio=5 tid=7 WAIT
+
+  | group="system" sCount=1 dsCount=0 obj=0x422b0590 self=0x6697f1b0
+
+  | sysTid=19800 nice=0 sched=0/0 cgrp=apps handle=1721234952
+
+  | state=S schedstat=( 0 0 0 ) utm=177 stm=29 core=1
+
+  at java.lang.Object.wait(Native Method)
+
+  - waiting on <0x4201c718> (a java.lang.ref.ReferenceQueue)
+
+  at java.lang.Object.wait(Object.java:401)
+
+  at java.lang.ref.ReferenceQueue.remove(ReferenceQueue.java:102)
+
+  at java.lang.ref.ReferenceQueue.remove(ReferenceQueue.java:73)
+
+  at java.lang.Daemons$FinalizerDaemon.run(Daemons.java:170)
+
+  at java.lang.Thread.run(Thread.java:841)
+
+
+
+"ReferenceQueueDaemon" daemon prio=5 tid=6 WAIT
+
+  | group="system" sCount=1 dsCount=0 obj=0x422b1410 self=0x6697e908
+
+  | sysTid=19799 nice=0 sched=0/0 cgrp=apps handle=1721232736
+
+  | state=S schedstat=( 0 0 0 ) utm=25 stm=5 core=3
+
+  at java.lang.Object.wait(Native Method)
+
+  - waiting on <0x4201c640> 
+
+  at java.lang.Object.wait(Object.java:364)
+
+  at java.lang.Daemons$ReferenceQueueDaemon.run(Daemons.java:130)
+
+  at java.lang.Thread.run(Thread.java:841)
+
+
+
+"Compiler" daemon prio=5 tid=5 VMWAIT
+
+  | group="system" sCount=1 dsCount=0 obj=0x422b5118 self=0x42004318
+
+  | sysTid=19798 nice=0 sched=0/0 cgrp=apps handle=1107312848
+
+  | state=S schedstat=( 0 0 0 ) utm=154 stm=124 core=3
+
+  #00  pc 000219fc  /system/lib/libc.so (__futex_syscall3+8)
+
+  #01  pc 0000ef9c  /system/lib/libc.so (__pthread_cond_timedwait_relative+48)
+
+  #02  pc 0000effc  /system/lib/libc.so (__pthread_cond_timedwait+64)
+
+  #03  pc 00073cff  /system/lib/libdvm.so
+
+  #04  pc 00054969  /system/lib/libdvm.so
+
+  #05  pc 0000d248  /system/lib/libc.so (__thread_entry+72)
+
+  #06  pc 0000d3e0  /system/lib/libc.so (pthread_create+240)
+
+  at dalvik.system.NativeStart.run(Native Method)
+
+
+
+"JDWP" daemon prio=5 tid=4 VMWAIT
+
+  | group="system" sCount=1 dsCount=0 obj=0x422b65c0 self=0x42003660
+
+  | sysTid=19797 nice=0 sched=0/0 cgrp=apps handle=1107309592
+
+  | state=S schedstat=( 0 0 0 ) utm=0 stm=0 core=2
+
+  #00  pc 000214d0  /system/lib/libc.so (recvmsg+8)
+
+  #01  pc 0006107f  /system/lib/libdvm.so
+
+  #02  pc 000612b3  /system/lib/libdvm.so
+
+  #03  pc 00063f83  /system/lib/libdvm.so
+
+  #04  pc 00054969  /system/lib/libdvm.so
+
+  #05  pc 0000d248  /system/lib/libc.so (__thread_entry+72)
+
+  #06  pc 0000d3e0  /system/lib/libc.so (pthread_create+240)
+
+  at dalvik.system.NativeStart.run(Native Method)
+
+
+
+"Signal Catcher" daemon prio=5 tid=3 RUNNABLE
+
+  | group="system" sCount=0 dsCount=0 obj=0x422d4460 self=0x66980b30
+
+  | sysTid=19796 nice=0 sched=0/0 cgrp=apps handle=1721199816
+
+  | state=R schedstat=( 0 0 0 ) utm=5 stm=5 core=2
+
+  at dalvik.system.NativeStart.run(Native Method)
+
+
+
+"GC" daemon prio=5 tid=2 VMWAIT
+
+  | group="system" sCount=1 dsCount=0 obj=0x422d6f08 self=0x669762e8
+
+  | sysTid=19794 nice=0 sched=0/0 cgrp=apps handle=1107311672
+
+  | state=S schedstat=( 0 0 0 ) utm=1724 stm=111 core=2
+
+  #00  pc 00021a00  /system/lib/libc.so (__futex_syscall3+12)
+
+  #01  pc 0000ef9c  /system/lib/libc.so (__pthread_cond_timedwait_relative+48)
+
+  #02  pc 0000effc  /system/lib/libc.so (__pthread_cond_timedwait+64)
+
+  #03  pc 000528d9  /system/lib/libdvm.so (dvmRelativeCondWait(pthread_cond_t*, pthread_mutex_t*, long long, int)+24)
+
+  #04  pc 0007276f  /system/lib/libdvm.so
+
+  #05  pc 00054969  /system/lib/libdvm.so
+
+  #06  pc 0000d248  /system/lib/libc.so (__thread_entry+72)
+
+  #07  pc 0000d3e0  /system/lib/libc.so (pthread_create+240)
+
+  at dalvik.system.NativeStart.run(Native Method)
+
+
+
+NATIVE THREADS:
+
+"MediaCodec_loop" sysTid=19926 nice=-2 sched=0/0 cgrp=apps
+
+  | state=S schedstat=( 0 0 0 ) utm=851 stm=670 core=1
+
+
+
+"CodecLooper" sysTid=19927 nice=-16 sched=0/0 cgrp=apps
+
+  | state=S schedstat=( 0 0 0 ) utm=757 stm=496 core=2
+
+
+
+"MediaCodec_loop" sysTid=19936 nice=-2 sched=0/0 cgrp=apps
+
+  | state=S schedstat=( 0 0 0 ) utm=1516 stm=1080 core=2
+
+
+
+"gle.aac.decoder" sysTid=19937 nice=-2 sched=0/0 cgrp=apps
+
+  | state=S schedstat=( 0 0 0 ) utm=2504 stm=309 core=0
+
+
+
+----- end 19791 -----
+

@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; background: transparent; color: var(--foreground); font-size: 13px; line-height: 1.5; }
+  .wrap { width: 790px; padding: 4px 2px 10px; }
+  h1 { font-size: 17px; margin: 0 0 2px; font-weight: 700; }
+  .sub { font-size: 12px; color: var(--muted-foreground); margin-bottom: 10px; }
+  .legend { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 12px; }
+  .chip { font-size: 11px; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted-foreground); }
+  .chip.fixed { border-color: rgba(34,197,94,.6); color: rgb(34,197,94); }
+  .chip.open  { border-color: rgba(245,158,11,.6); color: rgb(217,119,6); }
+  .chip.drop  { border-color: rgba(239,68,68,.6); color: rgb(220,38,38); }
+  .chip.ok    { border-color: var(--border); }
+  .stage { display: flex; gap: 10px; border: 1px solid var(--border); background: var(--card); border-left-width: 4px; border-radius: 8px; padding: 8px 12px; }
+  .stage.fixed { border-left-color: rgb(34,197,94); }
+  .stage.open  { border-left-color: rgb(245,158,11); }
+  .stage.drop  { border-left-color: rgb(239,68,68); }
+  .stage.ok    { border-left-color: var(--muted-foreground); }
+  .ic { font-size: 20px; line-height: 1.3; }
+  .main { flex: 1; min-width: 0; }
+  .t { font-weight: 700; font-size: 13.5px; }
+  .badge { font-size: 10.5px; font-weight: 600; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border); margin-left: 6px; vertical-align: 1px; white-space: nowrap; }
+  .b-fixed { border-color: rgba(34,197,94,.6); color: rgb(34,197,94); }
+  .b-open  { border-color: rgba(245,158,11,.6); color: rgb(217,119,6); }
+  .b-drop  { border-color: rgba(239,68,68,.6); color: rgb(220,38,38); }
+  .m { color: var(--muted-foreground); margin-top: 2px; }
+  .m b, .r b { color: var(--foreground); }
+  .r { margin-top: 3px; }
+  .rt { font-size: 10.5px; color: var(--muted-foreground); border: 1px dashed var(--border); border-radius: 999px; padding: 1px 7px; white-space: nowrap; align-self: flex-start; margin-left: 6px; }
+  .arrow { text-align: center; color: var(--muted-foreground); font-size: 11px; line-height: 1; margin: 3px 0; }
+  .split { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .h { font-size: 12px; font-weight: 700; margin: 14px 0 6px; color: var(--muted-foreground); text-transform: uppercase; letter-spacing: .04em; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { border: 1px solid var(--border); padding: 5px 8px; text-align: left; vertical-align: top; }
+  th { background: color-mix(in srgb, var(--foreground) 6%, transparent); font-size: 12px; }
+  td { font-size: 12px; }
+  .num { white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .cores { display: flex; gap: 10px; flex-wrap: wrap; }
+  .core { border: 1px solid var(--border); background: var(--card); border-radius: 8px; padding: 6px 10px; font-size: 12px; min-width: 168px; }
+  .core b { display: block; font-size: 12.5px; }
+  .foot { font-size: 11px; color: var(--muted-foreground); margin-top: 10px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>CS11 有线 CarPlay · 数据流 / 丢包点 / 瓶颈全图</h1>
+  <div class="sub">数据 = 2026-10-06 夜实测（交互压测窗口）· 修复提交 dd79bcd · 对照：平板无线同一软件栈 = 零丢包 → 瓶颈在 CS11 的 USB/内核/CPU 平面，不在协议栈</div>
+
+  <div class="legend">
+    <span class="chip fixed">🔥 已修复瓶颈（附实测数字）</span>
+    <span class="chip drop">📍 丢包点</span>
+    <span class="chip open">⚠️ 待优化候选</span>
+    <span class="chip ok">✅ 健康段</span>
+  </div>
+
+  <div class="stage open">
+    <div class="ic">📱</div>
+    <div class="main">
+      <div class="t">iPhone 发送侧（AirPlay 加密流）<span class="badge b-open">⚠️ 突发源（不可控侧）</span></div>
+      <div class="m">视频 = TCP + ChaCha20 加密 H.264；音频 = UDP；触控 = iAP 回程。有线持续 <b>3–4.4Mbps</b>，滑动/地图重绘瞬间更高——<b>大接收窗时手机会把多兆突发灌进链路，把音频 UDP 挤掉</b>（"窗口限速点"发现）</div>
+      <div class="r">可选缓解：协商帧率 30（~-40% 视频负载）· 分辨率降档（像素 -55%）</div>
+    </div>
+  </div>
+  <div class="arrow">▼</div>
+
+  <div class="stage fixed">
+    <div class="ic">🧵</div>
+    <div class="main">
+      <div class="t">USB 线缆 → 控制器中断 <span class="badge b-fixed">🔥 瓶颈 #1 · 已修复 · 最大根因</span></div>
+      <div class="m">IRQ 72 = <b>2,846,638</b> 次中断全挤 CPU0（cpu1/2/3 = 0，IRQ 75 同病）→ 中断补位抖动 → URB 补位迟滞 → NCM 收包迟滞 → <b>手机 TX 队列溢出丢包</b></div>
+      <div class="r">修复：smp_affinity = e（迁 CPU1+2+3，已固化进 bootstrap）→ 丢包 <b>44–61/5s → 2–5/5s（10×）</b>，Udp6InErrors 4.4 → 1.3/s</div>
+    </div>
+  </div>
+  <div class="arrow">▼</div>
+
+  <div class="stage drop">
+    <div class="ic">📦</div>
+    <div class="main">
+      <div class="t">内核：cdc_ncm 驱动（usb1）+ IPv6/UDP6/TCP6 栈 <span class="badge b-drop">📍 丢包点 A（链路级）</span></div>
+      <div class="m">驱动层 <b>0 丢</b>（+23,636 包/60s）；IPv6 层 0 错 0 丢；<b>UDP6 socket = 唯一窟窿</b>：Udp6InErrors <b>+217/60s（3.6/s）</b>；双协议同损（TCP 重传 ~3%）= 链路级 1–3% 均匀损耗</div>
+      <div class="r">死路已排除：cdc_ncm 无可调 rx_max · 内核未编 usbmon · 双方未实现 RTCP NACK</div>
+    </div>
+  </div>
+  <div class="arrow">▼</div>
+
+  <div class="stage drop">
+    <div class="ic">🚪</div>
+    <div class="main">
+      <div class="t">应用接收层（ScreenStream 视频 / BufferedAudioStream 音频）<span class="badge b-drop">📍 丢包点 B · 已节流封边</span></div>
+      <div class="m">修复前：大接收窗 → 视频突发挤音频；修复：<b>64KB rcvbuf + TCP_NODELAY</b>（发送端被节拍化）。修复后仍 +246/90s → <b>反证根不在应用层，在更下层</b></div>
+    </div>
+  </div>
+  <div class="arrow">▼</div>
+
+  <div class="stage fixed">
+    <div class="ic">🔓</div>
+    <div class="main">
+      <div class="t">解密 ChaCha20-Poly1305 <span class="badge b-fixed">🔥 瓶颈 #2 · 已修复</span></div>
+      <div class="m">原 = 纯 Java（BouncyCastle），<b>i.MX6 最大单一 CPU 耗电源</b>（视频帧逐帧解密）→ 修复 = Conscrypt/BoringSSL 原生 AEAD（带回退）</div>
+      <div class="r">实测：交互丢包 <b>4.5/s → 2.0/s（-55%）</b>（NATIVE_TEST +177/90s）；日志实锤 "native ChaCha20 active"</div>
+    </div>
+  </div>
+  <div class="arrow">▼ 分流</div>
+
+  <div class="split">
+    <div class="stage ok">
+      <div class="ic">🎬</div>
+      <div class="main">
+        <div class="t">视频链<span class="badge" style="border-color:var(--border)">✅ 解码健康 · ⚠️ 渲染待优化</span></div>
+        <div class="m">MediaCodec → <b>VPU 硬件 H.264 解码</b>（非瓶颈）→ 渲染合成（SurfaceFlinger/GPU）</div>
+        <div class="r">⚠️ 候选：SurfaceView + <b>IPU overlay 直通</b>（潜在最大 UI 帧率收益）· 管线缓冲池/零拷贝（消 GC 抖动）</div>
+      </div>
+    </div>
+    <div class="stage ok">
+      <div class="ic">🔊</div>
+      <div class="main">
+        <div class="t">音频链<span class="badge" style="border-color:var(--border)">✅</span></div>
+        <div class="m">AudioTrack → 功放；<b>原始流，不做修补</b>（用户要求：0 丢包从源头治）</div>
+        <div class="r">空闲态：零丢包达成（Udp6InErrors ≈ 0/60s）</div>
+      </div>
+    </div>
+  </div>
+  <div class="arrow">▼</div>
+
+  <div class="stage ok">
+    <div class="ic">🖥️</div>
+    <div class="main">
+      <div class="t">屏幕 / 扬声器</div>
+      <div class="m">触控回程（app → USB → iPhone）：延迟 <b>249ms → 84ms</b>（调优后）· 平板无线对照：touch2frame 28–41ms</div>
+    </div>
+  </div>
+
+  <div class="h">CPU 平面 · i.MX6 Quad 4×Cortex-A9</div>
+  <div class="cores">
+    <div class="core"><b>负载</b>7.65 → <b>3.01</b>（交互突发时曾飙 ~8 ≈ 2× 超载）</div>
+    <div class="core"><b>USB IRQ</b>CPU0 全挤 → 迁 CPU1+2+3（smp_affinity=e）</div>
+    <div class="core"><b>应用</b>taskset 0xd（CPU0/2/3）· RPS=2 · ksoftirqd -5</div>
+    <div class="core"><b>内核缓冲</b>rmem_max 2M / backlog 4000 / rcvbuf 64KB</div>
+  </div>
+
+  <div class="h">瓶颈排行（投入产出序）</div>
+  <table>
+    <tr><th>#</th><th>位置</th><th>机理</th><th>措施</th><th class="num">实测效果</th><th>状态</th></tr>
+    <tr><td>1</td><td>USB 中断调度（内核）</td><td>IRQ 钉死 CPU0 → 补位抖动 → NCM 迟滞</td><td>IRQ 亲和迁移</td><td class="num"><b>10×</b></td><td>✅ dd79bcd</td></tr>
+    <tr><td>2</td><td>视频解密（应用）</td><td>纯 Java ChaCha20 = 最大耗电源</td><td>Conscrypt 原生 AEAD</td><td class="num"><b>-55%</b></td><td>✅ dd79bcd</td></tr>
+    <tr><td>3</td><td>接收窗/突发（链路）</td><td>视频突发挤音频 UDP</td><td>64KB rcvbuf + TCP_NODELAY</td><td class="num">节流封边</td><td>✅ dd79bcd</td></tr>
+    <tr><td>4</td><td>渲染合成（框架）</td><td>GPU/合成器开销</td><td>SurfaceView + IPU overlay</td><td class="num">?</td><td>⏳ 候选</td></tr>
+    <tr><td>5</td><td>发送侧突发（iPhone）</td><td>源头突发不可控</td><td>帧率 30 / 分辨率降档</td><td class="num">~-40% / -55%</td><td>⏳ 候选</td></tr>
+  </table>
+
+  <div class="h">丢包点现状一览</div>
+  <table>
+    <tr><th>丢包点</th><th>位置</th><th class="num">修复前</th><th class="num">现在</th></tr>
+    <tr><td>A</td><td>UDP6 socket（链路级）</td><td class="num">3.6/s（+217/60s）</td><td class="num">空闲 <b>≈0/s</b>；交互期单包级</td></tr>
+    <tr><td>B</td><td>应用侧缺包</td><td class="num">14–21 包整段崩塌</td><td class="num"><b>miss=1 单包（8ms），23 事件/60s</b></td></tr>
+    <tr><td>C</td><td>USB 驱动层</td><td class="num">0</td><td class="num">0（从未丢过）</td></tr>
+    <tr><td>—</td><td>滑动窗口对照（90s）</td><td class="num">~600+</td><td class="num">330 → 217 → <b>177（2.0/s）</b> 逐级压低</td></tr>
+  </table>
+
+  <div class="foot">一句话：三大头 = ①内核中断调度（已修 10×）②应用解密（已修 -55%）③链路突发（已节流）；剩余卡顿候选全在渲染路径与发送侧协商，且与编程语言无关（详见 docs/_digest/22）。</div>
+</div>
+</body>
+</html>
