@@ -313,8 +313,6 @@ class CarPlayHostActivity : ComponentActivity() {
     private var displayScaleTenths = CarPlayDisplayScale.DEFAULT_TENTHS
     private var uiScalePercent = CarPlayUiScale.DEFAULT
     private var displayDiagnosticAttempt: String? = null
-    private var hevcEnabled = true
-    private var hevcSoftwareDecoderEnabled = false
     private var advancedAudioChannelMappingSupported = false
     private var advancedAudioChannelMapping = false
     private var navigationStreamType = 14
@@ -422,15 +420,6 @@ class CarPlayHostActivity : ComponentActivity() {
     private var failurePendingAfterMenu: CarPlayStatus.Failed? = null
     private val shuttingDown = AtomicBoolean(false)
     private val mainHandler = Handler(Looper.getMainLooper())
-    private var sidePanel: LinearLayout? = null
-    private var sidePanelBattery: TextView? = null
-    private var sidePanelShown = false
-    private val sidePanelTick = object : Runnable {
-        override fun run() {
-            refreshSidePanel()
-            if (sidePanelShown) mainHandler.postDelayed(this, SIDE_PANEL_REFRESH_MILLIS)
-        }
-    }
     private val teardownExecutor: ExecutorService = Executors.newSingleThreadExecutor()
     private val airPlayCommandExecutor: ExecutorService = Executors.newSingleThreadExecutor()
     private val logLines = ArrayDeque<LogEntry>()
@@ -575,10 +564,6 @@ class CarPlayHostActivity : ComponentActivity() {
         displayScaleTenths = CarPlayDisplayScale.sanitize((displayScalePercent + 5) / 10)
         // Size is now chosen only through CarPlaySize; ignore the canvas scale older builds stored.
         uiScalePercent = CarPlayUiScale.DEFAULT
-        hevcEnabled = AirPlayPersistence.loadHevcEnabled(this)
-        hevcSoftwareDecoderEnabled =
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
-                AirPlayPersistence.loadHevcSoftwareDecoderEnabled(this)
         advancedAudioChannelMapping =
             advancedAudioChannelMappingSupported &&
                 AirPlayPersistence.loadAdvancedAudioChannelMapping(this)
@@ -1000,7 +985,6 @@ class CarPlayHostActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
-        resetSidePanel()
         // The cluster push's artwork tier is *not* released here: the CarPlay session outlives this
         // Activity, and the cluster fetches the cover lazily, so the process-wide loopback server and
         // the covers it serves must stay up until the session really ends. That teardown lives in the
@@ -1186,8 +1170,6 @@ class CarPlayHostActivity : ComponentActivity() {
         paintWaitingScreen()
         viewport.addView(panel, FrameLayout.LayoutParams(-1, -2, Gravity.CENTER))
         root.addView(viewport, FrameLayout.LayoutParams(-1, -1))
-        // Above the video and gesture layer, below the menus.
-        sidePanel = buildSidePanel().also { root.addView(it, FrameLayout.LayoutParams(0, 0)) }
         var preparationHeight = -1
         fun updatePreparationLayout() {
             val height = viewport.height - viewport.paddingTop - viewport.paddingBottom
@@ -1256,85 +1238,6 @@ class CarPlayHostActivity : ComponentActivity() {
         return root
     }
 
-    // DiPlay's side panel: placed over the part of the stream CarPlay leaves black (placeSidePanel), so it
-    // follows the video when it is letterboxed; touches elsewhere still reach the gesture layer and CarPlay.
-    private fun buildSidePanel(): LinearLayout {
-        val panel = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-            isClickable = true
-            visibility = View.GONE
-            setBackgroundColor(Color.rgb(16, 16, 18))
-            setPadding(dp(24), dp(24), dp(24), dp(24))
-        }
-        panel.addView(android.widget.TextClock(this).apply {
-            format24Hour = "HH:mm"
-            format12Hour = "h:mm"
-            textSize = 72f
-            setTextColor(Color.WHITE)
-            gravity = Gravity.CENTER
-        })
-        sidePanelBattery = TextView(this).apply {
-            textSize = 30f
-            setTextColor(Color.rgb(200, 200, 205))
-            gravity = Gravity.CENTER
-            setPadding(0, dp(24), 0, dp(32))
-        }
-        panel.addView(sidePanelBattery)
-        panel.addView(Button(this).apply {
-            text = getString(R.string.side_panel_full_screen)
-            textSize = 22f
-            setOnClickListener { showSidePanel(false) }
-        })
-        return panel
-    }
-
-    // The panel's strip of the stream, mapped through the video's layout in the window.
-    private fun placeSidePanel(viewWidth: Int, viewHeight: Int) {
-        val panel = sidePanel ?: return
-        val display = sessionDisplay ?: return
-        val strip = display.viewAreas?.let { it.panelRect(it.current) } ?: return
-        val content = contentRect(viewWidth, viewHeight)
-        val scaleX = content.width / display.width
-        val scaleY = content.height / display.height
-        val left = Math.round(content.left + strip.originX * scaleX)
-        val top = Math.round(content.top + strip.originY * scaleY)
-        panel.layoutParams = FrameLayout.LayoutParams(
-            Math.round(content.left + (strip.originX + strip.width) * scaleX) - left,
-            Math.round(content.top + (strip.originY + strip.height) * scaleY) - top,
-            // Stream coordinates are physical pixels, independent of the UI's reading direction.
-            Gravity.TOP or Gravity.LEFT,
-        ).apply { leftMargin = left; topMargin = top }
-    }
-
-    private fun showSidePanel(show: Boolean) {
-        val areas = sessionDisplay?.viewAreas ?: return
-        val view = videoView ?: return
-        val split = isMultiWindowActive()
-        val portrait = if (split) screenPortrait() else view.height > view.width
-        val target = if (show) areas.sidePanel(portrait) else areas.indexFor(view.width, view.height, split, portrait)
-        val sent = target != null && controller?.showViewArea(target) == true
-        appendLog("Side panel ${if (show) "shown" else "hidden"}: view area $target sent=$sent")
-        if (!sent || target == null) return
-        areas.use(target)
-        sidePanelShown = show
-        sidePanel?.visibility = if (show) View.VISIBLE else View.GONE
-        mainHandler.removeCallbacks(sidePanelTick)
-        if (show) sidePanelTick.run()
-        updateVideoLayout(view.width, view.height)
-    }
-
-    private fun resetSidePanel() {
-        sidePanelShown = false
-        sidePanel?.visibility = View.GONE
-        mainHandler.removeCallbacks(sidePanelTick)
-    }
-
-    // The side panel carries no vehicle readouts on this head unit.
-    private fun refreshSidePanel() {
-        sidePanelBattery?.text = ""
-    }
-
     private fun buildSettingsMenu(): View {
         val overlay = FrameLayout(this).apply {
             setBackgroundColor(Color.BLACK)
@@ -1357,16 +1260,6 @@ class CarPlayHostActivity : ComponentActivity() {
                 ViewGroup.LayoutParams.WRAP_CONTENT,
             ),
         )
-        if (sessionDisplay?.viewAreas?.sidePanel() != null) {
-            content.addView(Button(this).apply {
-                text = getString(if (sidePanelShown) R.string.side_panel_full_screen else R.string.side_panel_show)
-                textSize = 20f
-                setOnClickListener {
-                    cancelSettingsEdits()
-                    showSidePanel(!sidePanelShown)
-                }
-            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-        }
         content.addView(
             settingsCategoryHeader(getString(R.string.connection)),
             LinearLayout.LayoutParams(
@@ -1632,50 +1525,6 @@ class CarPlayHostActivity : ComponentActivity() {
             ).apply { topMargin = dp(16) },
         )
 
-        val hevcRow = DisplaySettingsSection.createHevcRow(
-            context = this,
-            checked = hevcEnabled,
-            theme = SettingsTheme.OVERLAY,
-        ) { checked ->
-            if (hevcEnabled == checked) return@createHevcRow
-            hevcEnabled = checked
-            appendLog(
-                "HEVC (H.265) ${if (hevcEnabled) "enabled" else "disabled"}; " +
-                    "applies when settings close",
-            )
-            updateResolutionMenu()
-        }
-        content.addView(
-            hevcRow.rowView,
-            LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = dp(30) },
-        )
-
-        val softwareHevcRow = DisplaySettingsSection.createSoftwareHevcRow(
-            context = this,
-            checked = hevcSoftwareDecoderEnabled,
-            theme = SettingsTheme.OVERLAY,
-        ) { checked ->
-            if (hevcSoftwareDecoderEnabled == checked) return@createSoftwareHevcRow
-            hevcSoftwareDecoderEnabled = checked
-            appendLog(
-                "HEVC software decoder ${if (hevcSoftwareDecoderEnabled) "enabled" else "disabled"}; " +
-                    "applies when settings close",
-            )
-            updateResolutionMenu()
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            content.addView(
-                softwareHevcRow.rowView,
-                LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
-                ).apply { topMargin = dp(16) },
-            )
-        }
-
         content.addView(
             buildScreenCornerMaskSection(),
             LinearLayout.LayoutParams(
@@ -1904,8 +1753,6 @@ class CarPlayHostActivity : ComponentActivity() {
         AirPlayPersistence.saveFps(this, fps)
         AirPlayPersistence.saveWidthPhysicalMm(this, widthPhysicalMm)
         AirPlayPersistence.savePhysicalSizeBasis(this, physicalSizeBasis)
-        AirPlayPersistence.saveHevcEnabled(this, hevcEnabled)
-        AirPlayPersistence.saveHevcSoftwareDecoderEnabled(this, hevcSoftwareDecoderEnabled)
         AirPlayPersistence.saveManufacturer(this, manufacturer)
         AirPlayPersistence.saveModel(this, model)
         AirPlayPersistence.saveOemLabel(this, oemLabel)
@@ -3158,11 +3005,8 @@ class CarPlayHostActivity : ComponentActivity() {
             "${getString(R.string.resolution_handshake_prefix)}${native.width} x ${native.height} -> " +
                 "${negotiated.widthPixels} x ${negotiated.heightPixels}"
         }
-        val transport = if (!hevcEnabled) {
-            "H.264"
-        } else {
-            "HEVC (H.265, ${if (hevcSoftwareDecoderEnabled) "software" else "hardware"})"
-        }
+        // CS11: H.264 only, so the video transport is fixed.
+        val transport = "H.264"
         val fullscreen = buildString {
             append(if (hideTopBar) getString(R.string.fullscreen_top_hidden) else getString(R.string.fullscreen_top_shown))
             append(", ")
@@ -3215,7 +3059,7 @@ class CarPlayHostActivity : ComponentActivity() {
 
     private fun decoderCanvasSupport(display: AirPlayDisplayConfig): CanvasSupport {
         return try {
-        val mime = if (hevcEnabled) MediaFormat.MIMETYPE_VIDEO_HEVC else MediaFormat.MIMETYPE_VIDEO_AVC
+        val mime = MediaFormat.MIMETYPE_VIDEO_AVC
         // CS11: 4.4 没有 VideoCapabilities 探测；确认默认解码器可创建即可
         if (Build.VERSION.SDK_INT < 21) {
             val probe = runCatching { android.media.MediaCodec.createDecoderByType(mime) }.getOrNull()
@@ -3246,7 +3090,6 @@ class CarPlayHostActivity : ComponentActivity() {
                 display.widthPixels, display.heightPixels, display.fps.toDouble()) == true
             val reason = when {
                 !hardware -> "software_decoder"
-                hevcEnabled && hevcSoftwareDecoderEnabled -> "software_hevc_selected"
                 video == null -> "no_video_capabilities"
                 !sizeSupported -> "canvas_dimensions_unsupported"
                 !rateSupported -> "frame_rate_unsupported"
@@ -3348,48 +3191,15 @@ class CarPlayHostActivity : ComponentActivity() {
             ),
             safeAreaDrawOutside = safeAreaDrawOutside,
         )
-        // A fixed dock, split-screen support or a turning screen declares several areas the car switches
-        // between live. A session that starts in split screen sizes its canvas to that window, so it keeps
-        // the plain canvas and one area for it.
-        val inSplitScreen = isMultiWindowActive()
+        // A fixed dock declares one area per edge and the car switches between them live.
         val dock = CarPlayDock.load(this).also { sessionDock = it }
-        val splitWindow: (Boolean) -> Pair<Float, Float>? = { portrait ->
-            if (SplitScreenSettings.enabled(this) && !inSplitScreen) SplitScreenSettings.window(this, portrait) else null
-        }
-        val longPixels = maxOf(display.widthPixels, display.heightPixels)
-        val shortPixels = minOf(display.widthPixels, display.heightPixels)
-        val square = if (CarPlayRotation.enabled(this) && !inSplitScreen) {
-            CarPlayRotation.squareSide(longPixels, CarPlayRotation.picture(this), hevcEnabled, hevcSoftwareDecoderEnabled)
-        } else null
-        val canvas = if (square == null) display else {
-            // The square keeps the plain canvas's pixel density, so CarPlay's scale (and "CarPlay size")
-            // stays the same in both orientations; it has no room for the custom safe area.
-            val longMm = if (display.widthPixels >= display.heightPixels) display.widthPhysicalMm else display.heightPhysicalMm
-            val squareMm = longMm?.let { (it.toLong() * square / longPixels).toInt() }
-            display.copy(widthPixels = square, heightPixels = square, widthPhysicalMm = squareMm,
-                heightPhysicalMm = squareMm, viewArea = null, safeArea = null)
-        }
-        val viewAreas = if (square == null) {
-            CarPlayViewAreas.build(display.widthPixels, display.heightPixels, listOf(
-                CarPlayViewAreas.Screen(display.widthPixels, display.heightPixels, portrait = display.heightPixels > display.widthPixels),
-            ), dock, splitWindow, startPortrait = display.heightPixels > display.widthPixels,
-                sidePanel = SidePanelSettings.enabled(this), rightHandDrive = rightHandDrive)
-        } else {
-            val areaShort = (shortPixels.toLong() * square / longPixels).toInt() and 1.inv()
-            CarPlayViewAreas.build(square, square, listOf(
-                CarPlayViewAreas.Screen(square, areaShort, portrait = false),
-                CarPlayViewAreas.Screen(areaShort, square, portrait = true),
-            ), dock, splitWindow, startPortrait = size.height > size.width, sidePanel = SidePanelSettings.enabled(this),
-                rightHandDrive = rightHandDrive)
-        }
+        val viewAreas = CarPlayViewAreas.build(display.widthPixels, display.heightPixels, dock)
         pendingViewAreas = viewAreas
-        val declared = if (viewAreas == null) canvas else canvas.copy(viewAreas = viewAreas.areas, initialViewArea = viewAreas.current)
-        if (square != null) appendLog("Turning screen: square canvas ${square}x$square, areas ${viewAreas?.areas}")
+        val declared = if (viewAreas == null) display else display.copy(viewAreas = viewAreas.areas, initialViewArea = viewAreas.current)
         val requestSummary = "Display request selected=${CarPlayUiScale.label(requestedPercent)} percent=$requestedPercent " +
             "surface=${size.width}x${size.height} resolution=${requestedResolutionPercent}% " +
             "base=${requestedResolutionDisplay.widthPixels}x${requestedResolutionDisplay.heightPixels} " +
-            "candidate=${candidate.widthPixels}x${candidate.heightPixels} fps=$fps " +
-            "codec=${if (hevcEnabled) "HEVC" else "H.264"} softwareHevc=$hevcSoftwareDecoderEnabled"
+            "candidate=${candidate.widthPixels}x${candidate.heightPixels} fps=$fps codec=H.264"
         val effectiveSummary = "Display effective percent=$uiScalePercent resolution=${displayScalePercent}% " +
             "canvas=${display.widthPixels}x${display.heightPixels} decision=${support.reason} " +
             "physical=${physical.widthMm}x${physical.heightMm}mm safeArea=${display.safeArea} " +
@@ -3409,7 +3219,6 @@ class CarPlayHostActivity : ComponentActivity() {
             main = declared,
             cluster = clusterDisplayConfig(),
             rightHandDrive = rightHandDrive,
-            hevc = hevcEnabled,
             microphone = microphoneAvailable,
             // Probed before the first info plist: wireless CarPlay sends calls and Siri as Opus, and
             // the CS11 has no MediaCodec Opus encoder, so the microphone input is advertised only
@@ -3617,7 +3426,6 @@ class CarPlayHostActivity : ComponentActivity() {
             surface = null,
             videoWidth = videoWidth,
             videoHeight = videoHeight,
-            preferSoftwareHevcDecoder = hevcSoftwareDecoderEnabled,
             advancedAudioChannelMapping = advancedAudioChannelMapping,
             audioFocusEnabled = AirPlayPersistence.loadAudioFocusEnabled(this),
             mediaChannel = AirPlayPersistence.loadMediaAudioChannel(this),
@@ -3839,14 +3647,6 @@ class CarPlayHostActivity : ComponentActivity() {
         controller = snapshot.controller
         sink = snapshot.sink
         sessionDisplay = snapshot.display
-        resetSidePanel()
-        if (snapshot.display.viewAreas?.let { it.kindOf(it.current) == CarPlayViewAreas.Kind.SIDE_PANEL } == true) {
-            // The live stream can outlast its Activity. Restore the Android view covering its
-            // unused strip instead of leaving a blank third when a new host adopts the session.
-            sidePanelShown = true
-            sidePanel?.visibility = View.VISIBLE
-            sidePanelTick.run()
-        }
         MapMirrors.reapply()
         CarPlayBackgroundSession.store(snapshot.controller, snapshot.sink, snapshot.width, snapshot.height,
             this, snapshot.display) { completion ->
@@ -3915,8 +3715,7 @@ class CarPlayHostActivity : ComponentActivity() {
                 "(${displayScalePercent}%) " +
                 "physical=${airPlayConfig.main.widthPhysicalMm}x" +
                 "${airPlayConfig.main.heightPhysicalMm}mm " +
-                "video=${if (airPlayConfig.hevc) "HEVC" else "H.264"} " +
-                "decoder=${if (airPlayConfig.hevc && hevcSoftwareDecoderEnabled) "software" else "hardware"} " +
+                "video=H.264 decoder=hardware " +
                 "microphone=${airPlayConfig.microphone} " +
                 "location=${if (config.locationReportingEnabled) "enabled" else "disabled"} " +
                 "mfi=${mfiTargetLabel(config.mfiTarget)}",
@@ -3926,8 +3725,6 @@ class CarPlayHostActivity : ComponentActivity() {
             "starting controller display=${size.width}x${size.height} " +
                 "negotiated=${airPlayConfig.main.widthPixels}x${airPlayConfig.main.heightPixels} " +
                 "scale=${displayScalePercent}% " +
-                "hevc=${airPlayConfig.hevc} " +
-                "softwareHevc=${airPlayConfig.hevc && hevcSoftwareDecoderEnabled} " +
                 "microphone=${airPlayConfig.microphone} " +
                 "location=${config.locationReportingEnabled} " +
                 "mfi=${config.mfiTarget}",
@@ -3959,7 +3756,6 @@ class CarPlayHostActivity : ComponentActivity() {
             locationProvider = locationProvider,
         )
         controller = next
-        resetSidePanel() // a new session starts without the side panel
         CarPlayMediaKeys.attach(this, next)
         if (airPlayConfig.videoInCar) CarPlayVideo.attach(this, next)
         val display = CarPlaySessionDisplay(
@@ -4057,9 +3853,7 @@ class CarPlayHostActivity : ComponentActivity() {
             return
         }
         pendingDisplaySize = size
-        // With a turning screen's square canvas nothing reconnects, so the turn need not wait for the size to settle.
-        mainHandler.postDelayed(applyDisplaySize,
-            if (sessionDisplay?.viewAreas?.turnsWithScreen == true) 0L else DISPLAY_CHANGE_DEBOUNCE_MILLIS)
+        mainHandler.postDelayed(applyDisplaySize, DISPLAY_CHANGE_DEBOUNCE_MILLIS)
     }
 
     private fun isMultiWindowActive(): Boolean {
@@ -4069,7 +3863,6 @@ class CarPlayHostActivity : ComponentActivity() {
 
     private fun applyDisplaySize(size: DisplaySize) {
         val display = sessionDisplay
-        if (display != null && applyViewArea(size, display)) return
         val layoutChanged = displayLayoutChanged(size)
         if (shuttingDown.get()) return
         if (size == activeDisplaySize && !layoutChanged) {
@@ -4111,60 +3904,6 @@ class CarPlayHostActivity : ComponentActivity() {
         }
     }
 
-    /**
-     * Entering or leaving the head unit's split screen, or turning the screen with a square canvas, moves
-     * CarPlay to the matching view area instead of reconnecting. The split window is remembered per screen
-     * orientation for the next session's area. False when the change is something else (a camera window,
-     * a turn without a square canvas), which the usual path handles.
-     */
-    private fun applyViewArea(size: DisplaySize, display: CarPlaySessionDisplay): Boolean {
-        val areas = display.viewAreas ?: return false
-        if (controller == null || menuOpen || handshakeResetInProgress || shuttingDown.get()) return false
-        val split = isMultiWindowActive()
-        // A full window's own shape tells the screen's orientation; during a turn the display metrics and
-        // rotation can lag behind the window. A split-screen window can have either shape, so it asks the
-        // display, which is settled then.
-        val portrait = if (split) screenPortrait() else size.height > size.width
-        val previous = activeDisplaySize
-        if (areas.turnsWithScreen && display.rotation != displayRotation() && size == previous) {
-            // The turn arrived before the window's new size: note it and wait for the size, which picks
-            // the area, instead of letting the old rotation look like a changed layout.
-            sessionDisplay = display.copy(rotation = displayRotation())
-            Log.i(TAG, "Screen turned before the window resized (${size.width}x${size.height}); waiting for its size")
-            return true
-        }
-        val turned = previous != null && !split && (previous.height > previous.width) != portrait
-        if (turned && !areas.turnsWithScreen) return false
-        val longWindow = maxOf(display.windowWidth, display.windowHeight).toFloat()
-        val shortWindow = minOf(display.windowWidth, display.windowHeight).toFloat()
-        if (split && longWindow > 0 && shortWindow > 0) {
-            if (portrait) SplitScreenSettings.saveWindow(this, true, size.width / shortWindow, size.height / longWindow)
-            else SplitScreenSettings.saveWindow(this, false, size.width / longWindow, size.height / shortWindow)
-        }
-        val target = areas.indexFor(size.width, size.height, split, portrait) ?: return false
-        if (sidePanelShown) resetSidePanel() // a turn or the split screen ends the side panel
-        // The same whole-screen area without a turn (a camera window, say) keeps the usual handling.
-        if (!turned && target == areas.current && areas.kindOf(target) == CarPlayViewAreas.Kind.FULL_SCREEN) return false
-        activeDisplaySize = size
-        sessionDisplay = display.copy(rotation = displayRotation())
-        val sent = if (target == areas.current) true else controller?.showViewArea(target) == true
-        if (sent) areas.use(target)
-        videoView?.let { updateVideoLayout(it.width, it.height) }
-        val message = "Window ${previous?.width}x${previous?.height} -> ${size.width}x${size.height} " +
-            "split=$split portrait=$portrait turned=$turned: view area $target sent=$sent"
-        appendLog(message)
-        Log.i(TAG, message)
-        return true
-    }
-
-    /** Whether the screen itself is portrait now (DiPlay's own window may be a split-screen part of it). */
-    @Suppress("DEPRECATION")
-    private fun screenPortrait(): Boolean {
-        val metrics = android.util.DisplayMetrics()
-        windowManager.defaultDisplay.getRealMetrics(metrics)
-        return metrics.heightPixels > metrics.widthPixels
-    }
-
     @Suppress("DEPRECATION")
     private fun displayRotation(): Int = videoView?.display?.rotation ?: windowManager.defaultDisplay.rotation
 
@@ -4199,18 +3938,7 @@ class CarPlayHostActivity : ComponentActivity() {
 
     private fun contentRect(viewWidth: Int, viewHeight: Int): CarPlayVideoLayout {
         val display = sessionDisplay ?: return CarPlayVideoLayout(0f, 0f, viewWidth.toFloat(), viewHeight.toFloat())
-        // In the head unit's split screen, or on a turning screen's square canvas, CarPlay draws in part of
-        // the canvas; that area fills the window and the rest falls outside it. Video and touches both
-        // follow this. An area of the whole canvas keeps the usual fit.
-        display.viewAreas?.let { areas ->
-            val area = areas.layoutArea(areas.current)
-            if (area.width != display.width || area.height != display.height) {
-                val scaleX = viewWidth.toFloat() / area.width
-                val scaleY = viewHeight.toFloat() / area.height
-                return CarPlayVideoLayout(-area.originX * scaleX, -area.originY * scaleY,
-                    display.width * scaleX, display.height * scaleY)
-            }
-        }
+        // Every declared area (a fixed dock's edges) is the whole canvas, so the stream always fits.
         return CarPlayVideoLayout.fit(display.width, display.height, viewWidth, viewHeight)
     }
 
@@ -4222,7 +3950,6 @@ class CarPlayHostActivity : ComponentActivity() {
             setScale(content.width / viewWidth, content.height / viewHeight)
             postTranslate(content.left, content.top)
         })
-        if (sidePanelShown) placeSidePanel(viewWidth, viewHeight)
     }
 
     private fun recordDetectedMaximum(size: DisplaySize) {
@@ -4432,8 +4159,7 @@ class CarPlayHostActivity : ComponentActivity() {
         logLines.clear()
         appendLog(
             "$prefix; resolution " +
-                "${displayScalePercent}% with " +
-                (if (hevcEnabled) "HEVC (H.265)" else "H.264") +
+                "${displayScalePercent}% with H.264" +
                 ", MFI ${mfiTargetLabel(mfiTarget)}" +
                 ", Wi-Fi session ${hotspotModeLabel(wirelessHotspotMode)}",
         )
@@ -4467,7 +4193,6 @@ class CarPlayHostActivity : ComponentActivity() {
 
     private fun shutdown(terminateProcess: Boolean, reason: String, completion: () -> Unit = {}) {
         if (!shuttingDown.compareAndSet(false, true)) { completion(); return }
-        resetSidePanel()
         startupRetryBudget.disconnected()
         restartGeneration += 1
         mainHandler.removeCallbacks(applyDisplaySize)
@@ -4959,7 +4684,6 @@ class CarPlayHostActivity : ComponentActivity() {
     }
 
     private companion object {
-        const val SIDE_PANEL_REFRESH_MILLIS = 5_000L
         const val TAG = "xcertplay-usb"
         const val SCREEN_TYPE_MAIN = 110
         const val SCREEN_TYPE_ALT = 111

@@ -27,7 +27,6 @@ class CarPlayHostResolutionTest {
     @Before fun setUp() {
         activity = Robolectric.buildActivity(CarPlayHostActivity::class.java).get()
         set("airPlayIdentity", AirPlayIdentity.generate())
-        set("hevcEnabled", false)
         ShadowMediaCodecList.reset()
     }
 

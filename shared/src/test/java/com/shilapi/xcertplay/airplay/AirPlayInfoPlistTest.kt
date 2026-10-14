@@ -83,20 +83,6 @@ class AirPlayInfoPlistTest {
     }
 
     @Test
-    fun hevcCapabilityIsAdvertisedOnlyWhenEnabled() {
-        val base = AirPlayConfig(
-            deviceName = "test",
-            deviceId = "02:00:00:00:00:02",
-            btMac = "02:00:00:00:00:02",
-            sourceVersion = "366.0",
-            main = AirPlayDisplayConfig(widthPixels = 1280, heightPixels = 720),
-        )
-
-        assertFalse(AirPlayInfoPlist.build(base).containsKey("hevcInfo"))
-        assertTrue(AirPlayInfoPlist.build(base.copy(hevc = true)).containsKey("hevcInfo"))
-    }
-
-    @Test
     fun drivingSideAndDisplayValuesAreAdvertised() {
         val info = AirPlayInfoPlist.build(
             AirPlayConfig(

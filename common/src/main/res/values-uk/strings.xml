@@ -86,7 +86,7 @@
     <string name="resolution_handshake_prefix">Роздільна здатність узгодження:\u0020</string>
     <string name="safe_area_full_screen_at">Безпечна область: увесь екран,\u0020</string>
     <string name="safe_area_mapping_summary">Безпечна область: %1$d x %2$d у точці (%3$d, %4$d) на екрані %5$d x %6$d</string>
-    <string name="settings_android9_compat">Наведені нижче налаштування недоступні та приховані в Android 9 (API 28):\n• Wi-Fi P2P (5 ГГц) — натомість використовується вбудована точка доступу автомобіля.\n• Програмний декодер HEVC — натомість використовується апаратне декодування.</string>
+    <string name="settings_android9_compat">Наведені нижче налаштування недоступні та приховані в Android 9 (API 28):</string>
     <string name="settings_mfi_address_hint">Адреса має починатися з http:// або https://. Токен необов’язковий і надсилається як токен авторизації Bearer.</string>
     <string name="app_name">DiPlay</string>
     <string name="language_section_title">Мова</string>
@@ -198,7 +198,6 @@
     <string name="drag_to_move_pinch_to_zoom">Перетягніть, щоб перемістити; зведіть або розведіть пальці, щоб змінити масштаб</string>
     <string name="draw_outside_safe_area">Показувати поза безпечною областю</string>
     <string name="driving_side">Розташування керма</string>
-    <string name="efficient_video">Ефективне відео</string>
     <string name="enable_the_car_s_bluetooth_and_pair_your_iphone_first">Увімкніть Bluetooth автомобіля та спочатку спарте iPhone.</string>
     <string name="error">Помилка</string>
     <string name="exit_application">ВИЙТИ ІЗ ЗАСТОСУНКУ</string>
@@ -212,8 +211,6 @@
     <string name="getting_carplay_ready">Підготовка CarPlay…</string>
     <string name="got_it">Зрозуміло</string>
     <string name="handshake_resolution_waiting_for_display">Роздільна здатність узгодження: очікування екрана</string>
-    <string name="hevc_h_265_video_transport">Передавання відео HEVC H.265</string>
-    <string name="hevc_software_decoder">Програмний декодер HEVC</string>
     <string name="hide_bottom_bar">Приховати нижню панель</string>
     <string name="hide_keyboard">Приховати клавіатуру</string>
     <string name="hide_the_car_s_system_bars_while_carplay_is_open">Приховувати системні панелі автомобіля, коли відкрито CarPlay.</string>
@@ -374,8 +371,6 @@
     <string name="usage_access_setup_needed_for_automatic_mode">Доступ до даних використання: потрібне налаштування для автоматичного режиму</string>
     <string name="use_a_usb_data_cable_and_the_car_s_usb_data_port_unlock_yo">Скористайтеся USB-кабелем для передавання даних і відповідним портом автомобіля. Розблокуйте iPhone та дозвольте CarPlay. Налаштовувати точку доступу не потрібно.</string>
     <string name="use_a_usb_data_cable_and_unlock_your_iphone_allow_trust_an">Скористайтеся USB-кабелем для передавання даних і розблокуйте iPhone.\nПідтвердьте довіру та CarPlay, якщо iPhone запитає.</string>
-    <string name="use_hevc_leave_off_for_the_widest_head_unit_compatibility">Використовувати HEVC. Залиште вимкненим для найширшої сумісності з головними пристроями.</string>
-    <string name="use_software_hevc_decoder">Використовувати програмний декодер HEVC</string>
     <string name="use_usage_content_type_routing_instead_of_stream_type">Спрямовувати за призначенням і типом вмісту замість типу потоку</string>
     <string name="use_your_last_connection_type_and_selected_iphone">Використовувати останній спосіб підключення та вибраний iPhone.</string>
     <string name="vpn_consent_was_denied">У дозволі на VPN відмовлено</string>
@@ -594,18 +589,7 @@
     <string name="carplay_dock_driver_side">З боку водія</string>
     <string name="carplay_dock_bottom">Знизу</string>
     <string name="carplay_dock_hint">Де CarPlay показує програми, годинник і стан. Між «З боку водія» і «Знизу» перемикається одразу; «Автоматично» залишає вибір iPhone і діє після перепідключення.</string>
-    <string name="split_screen_areas">CarPlay у розділеному екрані</string>
-    <string name="split_screen_areas_description">Коли головний пристрій показує DiPlay у розділеному екрані, CarPlay перемальовується під це вікно, а не зменшується з чорними смугами, і повертається на весь екран без перепідключення. Розмір вікна запам’ятовується першого разу, тож з наступного підключення картинка точно за розміром. Якщо панель програм на «Автоматично», CarPlay тоді ставить її знизу. Застосовується з наступного підключення.</string>
-    <string name="carplay_rotation">Повертати CarPlay разом з екраном без перепідключення</string>
-    <string name="carplay_rotation_description">Для головних пристроїв, у яких екран повертається. CarPlay отримує квадратну картинку з горизонтальним і вертикальним екраном, тож поворот екрана перемальовує CarPlay замість перепідключення. Більший квадрат може збільшити навантаження під час обробки відео та знизити плавність, особливо з «Чіткіше» на великому екрані. Якщо ви рідко повертаєте екран, вимкнення цього параметра може допомогти. Власна безпечна зона до квадратної картинки не застосовується. Застосовується з наступного підключення.</string>
-    <string name="carplay_rotation_picture">Квадратна картинка</string>
-    <string name="carplay_rotation_smoother">Плавніше (1920)</string>
-    <string name="carplay_rotation_sharper">Чіткіше (розмір екрана)</string>
     <string name="carplay_call_controls_experimental">Кнопки викликів CarPlay (експериментально)</string>
-    <string name="side_panel">Бічна панель поруч із CarPlay (експериментально)</string>
-    <string name="side_panel_description">CarPlay може переходити на дві третини екрана, а DiPlay показує в решті свою панель: з боку пасажира на горизонтальному екрані, знизу на вертикальному (годинник і заряд, якщо його зчитано). Показуйте й ховайте її з меню під час сесії. Застосовується з наступного підключення.</string>
-    <string name="side_panel_show">Бічна панель</string>
-    <string name="side_panel_full_screen">⤢ На весь екран</string>
     <string name="main_buffered_audio">Буферизована музика (експериментально)</string>
     <string name="main_buffered_audio_description">Застосунки, які це підтримують (наприклад, Apple Music), надсилають музику приблизно на дві хвилини наперед, тож короткі провали Wi-Fi не чути. Інші застосунки працюють як раніше. Перепідключає CarPlay.</string>
     <string name="car_button_in_carplay">Кнопка автомобіля в CarPlay</string>

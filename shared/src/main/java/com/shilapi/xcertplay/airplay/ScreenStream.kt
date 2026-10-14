@@ -11,13 +11,14 @@ import java.net.InetAddress
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
-enum class VideoCodec { H264, H265 }
+/** CS11 / this project decodes H.264 only: the ROM's VPU decodes HEVC in software, so H.265 is not offered. */
+enum class VideoCodec { H264 }
 
 /**
  * Receives one CarPlay screen stream on a TCP data port.
  *
  * Each message is a 128-byte AirPlayScreenHeader followed by a body: a clear VideoConfig
- * (avcC/hvcC) or a ChaCha20-Poly1305 sealed VideoFrame. The key is the DataStream output key
+ * (avcC) or a ChaCha20-Poly1305 sealed VideoFrame. The key is the DataStream output key
  * and the per-frame nonce is an 8-byte little-endian counter.
  */
 class ScreenStream(
@@ -231,7 +232,7 @@ class ScreenStream(
 private fun ByteArray.hexPrefix(length: Int): String =
     take(length).joinToString("") { "%02x".format(it.toInt() and 0xff) }
 
-/** Extracts the avcC/hvcC codec-data record from a VideoConfig payload. */
+/** Extracts the avcC codec-data record from a VideoConfig payload. */
 object ScreenCodec {
     fun decryptFrame(key: ByteArray, counter: Long, header: ByteArray, body: ByteArray): ByteArray =
         if (body.size < TAG_SIZE) body
@@ -279,25 +280,12 @@ object ScreenCodec {
 
     fun detectConfig(payload: ByteArray): Pair<VideoCodec, ByteArray> {
         for (index in 4..payload.size - 4) {
-            val fourcc = String(payload, index, 4, Charsets.US_ASCII)
-            when (fourcc) {
-                "hvcC" -> return VideoCodec.H265 to payload.copyOfRange(index + 4, payload.size)
-                "avcC" -> return VideoCodec.H264 to payload.copyOfRange(index + 4, payload.size)
+            if (String(payload, index, 4, Charsets.US_ASCII) == "avcC") {
+                return VideoCodec.H264 to payload.copyOfRange(index + 4, payload.size)
             }
         }
-        return if (looksLikeAvcC(payload)) VideoCodec.H264 to payload else VideoCodec.H265 to payload
+        return VideoCodec.H264 to payload
     }
-
-    private fun looksLikeAvcC(payload: ByteArray): Boolean {
-        if (payload.size < 9) return false
-        if ((payload[5].toInt() and 0x1f) < 1) return false
-        val spsLength = readU16Be(payload, 6)
-        if (8 + spsLength > payload.size) return false
-        return (payload[8].toInt() and 0x1f) == 7
-    }
-
-    private fun readU16Be(source: ByteArray, offset: Int): Int =
-        ((source[offset].toInt() and 0xff) shl 8) or (source[offset + 1].toInt() and 0xff)
 
     const val TAG_SIZE = 16
 }

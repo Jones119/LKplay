@@ -1018,7 +1018,6 @@ internal const val MAIN_BUFFERED_FEATURE = "mainBuffered"
 
 internal fun setupEnabledFeatures(config: AirPlayConfig, proposed: List<*>?): List<String> {
     val features = mutableListOf<String>()
-    if (config.hevc) features.add("hevc")
     features.add("iAPChannel")
     features.add("viewAreas")
     if (config.cluster != null) features.add("altScreen")

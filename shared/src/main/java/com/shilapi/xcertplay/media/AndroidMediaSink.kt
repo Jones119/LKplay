@@ -172,7 +172,6 @@ class AndroidMediaSink(
     surface: Surface? = null,
     private val videoWidth: Int = 1280,
     private val videoHeight: Int = 720,
-    private val preferSoftwareHevcDecoder: Boolean = false,
     private val advancedAudioChannelMapping: Boolean = false,
     private val audioFocusEnabled: Boolean = false,
     private val mediaChannel: Int = 0,
@@ -473,7 +472,6 @@ class AndroidMediaSink(
         surface,
         videoWidth,
         videoHeight,
-        preferSoftwareHevcDecoder,
         requestKeyFrame = { requestVideoRecovery(type) },
         report = { videoDiagnosticHandlers[type]?.invoke(it) },
         statsLabel = statsLabel,
@@ -504,7 +502,6 @@ private class VideoDecoder(
     surface: Surface?,
     private val width: Int,
     private val height: Int,
-    private val preferSoftwareHevcDecoder: Boolean,
     private val requestKeyFrame: () -> Unit,
     private val report: (String) -> Unit,
     statsLabel: String? = null,
@@ -656,14 +653,10 @@ private class VideoDecoder(
         releaseDecoder()
         referenceChain.reset()
         val surface = outputSurface ?: return
-        val codec = config.codec
+        // CS11: H.264 only (see [VideoCodec]); the avcC parameter sets are the decoder's CSD.
+        val mime = MediaFormat.MIMETYPE_VIDEO_AVC
         val codecData = config.codecData
-        val mime = if (codec == VideoCodec.H265) MediaFormat.MIMETYPE_VIDEO_HEVC
-        else MediaFormat.MIMETYPE_VIDEO_AVC
-        val csd = if (codec == VideoCodec.H265) {
-            MediaCodecSupport.hevcCodecSpecificData(codecData).takeIf { it.isNotEmpty() }
-                ?.let { listOf(it) } ?: emptyList()
-        } else {
+        val csd = run {
             val (sps, pps) = MediaCodecSupport.avcParameterSets(codecData)
             listOfNotNull(
                 sps.takeIf { it.isNotEmpty() }?.let { START_CODE + it },
@@ -778,24 +771,7 @@ private class VideoDecoder(
         }?.name
     }
 
-    private fun createDecoder(mime: String): MediaCodec {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
-            mime == MediaFormat.MIMETYPE_VIDEO_HEVC &&
-            preferSoftwareHevcDecoder
-        ) {
-            val software = MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos.firstOrNull {
-                !it.isEncoder && it.isSoftwareOnly && mime in it.supportedTypes
-            }
-            if (software != null) {
-                try {
-                    return MediaCodec.createByCodecName(software.name)
-                } catch (error: Exception) {
-                    Log.w(TAG, "software HEVC decoder unavailable name=${software.name}", error)
-                }
-            }
-        }
-        return MediaCodec.createDecoderByType(mime)
-    }
+    private fun createDecoder(mime: String): MediaCodec = MediaCodec.createDecoderByType(mime)
 
     private fun changeSurface(surface: Surface?) {
         if (outputSurface === surface) return
