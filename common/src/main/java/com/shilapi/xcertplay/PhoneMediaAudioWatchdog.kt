@@ -260,9 +260,21 @@ private fun bondedIphoneAddress(adapter: android.bluetooth.BluetoothAdapter?): S
  */
 internal val BLUETOOTH_MAC = Regex("^[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){5}$")
 
-/** [address] when it really is a MAC, null otherwise. */
-private fun validPhoneAddress(address: String?): String? =
-    address?.trim()?.takeIf { BLUETOOTH_MAC.matches(it) }
+/**
+ * [address] in the spelling this head unit's Bluetooth stack accepts, or null when it is not a MAC.
+ *
+ * iOS reports its address lower case (`deviceId=9c:92:4f:02:b7:b7`, measured 2026-10-14/15) and that is
+ * what gets stored, but the car answers with upper case (`9C:92:4F:02:B7:B7` in logcat's
+ * `BtServiceProxy` / our own `reqA2dpDisconnect` line). Upper case is the form the stack takes: on the
+ * cold-start connection of 2026-10-15 the stored lower case cost both paths a release —
+ * `phone media watchdog not started (bad phone address)` (framework `getRemoteDevice` runs the address
+ * through `checkBluetoothAddress`, which accepts only `0-9A-F`) and `reqA2dpDisconnect(9c:92:4f:02:b7:b7)=false`
+ * — while the reconnect four minutes later answered `reqA2dpDisconnect(9C:92:4F:02:B7:B7)=true` and the
+ * stack then showed `connectState(a2dp_hfp) 9C:92:4F:02:B7:B7>110_110`. Canonicalising once, here,
+ * covers every caller: the watchdog's `getRemoteDevice` and the release's vendor call both use it.
+ */
+internal fun validPhoneAddress(address: String?): String? =
+    address?.trim()?.takeIf { BLUETOOTH_MAC.matches(it) }?.uppercase()
 
 internal fun PhoneMediaAudioWatchdog.startQuietly() {
     runCatching { start() }.onFailure { error ->
@@ -315,14 +327,66 @@ internal fun releasePhoneA2dp(context: Context, onLog: (String) -> Unit = {}): B
         val hfpReleased = if (hfpConnected == true) runCatching { vendor.disconnectHfp() }.getOrNull() else null
         say(
             "a2dp release address=$address source=${if (stored != null) "stored" else "bonded"} " +
-                "connected=$connected hfp=$hfpConnected released=$released hfpReleased=$hfpReleased",
+                "ready=${vendor.serviceReady()} connected=$connected hfp=$hfpConnected " +
+                "released=$released hfpReleased=$hfpReleased",
         )
         runCatching { DiPlayPreferences.savePhone(context, address, DiPlayPreferences.phoneName(context)) }
-        released == true
+        // Either profile going down is the release the session needs: reporting only A2DP made an
+        // HFP-only release read as "nothing happened" (2026-10-14 logged `released=false` on the same
+        // line as `hfpReleased=true`).
+        released == true || hfpReleased == true
     }.getOrElse { error ->
         say("a2dp release failed: ${error.javaClass.name}: ${error.message}")
         false
     }
+}
+
+/** One ladder at a time: the session start and iOS's own command both ask for the same release. */
+private val releaseLadderRunning = java.util.concurrent.atomic.AtomicBoolean(false)
+
+/**
+ * Runs [releasePhoneA2dp] now, and again if the head unit's Bluetooth API refuses it.
+ *
+ * Measured on the car on 2026-10-15 12:06, the first connection of a cold start: `Bt.create()` registers
+ * the vendor callbacks and fills its cache at 11.04-11.08, the session's release ran at 11.15 and was
+ * answered `ready=… connected=false hfp=false released=false`, while the head unit's own stack held the
+ * phone at `9C:92:4F:02:B7:B7 140_140` throughout (logcat, XCBTServiceLog) — so nothing was released and
+ * Bluetooth stayed attached, which is the regression the owner reported. The identical code answered
+ * `connected=true released=true hfpReleased=true` on the reconnect four minutes later, when that handle
+ * had already been created once. The ladder covers the window in between; it stops at the first success.
+ * A second request while one is running joins it rather than doubling the attempts.
+ */
+internal fun releasePhoneA2dpRetrying(
+    context: Context,
+    onLog: (String) -> Unit = {},
+    delaysMillis: LongArray = longArrayOf(0, 1_000, 3_000, 7_000, 15_000),
+) {
+    if (!releaseLadderRunning.compareAndSet(false, true)) {
+        onLog("a2dp release ladder already running; this request joins it")
+        return
+    }
+    val worker = HandlerThread("diplay-a2dp-release").apply { start() }
+    val handler = Handler(worker.looper)
+    var attempt = 0
+    val task = object : Runnable {
+        override fun run() {
+            attempt++
+            val released = runCatching { releasePhoneA2dp(context) { onLog("a2dp release attempt=$attempt $it") } }
+                .getOrDefault(false)
+            val next = if (released) null else delaysMillis.getOrNull(attempt)
+            if (next == null) {
+                onLog(
+                    "a2dp release ladder finished after attempt=$attempt " +
+                        "(released=$released, no further retry)",
+                )
+                releaseLadderRunning.set(false)
+                worker.quitSafely()
+                return
+            }
+            handler.postDelayed(this, next)
+        }
+    }
+    handler.post(task)
 }
 
 /** The logcat tag the A2DP release uses, shared with [PhoneMediaAudioWatchdog]'s own lines. */
@@ -349,6 +413,18 @@ private class VendorA2dpControl(
         val value = a2dp?.let { invoke(it, "isA2dpConnected") ?: invoke(it, "getA2dpConnectionState") } ?: return null
         return (value as? Boolean) ?: ((value as? Int) == CONNECTION_STATE_CONNECTED)
     }
+
+    /**
+     * The vendor's own readiness flags, logged with each release so a refusal names its reason.
+     *
+     * Measured on the car on 2026-10-15 12:06 (cold start): `Bt.create()` makes the A2DP/HFP handles
+     * register their callbacks and learn their state at 11.05-11.08, and the release attempted at 11.15
+     * was answered `connected=false hfp=false released=false` although the stack had the phone at
+     * `9C:92:4F:02:B7:B7 140_140` the whole time (logcat, XCBTServiceLog).
+     */
+    fun serviceReady(): String =
+        "a2dp=${a2dp?.let { invoke(it, "isA2dpServiceReady") }} " +
+            "hfp=${hfp?.let { invoke(it, "isHfpServiceReady") }}"
 
     /** True when the head unit accepted a disconnect for the phone's media profile. */
     fun disconnect(): Boolean? = request(a2dp, "reqA2dpDisconnect", "getA2dpConnectedAddress", disconnecting = true)

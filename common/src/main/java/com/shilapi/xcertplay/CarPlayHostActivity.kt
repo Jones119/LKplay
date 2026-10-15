@@ -3475,6 +3475,10 @@ class CarPlayHostActivity : ComponentActivity() {
                 // Started here as well as by DiPlaySessionService: the release is what keeps the phone
                 // playing at all, and the service is not always the thing that brought the session up.
                 mediaAudioWatchdog.startQuietly()
+                // Released here too, without waiting for iOS's `disableBluetooth`: on a cold start the head
+                // unit's Bluetooth API answers "not connected" for the first attempt (measured on the car
+                // on 2026-10-15, see `releasePhoneA2dpRetrying`), and the command can also arrive late.
+                releasePhoneA2dpRetrying(this@CarPlayHostActivity, onLog = { appendLog(it) })
                 runOnUiThread {
                     if (controllerGeneration != restartGeneration) {
                         return@runOnUiThread
@@ -3507,7 +3511,12 @@ class CarPlayHostActivity : ComponentActivity() {
                 runCatching {
                     android.util.Log.i("DiPlay-BtAudio", "disableBluetooth received; releasing the phone's A2DP link")
                     appendLog("CarPlay asked for Bluetooth off; releasing the phone's A2DP link")
-                    val released = releasePhoneA2dp(this@CarPlayHostActivity) { appendLog(it) }
+                    val released = runCatching { releasePhoneA2dp(this@CarPlayHostActivity) { appendLog(it) } }
+                        .getOrDefault(false)
+                    // The ladder's first attempt is immediate, so the command's own release is kept and the
+                    // retries its cold-start refusal needs are added on top (2026-10-15, see
+                    // `releasePhoneA2dpRetrying`).
+                    releasePhoneA2dpRetrying(this@CarPlayHostActivity, onLog = { appendLog(it) })
                     android.util.Log.i("DiPlay-BtAudio", "disableBluetooth release -> a2dpReleased=$released")
                     appendLog("released the phone's A2DP link=$released")
                     mediaAudioWatchdog.startQuietly()

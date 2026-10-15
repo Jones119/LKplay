@@ -2,6 +2,7 @@ package com.shilapi.xcertplay
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -58,5 +59,24 @@ class PhoneMediaAudioWatchdogTest {
         subject.tick()
         subject.restore()
         assertEquals(1, link.restores)
+    }
+
+    /**
+     * iOS reports its address lower case and that is what is stored, while this head unit's stack only
+     * accepts upper case: measured on the car on 2026-10-15, the stored lower case made the framework
+     * answer `phone media watchdog not started (bad phone address)` and made the vendor answer
+     * `reqA2dpDisconnect(9c:92:4f:02:b7:b7)=false`, while the reconnect — by then answering with its own
+     * upper-case address — released both profiles. Both callers take the address from here.
+     */
+    @Test fun thePhoneAddressIsCanonicalisedToTheCarsSpelling() {
+        assertEquals("9C:92:4F:02:B7:B7", validPhoneAddress("9c:92:4f:02:b7:b7"))
+        assertEquals("9C:92:4F:02:B7:B7", validPhoneAddress("  9C:92:4F:02:B7:B7  "))
+    }
+
+    @Test fun aValueThatIsNotAMacIsRefused() {
+        assertNull(validPhoneAddress(null))
+        assertNull(validPhoneAddress(""))
+        assertNull(validPhoneAddress("192.168.43.1"))
+        assertNull(validPhoneAddress("9c:92:4f:02:b7"))
     }
 }
