@@ -3467,11 +3467,48 @@ class CarPlayHostActivity : ComponentActivity() {
      */
     private val mediaAudioWatchdog by lazy { PhoneMediaAudioWatchdog(this) { appendLog(it) } }
 
+    /** Whether a lost session still owes the phone its Bluetooth back. See [MediaAudioRestorePolicy]. */
+    private val mediaAudioRestorePolicy = MediaAudioRestorePolicy()
+
+    /**
+     * Gives the phone its Bluetooth back once a lost session has stayed lost for the whole grace.
+     *
+     * Re-checked against the live state rather than trusting the timer alone: a session that came back
+     * (or a shutdown that already restored) makes this a no-op.
+     */
+    private val mediaAudioRestore = object : Runnable {
+        override fun run() {
+            if (!mediaAudioRestorePolicy.graceElapsed()) return
+            if (shuttingDown.get() || CarPlayBackgroundSession.active) return
+            appendLog(
+                "no CarPlay session for ${MEDIA_AUDIO_RESTORE_GRACE_MILLIS}ms; " +
+                    "giving the phone's Bluetooth back",
+            )
+            restorePhoneMediaAudio()
+        }
+    }
+
+    /** Arms the grace on the first loss of a session; the timer's own firing is the only consumer. */
+    private fun scheduleMediaAudioRestore() {
+        if (mediaAudioRestorePolicy.sessionLost()) {
+            mainHandler.postDelayed(mediaAudioRestore, MEDIA_AUDIO_RESTORE_GRACE_MILLIS)
+        }
+    }
+
+    /** A session is live again (or the app is going away): the phone is not owed anything yet. */
+    private fun cancelMediaAudioRestore() {
+        mediaAudioRestorePolicy.sessionActive()
+        mainHandler.removeCallbacks(mediaAudioRestore)
+    }
+
     private fun createSessionListener(controllerGeneration: Int): AirPlaySessionListener =
         object : AirPlaySessionListener {
             private val diagnosticLog = sessionLog
 
             override fun onSessionActive(session: AirPlaySession) {
+                // A live session is no longer owed the phone's Bluetooth, so a grace armed by an earlier
+                // loss is dropped before anything else can fire it.
+                cancelMediaAudioRestore()
                 // Started here as well as by DiPlaySessionService: the release is what keeps the phone
                 // playing at all, and the service is not always the thing that brought the session up.
                 mediaAudioWatchdog.startQuietly()
@@ -4000,6 +4037,9 @@ class CarPlayHostActivity : ComponentActivity() {
         if (menuOpen) recoveryPendingAfterMenu = true
         if (shuttingDown.get() || menuOpen || handshakeResetInProgress || startupRetryStopped) return
         if (reconnectScheduled) return
+        // The session is gone from here on, and wired loss is retried indefinitely, so nothing else
+        // will ever stop the watchdogs: arm the grace that gives the phone its Bluetooth back.
+        scheduleMediaAudioRestore()
         val startupDelay = if (startupFailure != null && startupFailure != WirelessStartupFailure.HOTSPOT_CONFIGURATION)
             startupRetryBudget.nextDelayMillis() else null
         if (startupFailure != null && startupDelay == null) {
@@ -4202,6 +4242,9 @@ class CarPlayHostActivity : ComponentActivity() {
 
     private fun shutdown(terminateProcess: Boolean, reason: String, completion: () -> Unit = {}) {
         if (!shuttingDown.compareAndSet(false, true)) { completion(); return }
+        // Shutdown restores through DiPlaySessionService's own stop; a grace still pending would fire
+        // against a stack that is already gone.
+        cancelMediaAudioRestore()
         startupRetryBudget.disconnected()
         restartGeneration += 1
         mainHandler.removeCallbacks(applyDisplaySize)
@@ -4702,6 +4745,13 @@ class CarPlayHostActivity : ComponentActivity() {
         const val CONFIGURATION_POLL_INTERVAL_MILLIS = 2_000L
         const val RECONNECT_DELAY_MILLIS = 2_000L
         const val IAP_TUNNEL_RECONNECT_DELAY_MILLIS = 15_000L
+        /**
+         * How long a lost session may stay lost before the phone gets its Bluetooth back. Long enough
+         * that a cable that merely moved (or an iAP tunnel that is being rebuilt) comes back first, so
+         * the phone's Bluetooth does not flap; short enough that an actually-pulled cable gives the
+         * head unit's own hands-free back while the driver is still in the car.
+         */
+        const val MEDIA_AUDIO_RESTORE_GRACE_MILLIS = 25_000L
         const val CONTROLLER_CLOSE_TIMEOUT_MILLIS = 4_000L
         const val AUDIO_CAPTURE_MARKER = "audio-capture.enabled"
         const val AUDIO_CAPTURE_DIRECTORY = "audio-captures"

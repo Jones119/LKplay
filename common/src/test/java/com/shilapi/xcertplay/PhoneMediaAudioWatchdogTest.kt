@@ -79,4 +79,40 @@ class PhoneMediaAudioWatchdogTest {
         assertNull(validPhoneAddress("192.168.43.1"))
         assertNull(validPhoneAddress("9c:92:4f:02:b7"))
     }
+
+    /**
+     * Pulling the cable is what the driver does most, and it was the one path that never gave the
+     * phone's Bluetooth back: measured on the car on 2026-10-15 13:12, `reconnectAfterLoss` retried
+     * forever, `DiPlaySessionService` was never stopped, and the head unit held the phone released for
+     * the rest of the capture while both watchdogs kept ticking. The grace below is the only thing
+     * that ever restores it.
+     */
+    @Test fun theFirstLossOfASessionArmsTheGraceAndARepeatDoesNot() {
+        val policy = MediaAudioRestorePolicy()
+        assertTrue(policy.sessionLost())
+        assertFalse(policy.sessionLost())
+    }
+
+    @Test fun anElapsedGraceHandsThePhoneBack() {
+        val policy = MediaAudioRestorePolicy()
+        policy.sessionLost()
+        assertTrue(policy.graceElapsed())
+        // Spent: the timer must not be able to fire a second restore on its own.
+        assertFalse(policy.graceElapsed())
+    }
+
+    @Test fun aSessionThatCameBackOwesThePhoneNothing() {
+        val policy = MediaAudioRestorePolicy()
+        policy.sessionLost()
+        policy.sessionActive()
+        assertFalse(policy.graceElapsed())
+    }
+
+    @Test fun theNextLossAfterASessionIsArmedAgain() {
+        val policy = MediaAudioRestorePolicy()
+        policy.sessionLost()
+        policy.sessionActive()
+        assertTrue(policy.sessionLost())
+        assertTrue(policy.graceElapsed())
+    }
 }

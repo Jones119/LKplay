@@ -49,6 +49,54 @@ internal class PhoneMediaAudioWatcher(
 }
 
 /**
+ * Decides when a lost CarPlay session has been gone long enough to give the phone's Bluetooth back.
+ *
+ * The release is scoped to a session, so the end of one owes the phone its link back: calls through
+ * the head unit's own hands-free, and its own Bluetooth music, both need it. The grace exists
+ * because a wired loss can be transient -- the cable moves, the session comes straight back -- and
+ * restoring on the first lost packet would flap the phone's Bluetooth on and off for nothing.
+ *
+ * Measured on the car on 2026-10-15 13:12: with no grace at all (the only path that ever restored
+ * was the notification's own "Disconnect"), pulling the cable left the head unit holding the phone
+ * released for the rest of the capture -- no `connectState` line followed `110_110`, and the app
+ * itself had already worked out `sessionActive=false` while both watchdogs kept ticking.
+ */
+internal class MediaAudioRestorePolicy {
+    private var pending = false
+
+    /** A session is live again: nothing is owed. */
+    @Synchronized fun sessionActive() {
+        pending = false
+    }
+
+    /** True when the caller should arm the grace timer -- the first loss of a session, and only it. */
+    @Synchronized fun sessionLost(): Boolean {
+        if (pending) return false
+        pending = true
+        return true
+    }
+
+    /** The grace timer fired: true when the session is still gone, so the phone must be given back. */
+    @Synchronized fun graceElapsed(): Boolean {
+        if (!pending) return false
+        pending = false
+        return true
+    }
+}
+
+/**
+ * Every watchdog this process built, so the end of a session can stop all of them at once.
+ *
+ * Two live at a time and only one of them is ever stopped by its owner: `DiPlaySessionService` stops
+ * its own on destroy, while the host activity's -- the one wired to the private log -- is never
+ * stopped anywhere. Measured on the car on 2026-10-15 13:13: both were ticking
+ * `bluetooth profiles a2dp=false hfp=false` (interleaved 1.1 s apart, one per 5 s), so a single
+ * `stop()` and the `restore()` inside it could not stick: the survivor re-releases within one tick.
+ */
+private val liveWatchdogs: MutableSet<PhoneMediaAudioWatchdog> =
+    java.util.Collections.newSetFromMap(java.util.WeakHashMap())
+
+/**
  * Runs [PhoneMediaAudioWatcher] on a background thread against the real A2DP profile.
  *
  * The iPhone may re-establish A2DP on its own, so the check is periodic rather than a one-shot.
@@ -66,6 +114,10 @@ internal class PhoneMediaAudioWatchdog(
     private val context: Context,
     private val onLog: (String) -> Unit = {},
 ) {
+    init {
+        liveWatchdogs.add(this)
+    }
+
     private var thread: HandlerThread? = null
     private var handler: Handler? = null
     private var proxy: BluetoothProfile? = null
@@ -135,6 +187,8 @@ internal class PhoneMediaAudioWatchdog(
         thread = worker
         handler = Handler(worker.looper)
         running = true
+        // A session holds the link again, so this watchdog may release it from here on.
+        restoreRequested.set(false)
         log("phone media watchdog started for $address")
         handler?.post(tick)
     }
@@ -166,6 +220,8 @@ internal class PhoneMediaAudioWatchdog(
         private val vendor = VendorA2dpControl(context, phoneAddress, ::log)
 
         override fun state(): MediaAudioLinkState {
+            // A session is owed its link back: nothing this watchdog asks may put the phone down again.
+            if (restoreRequested.get()) return MediaAudioLinkState.UNKNOWN
             // A2DP and HFP are released independently. Once CarPlay owns the media audio the A2DP link
             // is already gone while HFP still carries phone calls to the head unit — and that is
             // exactly when the head unit's own dialer takes a call over. Either profile being
@@ -187,6 +243,8 @@ internal class PhoneMediaAudioWatchdog(
         }
 
         override fun release(): Boolean {
+            // See `state()`: a tick already past its own guard must not undo a restore either.
+            if (restoreRequested.get()) return false
             vendor.disconnect()?.let { if (it) return true }
             // CarPlay has to own phone calls: while HFP stays connected the head unit's own dialer
             // takes the call over and CarPlay's telephony stream never carries its audio.
@@ -194,8 +252,16 @@ internal class PhoneMediaAudioWatchdog(
             return callProfileMethod("disconnect")
         }
 
-        override fun restore(): Boolean =
-            vendor.connectHfp() == true || vendor.connect() == true || callProfileMethod("connect")
+        override fun restore(): Boolean {
+            // Both profiles are asked for, with no short-circuit. `release()` keeps the early-return
+            // shape because the 5 s tick gives it a second chance; this runs once, from `stop()`, so
+            // an HFP-first answer would leave A2DP down for good. The two do come up independently on
+            // this car: measured 2026-10-15 13:03, iOS re-attaching by itself walked
+            // `110_120 -> 120_120 -> 120_140 -> 140_140`, A2DP first, HFP second.
+            val handsFree = vendor.connectHfp() == true
+            val media = vendor.connect() == true
+            return handsFree || media || callProfileMethod("connect")
+        }
     }
 
     /**
@@ -345,6 +411,21 @@ internal fun releasePhoneA2dp(context: Context, onLog: (String) -> Unit = {}): B
 private val releaseLadderRunning = java.util.concurrent.atomic.AtomicBoolean(false)
 
 /**
+ * Set when the session ends, so a ladder still in flight cannot re-release what [restorePhoneMediaAudio]
+ * has just given back. The ladder spans ~26 s of delays, which is long enough to matter.
+ */
+private val releaseCancelled = java.util.concurrent.atomic.AtomicBoolean(false)
+
+/**
+ * Set while the phone is owed its link back, and cleared when a session starts a watchdog again.
+ *
+ * [restorePhoneMediaAudio] and a tick that is already inside its vendor call can overlap, and that
+ * tick's disconnect would land after the restore's connect: down again, with no watchdog left running
+ * to correct it. A tick that has not started yet is covered by `running`; this covers the one that has.
+ */
+private val restoreRequested = java.util.concurrent.atomic.AtomicBoolean(false)
+
+/**
  * Runs [releasePhoneA2dp] now, and again if the head unit's Bluetooth API refuses it.
  *
  * Measured on the car on 2026-10-15 12:06, the first connection of a cold start: `Bt.create()` registers
@@ -365,11 +446,18 @@ internal fun releasePhoneA2dpRetrying(
         onLog("a2dp release ladder already running; this request joins it")
         return
     }
+    releaseCancelled.set(false)
     val worker = HandlerThread("diplay-a2dp-release").apply { start() }
     val handler = Handler(worker.looper)
     var attempt = 0
     val task = object : Runnable {
         override fun run() {
+            if (releaseCancelled.get()) {
+                onLog("a2dp release ladder cancelled after attempt=$attempt; the session ended")
+                releaseLadderRunning.set(false)
+                worker.quitSafely()
+                return
+            }
             attempt++
             val released = runCatching { releasePhoneA2dp(context) { onLog("a2dp release attempt=$attempt $it") } }
                 .getOrDefault(false)
@@ -387,6 +475,29 @@ internal fun releasePhoneA2dpRetrying(
         }
     }
     handler.post(task)
+}
+
+/**
+ * Stops every watchdog and hands the phone's Bluetooth back.
+ *
+ * This is what a CarPlay session owes the phone when it ends: the head unit's own hands-free and its
+ * own Bluetooth music both need the link, and the "not connected" state is one *we* created. Only the
+ * notification's "Disconnect" ever reached a restore before -- measured on the car on 2026-10-15
+ * 13:12, pulling the cable left `reconnectAfterLoss` retrying forever, so `DiPlaySessionService` was
+ * never stopped and no watchdog ever reached `stop()`; the head unit held the phone released for the
+ * rest of the capture, with no `connectState` line after `110_110`, while the app itself had already
+ * worked out `sessionActive=false`.
+ *
+ * Every instance has to go, not just the service's: the host activity's watchdog is never stopped by
+ * its owner, and one survivor re-releases within its next 5 s tick. A release ladder still in flight
+ * is cancelled for the same reason -- it spans ~26 s and would otherwise undo exactly this.
+ */
+internal fun restorePhoneMediaAudio() {
+    // Set before stopping anything: `stop()` cannot interrupt a tick that is already inside its vendor
+    // call, and that tick's disconnect would otherwise undo the connect below.
+    restoreRequested.set(true)
+    releaseCancelled.set(true)
+    liveWatchdogs.toList().forEach { runCatching { it.stop() } }
 }
 
 /** The logcat tag the A2DP release uses, shared with [PhoneMediaAudioWatchdog]'s own lines. */
