@@ -1015,6 +1015,23 @@ class CarPlayHostActivity : ComponentActivity() {
         sessionLog?.close()
         sessionLog = null
         super.onDestroy()
+        // Ending the screen ends the process.
+        //
+        // The userspace lwIP stack and its netif belong to the process, and the native side has no way to
+        // reset them - only per-socket close. Finishing the activity does not end the process either: Android
+        // keeps it cached, so the next plug-in runs the host again on the same stack. Measured on the car
+        // 2026-10-18 after a burst of swipes: the link reported rxFrames=7104 while injected=29, seven
+        // `ncm-status-in` threads were alive from six reconnect attempts, and re-plugging the cable never
+        // recovered because every attempt reused the wedged stack.
+        //
+        // Leaving the activity is the point at which this app has nothing to keep, so it takes the process
+        // with it. A rotation or a temporary stop is not that point - only a real finish is.
+        if (isFinishing && !isChangingConfigurations) {
+            mainHandler.postDelayed(
+                { android.os.Process.killProcess(android.os.Process.myPid()) },
+                PROCESS_EXIT_DELAY_MILLIS,
+            )
+        }
     }
 
     private fun buildContentView(): View {
@@ -4911,6 +4928,9 @@ class CarPlayHostActivity : ComponentActivity() {
 
     private companion object {
         const val TAG = "xcertplay-usb"
+
+        /** Grace before the process exits with a finished screen; see `onDestroy`. */
+        private const val PROCESS_EXIT_DELAY_MILLIS = 400L
         /** Rows the connecting checklist may occupy; see `renderConnectChecklist`. */
         private const val CHECKLIST_VISIBLE_NODES = 5
         const val SCREEN_TYPE_MAIN = 110
