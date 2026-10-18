@@ -3128,12 +3128,37 @@ class CarPlayHostActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * A handshake canvas forced through `debug.diplay.canvas`, for trying sizes without a rebuild.
+     *
+     * `adb shell setprop debug.diplay.canvas 1200x700` then reconnect; `''` clears it. The value is taken as
+     * the stream size the iPhone is asked for, so a different aspect ratio than the view will letterbox.
+     * Kept read-only and opt-in: an absent or malformed property changes nothing.
+     */
+    private fun debugCanvasOverride(): DisplaySize? = runCatching {
+        val raw = Class.forName("android.os.SystemProperties")
+            .getMethod("get", String::class.java)
+            .invoke(null, "debug.diplay.canvas") as? String
+        val text = raw?.trim().orEmpty()
+        if (text.isEmpty()) return@runCatching null
+        val parts = text.lowercase().split("x")
+        if (parts.size != 2) return@runCatching null
+        val width = parts[0].trim().toIntOrNull() ?: return@runCatching null
+        val height = parts[1].trim().toIntOrNull() ?: return@runCatching null
+        if (width < 320 || height < 240 || width > 4096 || height > 4096) return@runCatching null
+        DisplaySize(width, height)
+    }.getOrNull()
+
     private fun createAirPlayConfig(size: DisplaySize): AirPlayConfig {
         // The home settings page can change the name while this host stays alive.
         if (!menuOpen) oemLabel = AirPlayPersistence.loadOemLabel(this)
-        val safeWidth = (size.width / 2 * 2).coerceAtLeast(2)
-        val safeHeight = (size.height / 2 * 2).coerceAtLeast(2)
+        val forced = debugCanvasOverride()
+        val safeWidth = ((forced?.width ?: size.width) / 2 * 2).coerceAtLeast(2)
+        val safeHeight = ((forced?.height ?: size.height) / 2 * 2).coerceAtLeast(2)
         val alignedSize = DisplaySize(safeWidth, safeHeight)
+        if (forced != null) {
+            appendLog("Canvas override active: negotiating ${safeWidth}x$safeHeight instead of ${size.width}x${size.height}")
+        }
         val physical = resolvePhysicalSize(alignedSize)
         val knobPrimary = AndroidTvInputMode.shouldUseKnobAsPrimaryInput(this)
         val baseDisplay = AirPlayDisplayConfig(
