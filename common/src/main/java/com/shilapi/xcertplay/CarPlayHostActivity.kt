@@ -1160,6 +1160,12 @@ class CarPlayHostActivity : ComponentActivity() {
         }
         paintWaitingScreen()
         viewport.addView(panel, FrameLayout.LayoutParams(-1, -2, Gravity.CENTER))
+        // Opaque while connecting, so the wait shows this app's background and the step panel instead of the
+        // black the video TextureView paints until its first frame. The viewport is hidden the moment a stream
+        // becomes active (`onScreenStreamStateChanged` -> `updateDebugOverlays`), so it never covers video.
+        // Measured on the car 2026-10-18: surface creation 1080 ms + first layout 634 ms of black before the
+        // connecting screen appeared at all.
+        viewport.setBackgroundColor(settingsTheme.background)
         root.addView(viewport, FrameLayout.LayoutParams(-1, -1))
         var preparationHeight = -1
         fun updatePreparationLayout() {
