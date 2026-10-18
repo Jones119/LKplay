@@ -1,5 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="audio_decoder">Аудіодекодер</string>
+    <string name="audio_decoder_platform">Платформний (MediaCodec)</string>
+    <string name="audio_decoder_freescale">Freescale AAC (вендор)</string>
+    <string name="audio_decoder_description">Яким декодером відтворюється звук CarPlay. Платформний (MediaCodec) — типовий і працює завжди. Декодер Freescale завантажується із системних бібліотек пристрою і пропонується як експеримент; якщо його немає або він не запускається, використовується платформний, а причина пишеться в журнал.</string>
+    <string name="audio_decoder_unavailable">Недоступно на цьому пристрої (%1$s)</string>
     <string name="existing_wifi_title">Наявна Wi-Fi / Одна LAN</string>
     <string name="existing_wifi_description">Використовуйте наявний роутер або портативну Wi-Fi. iPhone та автомобіль залишаються в одній мережі з доступом до Інтернету.</string>
     <string name="existing_wifi_hint">Наявна Wi-Fi · Підключіть обидва пристрої до однієї Wi-Fi та увімкніть Bluetooth. Точка доступу автомобіля не потрібна.</string>
@@ -16,6 +21,7 @@
     <string name="built_in_car_hotspot">Вбудована точка доступу автомобіля</string>
     <string name="wifi_direct">Wi-Fi Direct</string>
     <string name="hotspot_hint_manual">Вбудована точка доступу · Тримайте точку доступу автомобіля, Bluetooth і Wi-Fi на iPhone увімкненими.</string>
+    <string name="turn_on_the_car_hotspot_in_the_car_settings_then_connect_again">Не вдалося прочитати дані точки доступу з цього головного пристрою. Увімкніть точку доступу автомобіля в налаштуваннях автомобіля та підключіться знову.</string>
     <string name="hotspot_hint_p2p">Wi-Fi Direct · Тримайте Wi-Fi автомобіля, Bluetooth і Wi-Fi на iPhone увімкненими.</string>
     <string name="cluster_size_standard">Стандартний · найчіткіший</string>
     <string name="cluster_size_larger">Більший · типовий</string>
@@ -29,7 +35,6 @@
     <string name="hotspot_mode_manual_desc">Використовувати власну точку доступу автомобіля. Якщо доступно, виберіть 5 ГГц у налаштуваннях автомобіля.</string>
     <string name="hotspot_mode_p2p_desc">Альтернативний спосіб. Потрібен увімкнений Wi-Fi автомобіля; на частоті 2,4 ГГц можливі затримки.</string>
     <string name="hotspot_details_off">Точку доступу вимкнено · Увімкніть її в налаштуваннях автомобіля.</string>
-    <string name="hotspot_details_saved">Дані збережено · Перед підключенням перевірте, чи ввімкнено точку доступу автомобіля.</string>
     <string name="permission_enabled_ready">Дозвіл надано · готово до використання</string>
     <string name="permission_not_enabled">Дозвіл ще не надано</string>
     <string name="clipboard_usage_access">Доступ DiPlay до даних використання</string>
@@ -79,7 +84,6 @@
     <string name="audio_saved_value">Збережено: %1$d</string>
     <string name="about_public_preview_prefix">Попередня версія ·\u0020</string>
     <string name="msg_car_hotspot_connect">DiPlay підключається через точку доступу автомобіля «%1$s». Увімкніть її в налаштуваннях автомобіля, а потім підключіться.</string>
-    <string name="edit_saved_hotspot_prefix">Змінити збережену точку доступу ·\u0020</string>
     <string name="cluster_adb_multi_device">Якщо ADB показує кілька пристроїв, виконайте adb -s &lt;car-device-ID&gt; shell appops set %1$s GET_USAGE_STATS allow. Ідентифікатор можна знайти командою adb devices.</string>
     <string name="status_ready_for_prefix">Готово до підключення:\u0020</string>
     <string name="audio_stream_unavailable">Аудіопотік типу %1$d тут недоступний (стан=%2$s)</string>
@@ -165,6 +169,8 @@
     <string name="connect_when_diplay_opens">Підключати під час відкриття DiPlay</string>
     <string name="connect_when_iphone_bluetooth_connects">Підключати після повторного з’єднання вибраного iPhone</string>
     <string name="connect_when_iphone_bluetooth_connects_description">Після пробудження авто відкривати DiPlay і запускати бездротовий CarPlay, коли вибраний iPhone підключиться через Bluetooth. Деякі пристрої обмежують фоновий запуск.</string>
+    <string name="resume_carplay_on_open">Повертатися в CarPlay при відкритті DiPlay</string>
+    <string name="resume_carplay_on_open_description">Поки CarPlay працює, натискання DiPlay одразу повертає на екран CarPlay, а не на головну сторінку застосунку. Вимкніть, щоб завжди спершу відкривалася головна сторінка. Впливає лише на вже під\'єднаний автомобіль.</string>
     <string name="connect_with_usb">Підключити через USB</string>
     <string name="connect_your_iphone_with_a_usb_cable">Підключіть iPhone кабелем USB</string>
     <string name="connecting_bluetooth">Підключення Bluetooth</string>
@@ -201,12 +207,9 @@
     <string name="enable_the_car_s_bluetooth_and_pair_your_iphone_first">Увімкніть Bluetooth автомобіля та спочатку спарте iPhone.</string>
     <string name="error">Помилка</string>
     <string name="exit_application">ВИЙТИ ІЗ ЗАСТОСУНКУ</string>
-    <string name="finish_setup_save_your_hotspot_details_to_use_this_mode">Завершіть налаштування · Збережіть дані точки доступу, щоб користуватися цим режимом.</string>
     <string name="follow_instrument_theme_and_map_card">Враховувати тему приборки та картку карти</string>
     <string name="frame_rate">Частота кадрів</string>
     <string name="full_screen">На весь екран</string>
-    <string name="adapt_pip_resolution">Адаптація роздільної здатності в багатооконному режимі</string>
-    <string name="adapt_pip_resolution_description">Перепідключає CarPlay для адаптації роздільної здатності до пропорцій вікна або PiP. Залиште вимкненим для миттєвого апаратного масштабування GPU.</string>
     <string name="fullscreen">Повний екран</string>
     <string name="getting_carplay_ready">Підготовка CarPlay…</string>
     <string name="got_it">Зрозуміло</string>
@@ -312,7 +315,8 @@
     <string name="s_1_0x">1.0x</string>
     <string name="s_1_choose_your_connection">1 · Виберіть спосіб підключення</string>
     <string name="s_1_connect_a_computer_with_adb_installed_to_the_car_using">1. Підключіть до автомобіля комп’ютер з установленим ADB через наявне USB-з’єднання або бездротове налагодження. Якщо автомобіль запитає, дозвольте налагодження.\n\n2. Виконайте цю команду в терміналі комп’ютера:</string>
-    <string name="s_1_open_car_hotspot_settings_turn_the_hotspot_on_and_sele">1. Відкрийте налаштування точки доступу автомобіля, увімкніть її та виберіть 5 ГГц, якщо доступно.\n2. Точно скопіюйте її назву й пароль нижче.\n3. Не вимикайте точку доступу під час підключення. DiPlay передасть дані через Bluetooth; iPhone приєднається автоматично.</string>
+    <string name="s_1_open_car_hotspot_settings_turn_the_hotspot_on_and_sele">1. Відкрийте налаштування точки доступу автомобіля та увімкніть її; виберіть 5 ГГц, якщо доступно.
+2. Залиште точку доступу увімкненою під час підключення. DiPlay зчитує ім\'я та пароль точки доступу з автомобіля й передає їх на iPhone через Bluetooth, і він підключається сам. Вводити нічого не потрібно.</string>
     <string name="s_2_4_ghz">2,4 ГГц</string>
     <string name="s_2_pair_your_iphone">2 · Спарте свій iPhone</string>
     <string name="s_300_ms_default">300 мс · типово</string>
@@ -331,9 +335,6 @@
     <string name="save_and_reconnect">Зберегти й перепідключитися</string>
     <string name="save_details">Зберегти дані</string>
     <string name="save_diagnostic_report">Зберегти діагностичний звіт</string>
-    <string name="save_hotspot_details_and_use_this_mode">Зберегти дані точки доступу й увімкнути цей режим</string>
-    <string name="save_the_name_and_password_from_the_car_s_hotspot_settings">Спочатку збережіть назву й пароль із налаштувань точки доступу автомобіля</string>
-    <string name="save_your_hotspot_details_in_connection_setup_first">Спочатку збережіть дані точки доступу в налаштуваннях підключення</string>
     <string name="saved_for_your_next_connection">Збережено для наступного підключення</string>
     <string name="saving_report">Збереження звіту…</string>
     <string name="security">Захист</string>
@@ -599,4 +600,5 @@
     <string name="car_button_description">CarPlay показує цей значок і назву у списку застосунків. Натисніть його, щоб повернутися на екран автомобіля. Зміни застосуються під час наступного підключення CarPlay.</string>
     <string name="car_button_saved_next_connection">Збережено. CarPlay покаже новий значок і назву під час наступного підключення.</string>
     <string name="this_head_unit_has_no_image_picker">На цьому головному пристрої немає вибору зображень.</string>
+  <string name="exit_application_description">Повністю закриває DiPlay: сеанс CarPlay, точка доступу автомобіля та всі фонові потоки завершуються разом із ним.</string>
 </resources>

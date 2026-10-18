@@ -1,5 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="audio_decoder">Decodificador de audio</string>
+    <string name="audio_decoder_platform">Plataforma (MediaCodec)</string>
+    <string name="audio_decoder_freescale">Freescale AAC (fabricante)</string>
+    <string name="audio_decoder_description">Qué decodificador reproduce el audio de CarPlay. Plataforma (MediaCodec) es el valor predeterminado y siempre funciona. El decodificador Freescale se carga desde las bibliotecas del propio equipo y se ofrece como experimento; si falta o no arranca, se usa el de la plataforma y el motivo queda en el registro de diagnóstico.</string>
+    <string name="audio_decoder_unavailable">No disponible en este equipo (%1$s)</string>
     <string name="existing_wifi_title">Wi-Fi existente / Misma LAN</string>
     <string name="existing_wifi_description">Usa un router o Wi-Fi portátil existente. Mantén el iPhone y el coche en la misma red con acceso a Internet.</string>
     <string name="existing_wifi_hint">Wi-Fi existente · Mantén ambos dispositivos en la misma Wi-Fi y el Bluetooth activado. No necesitas el punto de acceso del coche.</string>
@@ -15,6 +20,7 @@
     <string name="wifi_direct_channel_description">Auto elige un canal por ti. Los canales manuales dependen de lo que admita tu coche. Los cambios se aplican en la próxima conexión Wi-Fi Direct.</string>
     <string name="built_in_car_hotspot">Punto de acceso integrado del coche</string>
     <string name="hotspot_hint_manual">Punto de acceso integrado · Mantén activos el punto de acceso, el Bluetooth y el Wi‑Fi del iPhone.</string>
+    <string name="turn_on_the_car_hotspot_in_the_car_settings_then_connect_again">No se pudieron leer los datos del punto de acceso de esta unidad. Activa el punto de acceso del coche en los ajustes del coche y vuelve a conectarte.</string>
     <string name="hotspot_hint_p2p">Wi-Fi Direct · Mantén activos el interruptor Wi‑Fi del coche, el Bluetooth y el Wi‑Fi del iPhone.</string>
     <string name="cluster_size_standard">Estándar · máxima nitidez</string>
     <string name="cluster_size_larger">Más grande · predeterminado</string>
@@ -28,7 +34,6 @@
     <string name="hotspot_mode_manual_desc">Usa el punto de acceso propio del coche. Selecciona 5 GHz en la configuración del coche si está disponible.</string>
     <string name="hotspot_mode_p2p_desc">Configuración alternativa. Requiere el interruptor Wi‑Fi del coche; en 2,4 GHz la conexión puede trabarse.</string>
     <string name="hotspot_details_off">El punto de acceso está apagado · Actívalo en la configuración del coche.</string>
-    <string name="hotspot_details_saved">Datos guardados · Comprueba que el punto de acceso del coche esté activado antes de conectarte.</string>
     <string name="permission_enabled_ready">Permiso activado · listo para usar</string>
     <string name="permission_not_enabled">El permiso aún no está activado</string>
     <string name="clipboard_usage_access">Acceso al uso de DiPlay</string>
@@ -78,7 +83,6 @@
     <string name="audio_saved_value">Guardado: %1$d</string>
     <string name="about_public_preview_prefix">Vista previa ·\u0020</string>
     <string name="msg_car_hotspot_connect">DiPlay se conecta a través del punto de acceso del coche «%1$s». Actívalo en la configuración del coche y luego conéctate.</string>
-    <string name="edit_saved_hotspot_prefix">Editar punto de acceso guardado ·\u0020</string>
     <string name="cluster_adb_multi_device">Si ADB lista varios dispositivos, usa adb -s &lt;car-device-ID&gt; shell appops set %1$s GET_USAGE_STATS allow. Encuentra el ID con adb devices.</string>
     <string name="status_ready_for_prefix">Listo para\u0020</string>
     <string name="audio_stream_unavailable">El tipo de flujo %1$d no está disponible aquí (estado=%2$s)</string>
@@ -161,6 +165,8 @@
     <string name="connect_when_diplay_opens">Conectar al abrir DiPlay</string>
     <string name="connect_when_iphone_bluetooth_connects">Conectar al volver a enlazar el iPhone seleccionado</string>
     <string name="connect_when_iphone_bluetooth_connects_description">Al despertar el coche, abrir DiPlay e iniciar CarPlay inalámbrico cuando el iPhone seleccionado se conecte por Bluetooth. Algunas unidades restringen el inicio en segundo plano.</string>
+    <string name="resume_carplay_on_open">Volver a CarPlay al abrir DiPlay</string>
+    <string name="resume_carplay_on_open_description">Mientras CarPlay está en marcha, tocar DiPlay vuelve directamente a la pantalla de CarPlay en lugar de la página de inicio de la aplicación. Desactívalo para ir siempre primero a la página de inicio. Solo afecta a un coche ya conectado.</string>
     <string name="connect_with_usb">Conectar por USB</string>
     <string name="connect_your_iphone_with_a_usb_cable">Conecta tu iPhone con un cable USB</string>
     <string name="connecting_bluetooth">Conectando Bluetooth</string>
@@ -196,12 +202,9 @@
     <string name="enable_the_car_s_bluetooth_and_pair_your_iphone_first">Activa primero el Bluetooth del coche y empareja tu iPhone.</string>
     <string name="error">Error</string>
     <string name="exit_application">SALIR DE LA APLICACIÓN</string>
-    <string name="finish_setup_save_your_hotspot_details_to_use_this_mode">Finalizar configuración · Guarda los datos de tu punto de acceso para usar este modo.</string>
     <string name="follow_instrument_theme_and_map_card">Seguir el tema del cuadro y la tarjeta del mapa</string>
     <string name="frame_rate">Frecuencia de imágenes</string>
     <string name="full_screen">Pantalla completa</string>
-    <string name="adapt_pip_resolution">Adaptar resolución en multiventana</string>
-    <string name="adapt_pip_resolution_description">Vuelva a conectar CarPlay para adaptar la resolución al aspecto de multiventana o PiP. Déjelo desactivado para un escalado instantáneo por GPU sin demora.</string>
     <string name="fullscreen">Pantalla completa</string>
     <string name="getting_carplay_ready">Preparando CarPlay…</string>
     <string name="got_it">Entendido</string>
@@ -305,7 +308,8 @@
     <string name="s_1000_ms_most_stable">1000 ms · la más estable</string>
     <string name="s_1_choose_your_connection">1 · Elige tu conexión</string>
     <string name="s_1_connect_a_computer_with_adb_installed_to_the_car_using">1. Conecta un ordenador con ADB instalado al coche mediante tu conexión USB o de depuración inalámbrica existente. Aprueba la depuración en el coche si se te pide.\n\n2. Ejecuta este comando en la terminal del ordenador:</string>
-    <string name="s_1_open_car_hotspot_settings_turn_the_hotspot_on_and_sele">1. Abre los ajustes del punto de acceso del coche, actívalo y selecciona 5 GHz si está disponible.\n2. Copia abajo su nombre y contraseña exactamente.\n3. Deja el punto de acceso del coche activado al conectarte. DiPlay envía los datos por Bluetooth; tu iPhone se une automáticamente.</string>
+    <string name="s_1_open_car_hotspot_settings_turn_the_hotspot_on_and_sele">1. Abre los ajustes del punto de acceso del coche y actívalo; elige 5 GHz si se ofrece.
+2. Mantén el punto de acceso activado al conectarte. DiPlay lee el nombre y la contraseña del punto de acceso del coche y los envía a tu iPhone por Bluetooth, que se une solo. No hay que escribir nada.</string>
     <string name="s_2_pair_your_iphone">2 · Empareja tu iPhone</string>
     <string name="s_300_ms_default">300 ms · predeterminado</string>
     <string name="s_30_fps_lighter_load">30 img/s · carga más ligera</string>
@@ -322,9 +326,6 @@
     <string name="save_and_reconnect">Guardar y reconectar</string>
     <string name="save_details">Guardar datos</string>
     <string name="save_diagnostic_report">Guardar informe de diagnóstico</string>
-    <string name="save_hotspot_details_and_use_this_mode">Guardar datos del punto de acceso y usar este modo</string>
-    <string name="save_the_name_and_password_from_the_car_s_hotspot_settings">Guarda primero el nombre y la contraseña de los ajustes del punto de acceso del coche</string>
-    <string name="save_your_hotspot_details_in_connection_setup_first">Guarda primero los datos de tu punto de acceso en la configuración de conexión</string>
     <string name="saved_for_your_next_connection">Guardado para tu próxima conexión</string>
     <string name="saving_report">Guardando informe…</string>
     <string name="security">Seguridad</string>
@@ -589,4 +590,5 @@
     <string name="car_button_description">CarPlay muestra este icono y este nombre en su lista de apps. Tócalo para volver a la pantalla del coche. Los cambios se aplican la próxima vez que CarPlay se conecte.</string>
     <string name="car_button_saved_next_connection">Guardado. CarPlay mostrará el nuevo icono y nombre la próxima vez que se conecte.</string>
     <string name="this_head_unit_has_no_image_picker">Esta unidad principal no tiene selector de imágenes.</string>
+  <string name="exit_application_description">Cierra DiPlay por completo: la sesión de CarPlay, el punto de acceso del coche y todos los hilos en segundo plano terminan con él.</string>
 </resources>

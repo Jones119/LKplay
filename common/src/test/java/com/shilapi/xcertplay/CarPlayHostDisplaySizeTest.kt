@@ -46,7 +46,6 @@ class CarPlayHostDisplaySizeTest {
 
     @Before fun setUp() {
         activity = Robolectric.buildActivity(CarPlayHostActivity::class.java).get()
-        AirPlayPersistence.saveAdaptPipResolution(activity, false)
         // Source-only tests have no provisioned local authentication identity.
         AirPlayPersistence.saveMfiTarget(activity, MfiTarget.REMOTE)
         AirPlayPersistence.saveRemoteMfiServer(activity, "https://mfi.example.test")
@@ -92,41 +91,6 @@ class CarPlayHostDisplaySizeTest {
         assertSame(display, getField("sessionDisplay"))
         assertEquals(0, getField("restartGeneration"))
         assertEquals(1, keepLogs())
-    }
-
-    @Test fun aNarrowWindowWithAdaptPipResolutionTriggersReconnect() {
-        AirPlayPersistence.saveAdaptPipResolution(activity, true)
-        val display = startSession()
-        applySize(700, 990)
-        assertEquals(1, getField("restartGeneration"))
-        assertNull(getField("sessionDisplay"))
-    }
-
-    @Test fun resumingASquareCanvasInTheSameWindowDoesNotReconnect() {
-        AirPlayPersistence.saveAdaptPipResolution(activity, true)
-        val display = startSession(windowHeight = 1080, canvasHeight = 1920)
-        val video = object : TextureView(activity) {
-            override fun post(action: Runnable): Boolean = Handler(Looper.getMainLooper()).post(action)
-        }.apply { layout(0, 0, 1920, 1080) }
-        setField("videoView", video)
-
-        invoke("onResume")
-        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(600))
-
-        assertSame(display, getField("sessionDisplay"))
-        assertEquals(size(1920, 1080), getField("activeDisplaySize"))
-        assertEquals(0, getField("restartGeneration"))
-        assertNull(getField("pendingDisplaySize"))
-    }
-
-    @Test fun aRealPipAspectChangeStillReconnectsWithASquareCanvas() {
-        AirPlayPersistence.saveAdaptPipResolution(activity, true)
-        startSession(windowHeight = 1080, canvasHeight = 1920)
-
-        applySize(700, 1080)
-
-        assertEquals(1, getField("restartGeneration"))
-        assertNull(getField("sessionDisplay"))
     }
 
     @Test fun connectingInANarrowWindowRebuildsWhenTheCameraCloses() {
@@ -559,7 +523,9 @@ class CarPlayHostDisplaySizeTest {
     private fun menuBarSwitch(controls: ViewGroup, label: Int): Switch = (0 until controls.childCount)
         .mapNotNull { controls.getChildAt(it) as? ViewGroup }
         .flatMap { row -> (0 until row.childCount).map { row.getChildAt(it) } }
+        // The switch's accessible name is its label when the row has no explanation of its own.
         .filterIsInstance<Switch>().single { it.contentDescription == activity.getString(label) }
+
 
     private fun setField(name: String, value: Any?) {
         activity.javaClass.getDeclaredField(name).apply { isAccessible = true }.set(activity, value)

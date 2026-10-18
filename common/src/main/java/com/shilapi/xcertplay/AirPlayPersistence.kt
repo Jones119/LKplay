@@ -12,6 +12,7 @@ import com.shilapi.xcertplay.airplay.AirPlayIdentity
 import com.shilapi.xcertplay.airplay.PairingStore
 import com.shilapi.xcertplay.airplay.SafeAreaCodec
 import com.shilapi.xcertplay.airplay.SafeAreaRect
+import com.shilapi.xcertplay.media.AudioDecoderChoice
 import com.shilapi.xcertplay.orchestration.ManualHotspotBand
 import com.shilapi.xcertplay.orchestration.ManualHotspotSecurity
 import com.shilapi.xcertplay.orchestration.MfiTarget
@@ -66,6 +67,8 @@ object AirPlayPersistence {
     private const val KEY_CLUSTER_BRIDGE_ENABLED = "cluster_bridge_enabled"
     private const val KEY_ADB_CLUSTER_ACTIVITY = "adb_cluster_activity_enabled"
     private const val KEY_CENTER_MAP_OVERLAY = "center_map_overlay"
+    /** 音频解码器选择（AudioDecoderChoice）；缺省 = 平台 MediaCodec。 */
+    private const val KEY_AUDIO_DECODER = "audio_decoder"
     private const val KEY_CENTER_MAP_AUTO_HIDE = "center_map_auto_hide"
     private const val KEY_CLUSTER_MAP_SCALE = "cluster_map_scale_percent"
     private const val KEY_CLUSTER_CONTENT = "cluster_content"
@@ -86,7 +89,6 @@ object AirPlayPersistence {
     private const val KEY_HIDE_BOTTOM_BAR = "hide_bottom_bar"
     private const val KEY_SCREEN_CORNER_MASK = "screen_corner_mask"
     private const val KEY_SAFE_AREA_DRAW_OUTSIDE = "safe_area_draw_outside"
-    private const val KEY_ADAPT_PIP_RESOLUTION = "adapt_pip_resolution"
     private const val KEY_AUTO_START_ON_BOOT = "auto_start_on_boot"
     private const val KEY_LOCATION_REPORTING_ENABLED = "location_reporting_enabled"
     private const val KEY_MFI_TARGET = "mfi_target"
@@ -95,8 +97,8 @@ object AirPlayPersistence {
     private const val SAFE_AREA_KEY_PREFIX = "safe_area_"
     private const val CUSTOM_ICON_FILE = "airplay-icon.png"
 
-    const val DEFAULT_MANUFACTURER = "DiPlay"
-    const val DEFAULT_MODEL = "DiPlay"
+    const val DEFAULT_MANUFACTURER = "Lynk&Co"
+    const val DEFAULT_MODEL = "CS11"
     /** Shown by iOS next to the car icon in CarPlay; the owner can change it in Settings. */
     const val DEFAULT_OEM_LABEL = "领克"
     /** Defaults this fork shipped before the label became a Lynk & Co one; treated as unset. */
@@ -587,12 +589,21 @@ object AirPlayPersistence {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_CENTER_MAP_OVERLAY, enabled).apply()
     }
 
-    /** Whether to renegotiate resolution when entering/exiting freeform floating windows or launcher PiP. */
-    fun loadAdaptPipResolution(context: Context): Boolean =
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_ADAPT_PIP_RESOLUTION, false)
+    /**
+     * 音频解码器选择（设置页「声音设置」，见 AudioDecoderChoice）。
+     *
+     * 默认 MEDIACODEC（平台软解）。选 FREESCALE 时若厂商库不可用，渲染器会**自动回落**并在诊断行
+     * 写明原因——不会让用户没声音。取下次建流生效（`reconnects = true`）。
+     */
+    fun loadAudioDecoder(context: Context): AudioDecoderChoice =
+        AudioDecoderChoice.parse(
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getString(KEY_AUDIO_DECODER, null),
+        )
 
-    fun saveAdaptPipResolution(context: Context, enabled: Boolean) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_ADAPT_PIP_RESOLUTION, enabled).apply()
+    fun saveAudioDecoder(context: Context, choice: AudioDecoderChoice) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putString(KEY_AUDIO_DECODER, AudioDecoderChoice.toStorage(choice)).apply()
     }
 
     fun loadClusterContent(context: Context): CarPlayClusterDisplay.Content =
@@ -605,7 +616,17 @@ object AirPlayPersistence {
         overlaySettingsListener?.invoke()
     }
 
-    /** Fingers for the swipe-down that opens settings; some head units reserve three. */
+    /**
+     * Fingers for the swipe-down that opens settings.
+     *
+     * ⚠️ On a phone or tablet with MIUI (and most other skins) this gesture cannot work while the system's
+     * own three-finger shortcut is enabled: the system takes the stream over and ends it with ACTION_CANCEL
+     * the instant the **third** pointer lands, so the app never sees three simultaneous fingers at all
+     * (`adb shell settings put system enable_three_gesture 0` restores it; measured on a Xiaomi Pad 6 Max,
+     * docs/_digest/84). Raising the count does **not** help — with four fingers the cancel still arrives at
+     * three, so the fourth is never delivered. Three is the shipped default because the head unit has no
+     * such system gesture; change it in the panel if this device does.
+     */
     fun loadSettingsGestureFingers(context: Context): Int =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getInt(KEY_SETTINGS_GESTURE_FINGERS, 3).coerceIn(2, 4)

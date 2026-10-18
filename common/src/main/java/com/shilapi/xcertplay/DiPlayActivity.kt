@@ -60,8 +60,6 @@ class DiPlayActivity : ComponentActivity() {
     private val handler = Handler(Looper.getMainLooper())
     private var page = "home"
     private var clusterContentRequestVersion = 0L
-    private var pendingCarHotspotSetup = false
-    private var hotspotJoinControls: HotspotJoinControls? = null
     private var setupError: String? = null
     private var status: TextView? = null
     private var connectButton: Button? = null
@@ -145,8 +143,20 @@ class DiPlayActivity : ComponentActivity() {
             android.util.Log.e("DiPlaySetup", "CarPlay authentication could not be loaded", it)
             getString(R.string.setup_error_auth)
         }
-        pendingCarHotspotSetup = savedInstanceState?.getBoolean("pending_car_hotspot") ?: false
         page = savedInstanceState?.getString("page") ?: intent.getStringExtra("page") ?: "home"
+        // Back on the home page finishes this activity while the session runs on, so the launcher icon lands
+        // here with nothing under it. Going straight to CarPlay from onCreate - and finishing - means the
+        // connect screen never flashes on the way. Ported from upstream 10f19a6b; the switch is honoured
+        // because `openCarPlayScreenIfConnected` is what decides.
+        if (savedInstanceState == null && isLauncherIntent(intent) &&
+            CarPlayBackgroundSession.hasSession() && openCarPlayScreenIfConnected()
+        ) {
+            finish()
+            return
+        }
+        // Capture the ThreadGroup while the ROM still reports one; see WorkerThreads.
+        com.shilapi.xcertplay.compat.WorkerThreads.capture()
+        warmUpPreferences()
         render()
         handleWirelessRecovery()
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
@@ -167,9 +177,21 @@ class DiPlayActivity : ComponentActivity() {
         }
         openCarPlayScreenIfConnected()
     }
+
+    /**
+     * A bare tap on the launcher icon.
+     *
+     * The launcher sends `ACTION_MAIN` + `CATEGORY_LAUNCHER` and nothing else; every internal entry point
+     * (notification, Bluetooth auto-connect, the recovery links) carries extras instead — in particular a
+     * `page` — so they must not be treated as "the driver wants CarPlay back". Ported from upstream 10f19a6b,
+     * which also notes that the user-leave hint cannot tell these cases apart.
+     */
+    internal fun isLauncherIntent(intent: Intent?): Boolean =
+        intent != null && intent.action == Intent.ACTION_MAIN &&
+            intent.hasCategory(Intent.CATEGORY_LAUNCHER) && intent.getStringExtra("page") == null
+
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putString("page", page)
-        outState.putBoolean("pending_car_hotspot", pendingCarHotspotSetup)
         super.onSaveInstanceState(outState)
     }
     override fun onConfigurationChanged(newConfig: Configuration) { super.onConfigurationChanged(newConfig); render() }
@@ -184,9 +206,14 @@ class DiPlayActivity : ComponentActivity() {
         super.onStart()
         CenterMapOverlay.onDiPlayScreenShown()
         carPlayScreenBroughtForward = false
+        syncNightModeWithScreen()
     }
 
     override fun onStop() {
+        if (ambientListening) {
+            ambientLight.stop()
+            ambientListening = false
+        }
         cancelUsbPermissionSetup()
         startupHotspotCancelled = true
         super.onStop()
@@ -239,15 +266,21 @@ class DiPlayActivity : ComponentActivity() {
      * to the CarPlay screen instead of the wired/wireless page. That is what the driver expects, and
      * it keeps the host activity's surface from being torn down and rebuilt for nothing. The
      * connection page stays underneath, so Back still reaches it.
+     *
+     * The owner can turn this off ([DiPlayPreferences.resumeCarPlayOnOpen]), in which case the home page
+     * shows as it did before the behaviour was added. That only covers the *already connected* case: with no
+     * session there is nothing to return to, and dialling out stays with the auto-connect switches.
      */
     private fun openCarPlayScreenIfConnected(): Boolean {
         val explicitPage = intent.getStringExtra("page")
         val hasSession = CarPlayBackgroundSession.hasSession()
         val owns = CarPlayBackgroundSession.isOwner(this)
-        if (explicitPage != null || !hasSession) {
+        val resume = DiPlayPreferences.resumeCarPlayOnOpen(this)
+        if (explicitPage != null || !hasSession || !resume) {
             android.util.Log.i(
                 "DiPlay-Open",
-                "staying on the connection page page=$explicitPage hasSession=$hasSession owner=$owns",
+                "staying on the connection page page=$explicitPage hasSession=$hasSession owner=$owns " +
+                    "resumeCarPlay=$resume",
             )
             return false
         }
@@ -277,7 +310,6 @@ class DiPlayActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
-        hotspotJoinControls?.close()
         cancelUsbPermissionSetup()
         WheelKeyService.cancelLearning()
         super.onDestroy()
@@ -356,6 +388,9 @@ class DiPlayActivity : ComponentActivity() {
         }
         setContentView(scroll)
         renderedPage = page
+        // Remembered so `syncNightModeWithScreen` can tell whether the resolved mode moved while this page
+        // was not visible, and re-render instead of leaving a stale palette on screen.
+        lastRenderedNight = resolvedNight
         refreshStatus()
         pendingScrollY = previousScrollY
         // A stopped window still dispatches pre-draw but skips layout, so wait for a real layout;
@@ -624,7 +659,9 @@ class DiPlayActivity : ComponentActivity() {
             addView(sections, LinearLayout.LayoutParams(-1, -2))
         }
         val page = row().apply { gravity = Gravity.TOP }
-        page.addView(nav, LinearLayout.LayoutParams(dp(300), -2))
+        // 220dp, not 300dp: at 300 the index took a quarter of the 1280dp-wide screen and pushed the
+        // cards' right edge under the car's own status strip (owner report, 2026-10-18).
+        page.addView(nav, LinearLayout.LayoutParams(dp(220), -2))
         page.addView(
             sectionScroll,
             LinearLayout.LayoutParams(0, (resources.displayMetrics.heightPixels - dp(240)).coerceAtLeast(dp(360)), 1f),
@@ -666,6 +703,15 @@ class DiPlayActivity : ComponentActivity() {
         }
         section(content, getString(R.string.automatic_connection), R.drawable.ic_dp_automation) { card ->
             toggle(card, getString(R.string.connect_when_diplay_opens), getString(R.string.use_your_last_connection_type_and_selected_iphone), DiPlayPreferences.autoConnect(this)) { DiPlayPreferences.saveAutoConnect(this, it) }
+            // Distinct from the switch above: that one decides whether to dial out, this one decides where
+            // the app lands when a session is *already* running. Defaults on, which is the behaviour the
+            // driver asked for (docs/_digest/84).
+            toggle(
+                card,
+                getString(R.string.resume_carplay_on_open),
+                getString(R.string.resume_carplay_on_open_description),
+                DiPlayPreferences.resumeCarPlayOnOpen(this),
+            ) { DiPlayPreferences.saveResumeCarPlayOnOpen(this, it) }
             toggle(card, getString(R.string.connect_when_iphone_bluetooth_connects),
                 getString(R.string.connect_when_iphone_bluetooth_connects_description),
                 DiPlayPreferences.connectOnPhoneBluetooth(this)) { enabled ->
@@ -704,42 +750,65 @@ class DiPlayActivity : ComponentActivity() {
             }
             if (!autoConfirmActive) {
                 card.addView(
+                    // Secondary, not primary: this is one permission step inside a card, not the page's main
+                    // action. It used to pass `true` here and `false` at the identical button in the
+                    // dashboard section, so the same action was a white block on one screen and a dark one on
+                    // the other (docs/_digest/84).
                     button(
                         getString(R.string.btn_auto_apply_permissions),
-                        true,
+                        false,
                     ) {
                         autoApplyPermissions()
                     },
                     matchButton(8, 54),
                 )
             } else {
-                card.addView(label(getString(R.string.usb_auto_confirm_active_hint), 14, Color.rgb(127, 205, 154)).apply {
-                    setPadding(0, dp(4), 0, dp(8))
-                })
+                card.addView(
+                    label(getString(R.string.usb_auto_confirm_active_hint), 14, SUCCESS).apply {
+                        setPadding(0, dp(4), 0, dp(8))
+                    },
+                )
             }
             card.addView(button("${getString(R.string.choose_iphone_prefix)}${DiPlayPreferences.phoneName(this)}", false) { choosePhone() }, matchButton(12, 60))
         }
         hotspotSettingsControls(content)
         section(content, getString(R.string.display_and_performance), R.drawable.ic_dp_display) { card ->
-            val nightModes = CarPlayNightMode.entries
+            // 跟随光感 is offered only where the hardware exists.
+            //
+            // The CS11 has no ambient light sensor at all: `SensorManager` lists accelerometer, gyroscope,
+            // rotation vector and the AOSP composites but no `TYPE_LIGHT`, and the sysfs path named by
+            // `ro.hardware.lightsensor` (/sys/class/i2c-dev/i2c-1/device/1-0044/) does not exist on this
+            // firmware — it is a leftover from a reference design. Offering the option there would be a
+            // control that can never do anything, which is exactly what the owner hit (2026-10-18).
+            // All four modes stay listed: the car may well switch its own theme from a CAN illumination
+            // signal (the owner reports the built-in and third-party navigation going dark in tunnels), it
+            // is just not reaching Android as either a `TYPE_LIGHT` sensor or a `uiMode` night flag on this
+            // firmware. Hiding the automatic modes would be wrong; the note below says what to do instead
+            // until the real channel is found.
+            val ambientSupported = ambientSensorAvailable
+            val nightModes = CarPlayNightMode.entries.toList()
             val nightMode = AirPlayPersistence.loadCarPlayNightMode(this)
+            // Follows the chosen mode, not the hardware: the threshold and delay are still the settings a
+            // reader would configure for 跟随光感, and hiding them would make the option look broken.
             val ambientControls = column().apply {
                 visibility = if (nightMode == CarPlayNightMode.AMBIENT) View.VISIBLE else View.GONE
             }
             choice(
                 card,
                 getString(R.string.carplay_night_mode),
-                listOf(
-                    getString(R.string.carplay_night_system),
-                    getString(R.string.carplay_night_ambient),
-                    getString(R.string.carplay_night_day),
-                    getString(R.string.carplay_night_night),
-                ),
-                nightModes.indexOf(nightMode),
+                nightModes.map { getString(nightModeLabel(it)) },
+                nightModes.indexOf(nightMode).coerceAtLeast(0),
                 reconnects = false,
             ) { index ->
                 AirPlayPersistence.saveCarPlayNightMode(this, nightModes[index])
-                ambientControls.visibility = if (nightModes[index] == CarPlayNightMode.AMBIENT) View.VISIBLE else View.GONE
+                // Re-render at once: without this the page kept its old palette until some other action
+                // happened to rebuild it, so picking 固定夜间 looked like it did nothing (owner report).
+                render()
+            }
+            if (!ambientSupported) {
+                card.addView(label(getString(R.string.carplay_night_auto_unavailable), 14, MUTED).apply {
+                    setPadding(0, 0, 0, dp(18))
+                })
             }
             card.addView(label(getString(R.string.carplay_night_hint), 14, MUTED))
             card.addView(label(getString(R.string.carplay_night_time_note), 14, MUTED).apply {
@@ -786,9 +855,6 @@ class DiPlayActivity : ComponentActivity() {
             ) { label, checked, onChanged ->
                 toggle(card, getString(label), getString(R.string.hide_the_car_s_system_bars_while_carplay_is_open), checked, save = onChanged)
             }
-            toggle(card, getString(R.string.adapt_pip_resolution), getString(R.string.adapt_pip_resolution_description), AirPlayPersistence.loadAdaptPipResolution(this)) {
-                AirPlayPersistence.saveAdaptPipResolution(this, it)
-            }
         }
         section(content, getString(R.string.car_button_in_carplay), R.drawable.ic_dp_car) { card -> carButtonCard = card; carButtonControls(card) }
         section(content, getString(R.string.audio_routing), R.drawable.ic_dp_audio) { card ->
@@ -802,25 +868,18 @@ class DiPlayActivity : ComponentActivity() {
             }
             mediaChannelControl(card)
             navigationChannelControl(card)
+            audioDecoderControl(card)
             // The head unit can keep the microphone for its own voice assistant, and CarPlay voice
-            // input then fails silently; report it instead of leaving the driver to guess.
-            val microphoneStatus = label(getString(R.string.microphone_status_checking), 14, MUTED)
-            card.addView(microphoneStatus)
+            // input then fails silently; the hint below says so. The live AVAILABLE/BLOCKED badge is not
+            // probed from this screen any more:
+            //
+            // on this ROM (CS11, Android 4.4 / Dalvik) constructing a Thread from inside this settings
+            // lambda dies in `java.lang.Thread.create` with a NullPointerException and takes the whole
+            // settings screen with it — measured on the car 2026-10-18 with all three forms
+            // (`Thread(r, name)`, `Thread(r)` and `HandlerThread(name)`), so it is not the naming. The
+            // microphone check still reaches the diagnostic report. Losing the live badge is cheaper than
+            // losing the settings screen.
             card.addView(label(getString(R.string.microphone_status_hint), 13, MUTED))
-            Thread({
-                val status = com.shilapi.xcertplay.media.MicrophoneAvailability.probe()
-                runOnUiThread {
-                    microphoneStatus.text = getString(
-                        when (status) {
-                            com.shilapi.xcertplay.media.MicrophoneAvailability.Status.AVAILABLE ->
-                                R.string.microphone_status_available
-                            com.shilapi.xcertplay.media.MicrophoneAvailability.Status.BLOCKED ->
-                                R.string.microphone_status_blocked
-                            else -> R.string.microphone_status_checking
-                        },
-                    )
-                }
-            }, "diplay-mic-status").apply { isDaemon = true }.start()
         }
         section(content, getString(R.string.location), R.drawable.ic_dp_navigation) { card ->
             toggle(card, getString(R.string.report_location_to_iphone),
@@ -908,6 +967,14 @@ class DiPlayActivity : ComponentActivity() {
         }
         section(content, getString(R.string.about), R.drawable.ic_dp_about) { card ->
             card.addView(button(getString(R.string.about_diplay), false) { page = "about"; render() }, matchButton(0, 60))
+            // An explicit way out, here rather than on the separate about page: this row is the one the
+            // driver reaches through 设置 → 关于 (owner correction, 2026-10-18). Without it the only way to
+            // stop DiPlay is the car's task killer, and a background CarPlay session keeps the hotspot and
+            // the decoder alive after the driver has finished with it.
+            card.addView(label(getString(R.string.exit_application_description), 15, MUTED).apply {
+                setPadding(0, dp(16), 0, dp(10))
+            })
+            card.addView(button(getString(R.string.exit_application), primary = false) { exitDiPlay() }, matchButton(0, 60))
         }
         languageSettings(content)
     }
@@ -920,7 +987,26 @@ class DiPlayActivity : ComponentActivity() {
         }
         section(content, getString(R.string.made_possible_by_open_source)) { card ->
             card.addView(label(getString(R.string.receiver_based_on_xcertplay_licensed_under_gpl_3_0_diplay), 16, MUTED))
-        }
+        }    }
+
+    /**
+     * Ends DiPlay for real.
+     *
+     * `finish()` alone only closes the settings page: the wireless session, the hotspot and the codec
+     * threads all live in this process, so the user would still be connected with no window to see. Removing
+     * the task and then ending the process is what "exit the application" has to mean here, and it is the
+     * same thing the in-CarPlay exit does (`CarPlayHostActivity.exitApplication`).
+     */
+    private fun exitDiPlay() {
+        Log.i("DiPlay-Exit", "exit requested from the about page")
+        // `finishAffinity` is API 16, so it is safe on the API 19 head unit; the API 21+ task removal that
+        // CarPlayHostActivity uses is not needed here because the process is about to end anyway.
+        finishAffinity()
+        // Give the task a moment to leave the screen before the process goes, so the launcher is not left
+        // drawing a window that has already died.
+        handler.postDelayed({
+            android.os.Process.killProcess(android.os.Process.myPid())
+        }, EXIT_KILL_DELAY_MILLIS)
     }
 
     // An opted-in connection prepares the hotspot in the controller instead of stopping at this reminder.
@@ -940,6 +1026,38 @@ class DiPlayActivity : ComponentActivity() {
 
     private fun carHotspotSelfConfigured(): Boolean = carHotspotConfiguration() != null
 
+
+    private fun nightModeLabel(mode: CarPlayNightMode): Int = when (mode) {
+        CarPlayNightMode.SYSTEM -> R.string.carplay_night_system
+        CarPlayNightMode.AMBIENT -> R.string.carplay_night_ambient
+        CarPlayNightMode.DAY -> R.string.carplay_night_day
+        CarPlayNightMode.NIGHT -> R.string.carplay_night_night
+    }
+
+
+    /**
+     * Opens every preference file this screen can reach while `onCreate` is still running.
+     *
+     * Measured on the car 2026-10-18 (CS11, Android 4.4.3 / API 19): the first `getSharedPreferences` call
+     * for a file that is not loaded yet makes the framework's `SharedPreferencesImpl` start its own loader
+     * thread, and on this ROM that thread construction fails —
+     * `Caused by: java.lang.NullPointerException at java.lang.Thread.create(Thread.java:403)`
+     * `at android.app.SharedPreferencesImpl.startLoadFromDisk(SharedPreferencesImpl.java:88)`. It is thrown
+     * out of `onResume` (`startCarHotspotOnLaunch` -> `startupHotspotEligible`) and takes DiPlay with it.
+     *
+     * Creating the same threads during `onCreate` succeeds on this ROM (a probe of all ten construction
+     * forms reported OK there), so warming the files up front keeps the later, fatal path on the cache.
+     * This is a workaround for a firmware defect, not a design choice: see `docs/_digest/89`.
+     */
+    private fun warmUpPreferences() {
+        for (name in PREFERENCE_FILES) {
+            runCatching { getSharedPreferences(name, MODE_PRIVATE) }
+                .onFailure { Log.w("DiPlay-Prefs", "warm up $name failed", it) }
+        }
+    }
+
+
+
     private fun hotspotSettingsControls(parent: LinearLayout) {
         if (AirPlayPersistence.loadWirelessHotspotMode(this) != WirelessHotspotMode.MANUAL) return
         // CS11/4.4: the hotspot is started through reflected setWifiApEnabled, which needs no ADB.
@@ -951,16 +1069,36 @@ class DiPlayActivity : ComponentActivity() {
         val controls = column().apply { visibility = View.GONE }
         hotspotControls = controls
         parent.addView(controls)
-        Thread({
-            val access = runCatching { CarHotspotSetup.check(applicationContext) }
-                .onFailure { Log.w("DiPlay-Hotspot", "settings ADB check failed", it) }
-                .getOrDefault(LocalAdb.Access.UNREACHABLE)
-            Log.i("DiPlay-Hotspot", "settings eligibility: legacy=$legacy adb=$access visible=${CarHotspotSettings.visible(access, legacy)}")
-            runOnUiThread {
-                if (hotspotControls !== controls || isFinishing || isDestroyed) return@runOnUiThread
-                renderHotspotControls(controls, access, legacy)
-            }
-        }, "diplay-hotspot-adb-check").start()
+        hotspotCheckTarget = controls
+        hotspotCheckLegacy = legacy
+        // The thread is started from a plain method, not from inside this `section(...)` lambda.
+        //
+        // Measured on the car 2026-10-18 (CS11, Android 4.4 / Dalvik): constructing a Thread from inside an
+        // inline lambda's body dies in `java.lang.Thread.create` with a NullPointerException and takes the
+        // screen with it, while the same construction in an ordinary method is fine (every other thread in
+        // this app is started that way and works). `docs/_digest/89` records the reproduction.
+        startHotspotEligibilityCheck()
+    }
+
+    private var hotspotCheckTarget: LinearLayout? = null
+    private var hotspotCheckLegacy = false
+
+    private fun startHotspotEligibilityCheck() {
+        com.shilapi.xcertplay.compat.WorkerThreads.start("diplay-hotspot-adb-check") { runHotspotEligibilityCheck() }
+    }
+
+    private fun runHotspotEligibilityCheck() {
+        val controls = hotspotCheckTarget
+        val legacy = hotspotCheckLegacy
+        if (controls == null) return
+        val access = runCatching { CarHotspotSetup.check(applicationContext) }
+            .onFailure { Log.w("DiPlay-Hotspot", "settings ADB check failed", it) }
+            .getOrDefault(LocalAdb.Access.UNREACHABLE)
+        Log.i("DiPlay-Hotspot", "settings eligibility: legacy=$legacy adb=$access visible=${CarHotspotSettings.visible(access, legacy)}")
+        runOnUiThread {
+            if (hotspotControls !== controls || isFinishing || isDestroyed) return@runOnUiThread
+            renderHotspotControls(controls, access, legacy)
+        }
     }
 
     private fun renderHotspotControls(controls: LinearLayout, access: LocalAdb.Access, legacy: Boolean) {
@@ -1014,7 +1152,7 @@ class DiPlayActivity : ComponentActivity() {
         updateAdbSwitches()
         adbStatus?.setText(R.string.adb_checking_may_ask)
         if (page == "settings") render()
-        Thread({
+        com.shilapi.xcertplay.compat.WorkerThreads.start("diplay-adb-grant") {
             var access = LocalAdb.Access.UNREACHABLE
             val ready = runCatching {
                 access = CarHotspotSetup.grant(app, permissions)
@@ -1036,7 +1174,7 @@ class DiPlayActivity : ComponentActivity() {
                 updateAdbSwitches()
                 toast(getString(message))
             }
-        }, "diplay-adb-grant").start()
+        }
     }
 
     private fun updateAdbSwitches() {
@@ -1051,7 +1189,7 @@ class DiPlayActivity : ComponentActivity() {
     private fun startCarHotspotOnLaunch() {
         if (!startupHotspotEligible()) return
         val app = applicationContext
-        Thread({
+        com.shilapi.xcertplay.compat.WorkerThreads.start("diplay-hotspot-startup") {
             val result = CarHotspotTethering.enable(app,
                 isCancelled = { startupHotspotCancelled || !startupHotspotEligible() },
                 log = { Log.i("DiPlay-Hotspot", it) },
@@ -1061,7 +1199,7 @@ class DiPlayActivity : ComponentActivity() {
                 hotspotStartupResult = result
                 if (page == "home") render()
             }
-        }, "diplay-hotspot-startup").start()
+        }
     }
 
     private fun startupHotspotEligible(): Boolean =
@@ -1122,7 +1260,7 @@ class DiPlayActivity : ComponentActivity() {
     }
 
     private fun wirelessLinkControls(parent: LinearLayout) {
-        val mode = if (pendingCarHotspotSetup) WirelessHotspotMode.MANUAL else AirPlayPersistence.loadWirelessHotspotMode(this)
+        val mode = AirPlayPersistence.loadWirelessHotspotMode(this)
         val modes = listOf(WirelessHotspotMode.MANUAL, WirelessHotspotMode.WIFI_P2P, WirelessHotspotMode.EXISTING_WIFI)
         val titles = listOf(getString(R.string.built_in_car_hotspot), getString(R.string.wifi_direct), getString(R.string.existing_wifi_title))
         val descriptions = listOf(
@@ -1139,17 +1277,15 @@ class DiPlayActivity : ComponentActivity() {
                 if (index > 0) marginStart = dp(16)
             } else LinearLayout.LayoutParams(-1, -2))
             option.addView(button("${if (mode == candidate) "✓  " else ""}${titles[index]}", mode == candidate) {
-                if (candidate == WirelessHotspotMode.MANUAL) {
-                    pendingCarHotspotSetup = !carHotspotSelfConfigured()
-                    render()
-                } else if (candidate == WirelessHotspotMode.EXISTING_WIFI) {
+                // Manual mode needs nothing typed any more: the SSID and passphrase are read out of the
+                // firmware's AP configuration. The only other mode with input is existing-Wi-Fi, whose
+                // credentials belong to a router DiPlay has no way to discover.
+                if (candidate == WirelessHotspotMode.EXISTING_WIFI) {
                     askHotspotCredentials(existingWifi = true) { ssid, password ->
                         AirPlayPersistence.saveExistingWifiCredentials(this, ssid, password)
-                        pendingCarHotspotSetup = false
                         applyWirelessLink(candidate)
                     }
                 } else {
-                    pendingCarHotspotSetup = false
                     applyWirelessLink(candidate)
                 }
             }, matchButton(12, 60))
@@ -1158,26 +1294,25 @@ class DiPlayActivity : ComponentActivity() {
         if (mode == WirelessHotspotMode.MANUAL) {
             val storedInCar = carHotspotConfiguration()
             parent.addView(label(getString(R.string.hotspot_setup), 22, TEXT, true))
-            parent.addView(label(getString(R.string.s_1_open_car_hotspot_settings_turn_the_hotspot_on_and_sele), 16, MUTED).apply { setPadding(0, dp(8), 0, dp(12)) })
+            // The SSID and passphrase are read out of the firmware's own AP configuration and pushed to the
+            // iPhone over Bluetooth, so step 2 of the old instructions ("copy the name and password in below")
+            // no longer exists and the edit button that asked for them is gone (docs/_digest/84).
+            parent.addView(
+                label(getString(R.string.s_1_open_car_hotspot_settings_turn_the_hotspot_on_and_sele), 16, MUTED)
+                    .apply { setPadding(0, dp(8), 0, dp(12)) },
+            )
             parent.addView(button(getString(R.string.open_car_hotspot_settings), false) { openCarWifiSettings() }, matchButton(0, 60))
-            parent.addView(button(if (pendingCarHotspotSetup) getString(R.string.save_hotspot_details_and_use_this_mode) else "${getString(R.string.edit_saved_hotspot_prefix)}${storedSsid().ifEmpty { storedInCar?.ssid.orEmpty() }}", false) {
-                askHotspotCredentials { ssid, password ->
-                    saveHotspotCredentials(ssid, password)
-                    pendingCarHotspotSetup = false
-                    applyWirelessLink(WirelessHotspotMode.MANUAL)
-                }
-            }, matchButton(12, 60))
-            parent.addView(label(when {
-                pendingCarHotspotSetup -> getString(R.string.finish_setup_save_your_hotspot_details_to_use_this_mode)
-                storedInCar != null && storedSsid().isEmpty() -> getString(R.string.hotspot_details_read_from_car, storedInCar.ssid)
-                carHotspotOff() -> getString(R.string.hotspot_details_off)
-                else -> getString(R.string.hotspot_details_saved)
-            }, 15, if (carHotspotOff()) WARNING else MUTED).apply { setPadding(0, dp(12), 0, 0) })
-            val join = hotspotJoinControls ?: HotspotJoinControls(this,
-                { CarPlayBackgroundSession.hasSession() }, beforeAction = { startupHotspotCancelled = true },
-                labelFactory = { label(it, 15, MUTED) }, buttonFactory = { title, click -> button(title, false, click) })
-                .also { hotspotJoinControls = it }
-            parent.addView(join.build())
+            parent.addView(
+                label(
+                    when {
+                        storedInCar != null -> getString(R.string.hotspot_details_read_from_car, storedInCar.ssid)
+                        carHotspotOff() -> getString(R.string.hotspot_details_off)
+                        else -> getString(R.string.turn_on_the_car_hotspot_in_the_car_settings_then_connect_again)
+                    },
+                    15,
+                    if (storedInCar != null) MUTED else WARNING,
+                ).apply { setPadding(0, dp(12), 0, 0) },
+            )
         } else if (mode == WirelessHotspotMode.EXISTING_WIFI) {
             parent.addView(label(getString(R.string.existing_wifi_instructions), 16, MUTED))
             parent.addView(button(getString(R.string.open_car_wi_fi_settings), false) { openCarClientWifiSettings() }, matchButton(12, 60))
@@ -1302,10 +1437,61 @@ class DiPlayActivity : ComponentActivity() {
 
     private fun channelLabel(value: Int): String = value.toString()
 
+    /**
+     * 音频解码器选择（docs/_digest/79 A1 的设置项）。
+     *
+     * 平台码始终可选；Freescale 那项**先探测再显示**——厂商库不在这台车机上、或入口符号缺失时，
+     * 选项显示为不可用并附上原因，而不是让用户选中一个注定失败的开关。
+     * 判定依据是 `FreescaleAacBridge`：shim 加载 → `/system/lib` 的 `dlopen` → `aacd_query_dec_mem` 返回 0。
+     */
+    private fun audioDecoderControl(card: android.widget.LinearLayout) {
+        val ready = com.shilapi.xcertplay.media.FreescaleAacBridge.isAvailable()
+        val freescaleLabel = if (ready) {
+            getString(R.string.audio_decoder_freescale)
+        } else {
+            getString(
+                R.string.audio_decoder_freescale,
+            ) + " · " + getString(
+                R.string.audio_decoder_unavailable,
+                com.shilapi.xcertplay.media.FreescaleAacBridge.reason(),
+            )
+        }
+        // 顺序与 AudioDecoderChoice 的 ordinal 对齐（MEDIACODEC=0, FREESCALE=1）。
+        val options = listOf(getString(R.string.audio_decoder_platform), freescaleLabel)
+        val current = AirPlayPersistence.loadAudioDecoder(this).ordinal.coerceIn(0, options.lastIndex)
+        choice(
+            card,
+            getString(R.string.audio_decoder),
+            options,
+            current,
+            // 解码器在下次建流时才生效，所以要重连才有意义。
+            reconnects = true,
+            // 厂商解码器不具备条件时不让选，避免用户以为切换失败是 bug。
+            enabled = ready || current == 0,
+        ) { index ->
+            AirPlayPersistence.saveAudioDecoder(
+                this,
+                com.shilapi.xcertplay.media.AudioDecoderChoice.entries[
+                    index.coerceIn(0, com.shilapi.xcertplay.media.AudioDecoderChoice.entries.lastIndex)
+                ],
+            )
+        }
+        card.addView(label(getString(R.string.audio_decoder_description), 13, MUTED))
+    }
+
     private fun storedSsid() = AirPlayPersistence.loadManualHotspotSsid(this)
     private fun storedPassword() = AirPlayPersistence.loadManualHotspotPassphrase(this)
     private fun hotspotError(ssid: String, password: String) =
         com.shilapi.xcertplay.orchestration.ManualHotspotValidation.error(ssid, password)?.let { getString(it.messageResource()) }
+
+    /**
+     * The same check against the owner's saved form, which is the fallback only.
+     *
+     * The primary source is the firmware's own AP configuration ([carHotspotConfiguration]); this exists so a
+     * head unit whose AP configuration cannot be read still has the older typed-in path, and so a genuinely
+     * broken saved pair is reported instead of failing later inside the controller.
+     */
+    private fun manualHotspotError(): String? = hotspotError(storedSsid(), storedPassword())
 
     private fun saveHotspotCredentials(ssid: String, password: String) {
         AirPlayPersistence.saveManualHotspotSsid(this, ssid)
@@ -1317,6 +1503,7 @@ class DiPlayActivity : ComponentActivity() {
     }
 
     private fun askHotspotCredentials(existingWifi: Boolean = false, done: (String, String) -> Unit) {
+
         val fields = column().apply { setPadding(dp(24), dp(12), dp(24), dp(12)) }
         fields.addView(label(getString(if (existingWifi) R.string.existing_wifi_instructions else R.string.copy_these_from_the_car_s_hotspot_settings_use_5_ghz_if_av), 16, MUTED))
         // CS11/4.4: offer what the car itself stores, so the fields never open blank on that firmware.
@@ -1368,6 +1555,7 @@ class DiPlayActivity : ComponentActivity() {
             dialog.getButton(android.app.AlertDialog.BUTTON_NEUTRAL).setOnClickListener { hideKeyboard() }
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                 val name = if (existingWifi) ssid.text.toString() else ssid.text.toString().trim()
+
                 val secret = password.text.toString()
                 val problem = hotspotError(name, secret)
                 if (problem != null) error.text = problem
@@ -1378,7 +1566,6 @@ class DiPlayActivity : ComponentActivity() {
     }
 
     // "Left 20 %", "Centre · default", "Down 10 %": a signed step reads as a direction and a distance.
-
 
     private fun promptEnableUsbAutoConfirm() {
         if (UsbPermissionSetup.Permission.ACCESSIBILITY.granted(this)) {
@@ -1429,7 +1616,7 @@ class DiPlayActivity : ComponentActivity() {
             if (usbPermissionDialog === progress) cancelUsbPermissionSetup()
         }
         progress.show()
-        Thread({
+        com.shilapi.xcertplay.compat.WorkerThreads.start("diplay-auto-permission") {
             val result = operation.run()
             handler.post {
                 if (usbPermissionOperation !== operation || operation.isCancelled || isFinishing || isDestroyed) {
@@ -1454,7 +1641,7 @@ class DiPlayActivity : ComponentActivity() {
                     showManualPermissionDialog(reason)
                 }
             }
-        }, "diplay-auto-permission").start()
+        }
     }
 
     private fun showManualPermissionDialog(reason: String) {
@@ -1524,7 +1711,7 @@ class DiPlayActivity : ComponentActivity() {
         }), 14, if (connected) MUTED else WARNING))
         if (!connected) {
             card.addView(button(getString(R.string.wheel_keys_enable_adb), false) {
-                Thread({
+                com.shilapi.xcertplay.compat.WorkerThreads.start("diplay-wheel-keys-enable") {
                     val access = WheelKeyService.enableOverAdb(this)
                     runOnUiThread {
                         if (access != com.shilapi.xcertplay.adb.LocalAdb.Access.READY) {
@@ -1532,7 +1719,7 @@ class DiPlayActivity : ComponentActivity() {
                         }
                         render()
                     }
-                }, "diplay-wheel-keys-enable").start()
+                }
             }, matchButton(10, 56))
             card.addView(button(getString(R.string.wheel_keys_open_settings), false) {
                 runCatching { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
@@ -1583,12 +1770,8 @@ class DiPlayActivity : ComponentActivity() {
         }
     }
 
-
-
     private fun hasPreciseLocation() =
         hasPermissionCompat(Manifest.permission.ACCESS_FINE_LOCATION)
-
-
 
     private fun reconnectForClusterMap() {
         if (CarPlayBackgroundSession.hasSession()) connect(AirPlayPersistence.loadWirelessEnabled(this))
@@ -1925,15 +2108,20 @@ class DiPlayActivity : ComponentActivity() {
 
     private fun connect(wireless: Boolean) {
         startupHotspotCancelled = true
-        if (wireless && pendingCarHotspotSetup && !carHotspotSelfConfigured()) { toast(getString(R.string.save_your_hotspot_details_in_connection_setup_first)); page = "connection"; render(); return }
         if (setupError != null) { toast(setupError!!); return }
+        // CS11/4.4: the hotspot's SSID and passphrase are read out of the firmware's own AP configuration
+        // (docs/_digest/84), so there is nothing for the owner to type. What can still block a connection is
+        // the car having no usable hotspot configuration at all, and that is what this checks - the saved
+        // form is only a fallback for a unit whose AP configuration cannot be read.
         if (wireless && AirPlayPersistence.loadWirelessHotspotMode(this) == WirelessHotspotMode.MANUAL &&
             !carHotspotSelfConfigured() &&
-            hotspotError(storedSsid(), storedPassword()) != null) {
-            pendingCarHotspotSetup = true
-            page = "connection"
-            render()
-            toast(getString(R.string.save_the_name_and_password_from_the_car_s_hotspot_settings))
+            manualHotspotError() != null) {
+            // Fallback path only: the firmware had no readable AP configuration, so the owner's saved form
+            // is all there is and it has to be valid. The dialog is the same one the mode used to show.
+            askHotspotCredentials { ssid, password ->
+                saveHotspotCredentials(ssid, password)
+                connect(true)
+            }
             return
         }
         if (wireless && carHotspotOff()) { carHotspotOffDialog(); return }
@@ -2081,7 +2269,7 @@ class DiPlayActivity : ComponentActivity() {
         exportButton?.apply { isEnabled = false; text = getString(R.string.saving_report) }
         val appContext = applicationContext
         val fileName = reportFileName()
-        Thread({
+        com.shilapi.xcertplay.compat.WorkerThreads.start("diplay-export") {
             val result = runCatching {
                 val report = buildString {
                     appendLine("DiPlay ${version()} · private beta diagnostic report")
@@ -2152,7 +2340,7 @@ class DiPlayActivity : ComponentActivity() {
                         .setNegativeButton(getString(R.string.close), null).show()
                 }
             }
-        }, "diplay-export").start()
+        }
     }
 
     private fun showDiagnosticReport(report: String) {
@@ -2213,8 +2401,11 @@ class DiPlayActivity : ComponentActivity() {
     private fun paintChannel(index: Int, selected: Boolean) {
         val target = channelButtons.getOrNull(index) ?: return
         target.isSelected = selected
+        // Selected is the inverted primary fill; unselected is the same secondary control every other button
+        // uses. It used to fill with SURFACE, the card's own colour, so an unselected channel had no visible
+        // box at all while a selected one was a white block — the "merges" versus "jarring" pair again.
         target.setTextColor(if (selected) BG else TEXT)
-        target.background = ripple(rounded(if (selected) ACCENT else SURFACE, if (selected) ACCENT else BORDER))
+        target.background = ripple(if (selected) rounded(ACCENT, ACCENT) else secondaryControl())
     }
 
     private fun channelSelector(): ViewGroup {
@@ -2230,6 +2421,10 @@ class DiPlayActivity : ComponentActivity() {
                 isAllCaps = false
                 textSize = 16f
                 minHeight = dp(48)
+                // Set here as well as in paintChannel: the grid is built before any selection is painted, so
+                // without this an unselected channel would render as bare text with no box.
+                setTextColor(TEXT)
+                background = ripple(secondaryControl())
                 if (Build.VERSION.SDK_INT >= 21) stateListAnimator = null
                 setOnClickListener {
                     val previous = navigationStreamType
@@ -2294,7 +2489,7 @@ class DiPlayActivity : ComponentActivity() {
             label = title,
             description = description,
             checked = value,
-            theme = SettingsTheme.CARD,
+            theme = nightPalette,
             contentDescription = title,
             enabled = enabled,
             onChanged = save,
@@ -2324,7 +2519,14 @@ class DiPlayActivity : ComponentActivity() {
         }
         parent.addView(button, matchButton(0, 60)); parent.addView(space(12))
     }
-    private fun card() = column().apply { background = rounded(SURFACE, BORDER); setPadding(dp(24), dp(24), dp(24), dp(24)) }
+    /**
+     * A card, from the shared factory.
+     *
+     * This used to build its own `GradientDrawable`, which is exactly how the page kept a palette of its own
+     * while the overlay was fixed separately: two implementations of "a card", so a change to one never
+     * reached the other (docs/_digest/84).
+     */
+    private fun card() = SettingsWidgets.createCard(this, nightPalette)
     private fun column() = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; layoutParams = LinearLayout.LayoutParams(-1, -2) }
     private fun row() = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; layoutParams = LinearLayout.LayoutParams(-1, -2) }
     private fun label(value: String, size: Int, color: Int, bold: Boolean = false) = TextView(this).apply {
@@ -2335,12 +2537,17 @@ class DiPlayActivity : ComponentActivity() {
     private fun button(title: String, primary: Boolean, click: () -> Unit) = Button(this).apply {
         text = title; isAllCaps = false; textSize = 18f; setTextColor(if (primary) BG else TEXT)
         typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-        // A secondary action is a row with a hairline under it, not a box inside the card's own box: boxes
-        // nested in boxes are what made this page read as a stack of buttons instead of a list (docs/_digest/60).
+        // Two tiers, and nothing in between.
+        //
+        // The secondary tier used to be transparent with a white hairline under it, which on a card read as
+        // "no button at all"; the two places that did fill it used `SURFACE`, the card's own colour, so they
+        // read as "no button at all" a different way. The owner's words were that a button's background either
+        // "merges with the container" or is "jarringly white" (docs/_digest/84). A control needs to be a
+        // filled, outlined box: [RAISED] lifts it 1.22:1 off the card and [CONTROL_BORDER] gives it an edge.
         background = if (primary) {
             ripple(rounded(ACCENT, ACCENT))
         } else {
-            ripple(RowDivider(BORDER, dp(1)))
+            ripple(secondaryControl())
         }
         setPadding(dp(16), 0, dp(16), 0); minHeight = if (primary) dp(56) else dp(52)
         if (Build.VERSION.SDK_INT >= 21) stateListAnimator = null
@@ -2365,6 +2572,12 @@ class DiPlayActivity : ComponentActivity() {
     }
     // 4 dp: squared enough to read as technical, which is the register the brand's graphics live in.
     private fun rounded(color: Int, stroke: Int) = GradientDrawable().apply { setColor(color); cornerRadius = dp(4).toFloat(); setStroke(dp(1), stroke) }
+
+    /**
+     * The background of any control that is neither the page nor the primary action: buttons, unselected
+     * chips. One definition, so the two tiers cannot drift apart again.
+     */
+    private fun secondaryControl() = rounded(RAISED, CONTROL_BORDER)
     // CS11: RippleDrawable 是 API21+；4.4 回退为静态圆角底
     private fun ripple(content: android.graphics.drawable.Drawable): android.graphics.drawable.Drawable =
         if (Build.VERSION.SDK_INT >= 21) android.graphics.drawable.RippleDrawable(ColorStateList.valueOf(0x336F9FD9), content, null) else content
@@ -2372,20 +2585,110 @@ class DiPlayActivity : ComponentActivity() {
     private fun space(height: Int) = View(this).apply { layoutParams = LinearLayout.LayoutParams(1, dp(height)) }
     // Rounded, not truncated: below 160 dpi dp(1) became 0 and every border vanished.
     private fun dp(value: Int) = (value * resources.displayMetrics.density).roundToInt()
+
+    /**
+     * The cabin's theme, resolved once per render from the owner's own day/night setting.
+     *
+     * `CarPlayNightMode` is the single source of truth: it already drives CarPlay's night mode itself, so
+     * hanging this page off the same setting keeps the two in step. `DAY`/`NIGHT` are explicit, `SYSTEM`
+     * follows Android's own `uiMode`, and `AMBIENT` falls back to `SYSTEM` here because the light sensor is
+     * owned by the host activity's controller — this page is a flat surface with no video on it, so being a
+     * few seconds behind a cloud is not worth a second sensor listener.
+     */
+    private val nightPalette: SettingsTheme get() = SettingsTheme.page(resolvedNight)
+
+    /**
+     * Whether the page should be dark, with every one of the four modes actually honoured.
+     *
+     * Before this, `SYSTEM` and `AMBIENT` both read `Configuration.uiMode`, so on the head unit — whose
+     * `uiMode` never reports night — picking either one left the page light no matter how dark the cabin
+     * was (owner report, 2026-10-18). `AMBIENT` now follows the light sensor against the saved threshold,
+     * and `SYSTEM` falls back to `uiMode` only when there is no sensor or no reading yet.
+     */
+    private val resolvedNight: Boolean
+        get() = when (AirPlayPersistence.loadCarPlayNightMode(this)) {
+            CarPlayNightMode.DAY -> false
+            CarPlayNightMode.NIGHT -> true
+            CarPlayNightMode.SYSTEM -> systemNight
+            CarPlayNightMode.AMBIENT ->
+                if (ambientSensorAvailable) ambientNight else systemNight
+        }
+
+    private val systemNight: Boolean
+        get() = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
+            Configuration.UI_MODE_NIGHT_YES
+
+    private val ambientSensorAvailable: Boolean
+        get() = runCatching { ambientLight.available }.getOrDefault(false)
+
+    /** Last sensor reading decided the page is dark. Flipped by [onAmbientLux]. */
+    private var ambientNight = false
+    private var ambientListening = false
+    private var lastRenderedNight: Boolean? = null
+
+    private val ambientLight by lazy { AndroidAmbientLight(this) }
+
+    private fun onAmbientLux(lux: Float) {
+        if (!lux.isFinite() || lux < 0f) return
+        val threshold = AirPlayPersistence.loadAmbientLightThreshold(this).lux
+        val night = lux < threshold
+        if (night == ambientNight) return
+        ambientNight = night
+        if (page == "settings" || page == "about") render()
+    }
+
+    /**
+     * Starts or stops the light sensor for the page palette, and re-renders when the resolved mode moved
+     * while the screen was not visible (the settings page can sit behind CarPlay for a long time).
+     */
+    private fun syncNightModeWithScreen() {
+        val mode = AirPlayPersistence.loadCarPlayNightMode(this)
+        val wantListening = mode == CarPlayNightMode.AMBIENT && ambientSensorAvailable
+        if (wantListening && !ambientListening) {
+            ambientListening = ambientLight.start(::onAmbientLux)
+        } else if (!wantListening && ambientListening) {
+            ambientLight.stop()
+            ambientListening = false
+        }
+        val rendered = lastRenderedNight
+        if (rendered != null && rendered != resolvedNight) render()
+    }
+
+    /**
+     * The page palette. These read the resolved theme on each access rather than being constants, because
+     * the same binary draws a light page in daylight and a dark one at night; a `val` snapshot taken at
+     * class-init would pin whichever mode the process happened to start in.
+     *
+     * Three borders, not one, because nothing here can cast a shadow — see [SettingsTheme]. [BORDER]
+     * outlines cards and controls, which is the boundary the driver actually reads.
+     */
+    private val BG get() = nightPalette.background
+    private val SURFACE get() = nightPalette.surface
+    private val RAISED get() = nightPalette.surfaceElevated
+    private val DIVIDER get() = nightPalette.divider
+    private val BORDER get() = nightPalette.cardBorder
+    private val CONTROL_BORDER get() = nightPalette.controlBorder
+    private val ACCENT get() = nightPalette.accent
+    private val TEXT get() = nightPalette.textPrimary
+    private val MUTED get() = nightPalette.textSecondary
+    private val SUCCESS get() = nightPalette.success
+    private val WARNING get() = nightPalette.warning
+
     companion object {
         private const val VEHICLE_VALIDATION_RETRY_MILLIS = 500L
         private const val ADB_KEY_SAVE_WAIT_MILLIS = 500L
-        // Lynk & Co tokens (docs/_digest/60): pure black page, warm near-black surfaces, 1 px hairlines and a
-        // white inverted primary button. Sampled from the brand's own wordmark (pure #000000) and site
-        // imagery (#10100E, #141311); colour carries no meaning here, weight and spacing do.
-        private val BG = Color.rgb(0x00, 0x00, 0x00)
-        private val SURFACE = Color.rgb(0x10, 0x10, 0x10)
-        // One step lighter than a card, so a button reads as a button even where its 1 px border is faint.
-        private val BUTTON = Color.rgb(0x1A, 0x19, 0x17)
-        private val BORDER = Color.rgb(0x2A, 0x29, 0x26)
-        private val ACCENT = Color.rgb(0xFF, 0xFF, 0xFF)
-        private val TEXT = Color.rgb(0xFF, 0xFF, 0xFF)
-        private val MUTED = Color.rgb(0x9A, 0x9A, 0x96)
-        private val WARNING = Color.rgb(0xE0, 0xA6, 0x4A)
+
+        /** Lets the task leave the screen before the process ends; see `exitDiPlay`. */
+        private const val EXIT_KILL_DELAY_MILLIS = 250L
+
+        /** Every preference file the app opens after `onCreate`; see `warmUpPreferences`. */
+        private val PREFERENCE_FILES = listOf(
+            "diplay",
+            "diplay_car_hotspot",
+            "diplay_phone_wake",
+            "carplay_picture",
+            "carplay_wifi_p2p",
+            "carplay_wifi_p2p_success",
+        )
     }
 }

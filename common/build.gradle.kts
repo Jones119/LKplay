@@ -27,7 +27,12 @@ android {
         // (this fixed thirteen tests in :shared) so the tests check the behaviour they describe.
         unitTests.isReturnDefaultValues = true
         // The UI suite covers several SDKs and locale-specific resource sandboxes.
-        unitTests.all { it.maxHeapSize = "1g" }
+        unitTests.all {
+            it.maxHeapSize = "1g"
+            // CS11: android.util.Log is a no-op here (`isReturnDefaultValues` above), so a test that needs
+            // to show why an assertion failed has only println. Gradle swallows it unless this is on.
+            it.testLogging { events("failed"); showStandardStreams = true }
+        }
     }
 
     // CS11: lint 只作清单使用，不阻断构建（M2 修复期）

@@ -1,6 +1,7 @@
 package com.shilapi.xcertplay.settings
 
 import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
 import android.view.View
 import android.view.ViewGroup
 import android.widget.RadioButton
@@ -60,25 +61,59 @@ class SettingsWidgetsTest {
         }
     }
 
+    /**
+     * The overlay keeps the monochrome tokens and the label-only metrics, and now shows a description
+     * too when the caller supplies one.
+     *
+     * The description is the point: the overlay used to drop it, so the same switch explained itself on
+     * the settings page and said nothing in the three-finger panel, and the panel drew its own prose
+     * with a hardcoded colour from the retired palette (docs/_digest/60).
+     */
     @Test fun overlayUsesTheMonochromeTokensAndLabelMetrics() {
         val row = ConnectionSettingsSection.createWirelessCarPlayRow(context, true, onChanged = {})
-        val label = (row.rowView as ViewGroup).getChildAt(0) as TextView
-        assertEquals(20f, label.textSize / context.resources.displayMetrics.scaledDensity, 0.01f)
+        val texts = views(row.rowView).filterIsInstance<TextView>().filter { it !== row.switch }.toList()
+        // Label first, then the description the section passes for this row.
+        assertEquals(2, texts.size)
+        val label = texts[0]
+        val description = texts[1]
+        // 18 sp, the size every overlay row label uses: a switch, a choice and a slider label all read at
+        // the same rank. The wireless row used to ask for 20 sp and stood out in the panel.
+        assertEquals(18f, label.textSize / context.resources.displayMetrics.scaledDensity, 0.01f)
         assertFalse(label.includeFontPadding)
         assertEquals(Color.rgb(0x9A, 0x9A, 0x96), label.currentTextColor)
-        assertEquals(Color.rgb(0xFF, 0xFF, 0xFF), row.switch.thumbTintList!!.getColorForState(
-            intArrayOf(android.R.attr.state_checked), 0))
+        assertEquals(Color.rgb(0x9A, 0x9A, 0x96), description.currentTextColor)
+        // The switch is painted through drawables, not tint lists: `thumbTintList` is API 23+ and the CS11
+        // is API 19, where it is silently absent — which is how the head unit ended up drawing the
+        // framework's own Holo switch in colours this project never chose.
+        val thumb = row.switch.thumbDrawable as GradientDrawable
+        val track = row.switch.trackDrawable as GradientDrawable
+        // The checked thumb is `buttonText`, not `accent`. `accent` is also the *fill* of a primary button,
+        // and against the light `accentTrack` it measured about 1.9:1 — the driver reported the night
+        // switches as "contrast a bit small" on the car (2026-10-18). `buttonText` is the colour that is
+        // meant to sit on that family of fill, so the thumb-to-track contrast is roughly 8:1 in every theme.
+        assertEquals(SettingsTheme.OVERLAY.buttonText, thumb.color?.defaultColor)
+        assertEquals(SettingsTheme.OVERLAY.accentTrack, track.color?.defaultColor)
+        // What actually matters for the driver: the thumb must not vanish into its own track.
+        assertTrue(thumb.color!!.defaultColor != track.color!!.defaultColor)
         val heading = SettingsWidgets.createCategoryHeader(context, "Heading")
         assertEquals(Color.rgb(0xFF, 0xFF, 0xFF), heading.currentTextColor)
         assertFalse(heading.includeFontPadding)
     }
 
+    /** A row with no description stays label-only, so the overlay does not gain empty space. */
+    @Test fun anOverlayRowWithoutADescriptionRendersOnlyItsLabel() {
+        val row = SettingsWidgets.createSwitchRow(context, "Title", "", false,
+            SettingsTheme.OVERLAY, onChanged = {})
+        val texts = views(row.rowView).filterIsInstance<TextView>().filter { it !== row.switch }.toList()
+        assertEquals(listOf("Title"), texts.map { it.text.toString() })
+    }
+
     @Test fun cardDescriptionsKeepMultilineSpacingAndTheirAccessibleTitle() {
         val row = SettingsWidgets.createSwitchRow(context, "Title", "First line\nSecond line", false,
-            SettingsTheme.CARD, onChanged = {})
+            SettingsTheme.NIGHT, onChanged = {})
         val texts = views(row.rowView).filterIsInstance<TextView>().filter { it !== row.switch }.toList()
         assertEquals(listOf("Title", "First line\nSecond line"), texts.map { it.text.toString() })
-        assertTrue(texts.all { it.lineSpacingExtra == SettingsTheme.CARD.dp(context, 3).toFloat() })
+        assertTrue(texts.all { it.lineSpacingExtra == SettingsTheme.NIGHT.dp(context, 3).toFloat() })
         assertEquals("Title", row.switch.contentDescription)
     }
 

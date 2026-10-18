@@ -83,4 +83,19 @@ internal object DiPlayPreferences {
     fun saveConnectOnPhoneBluetooth(context: Context, value: Boolean) {
         prefs(context).edit().putBoolean("connect_on_phone_bluetooth", value).apply()
     }
+
+    /**
+     * Tapping DiPlay while CarPlay is already running comes straight back to the CarPlay screen instead of
+     * the app's own home page (docs/_digest/84). **On by default**: that is what the driver expects, and it
+     * keeps the host activity's video surface from being torn down and rebuilt for nothing.
+     *
+     * Only the *already connected* case is governed here. What happens with no session - showing the home
+     * page, and whether to dial out by itself - stays with [autoConnect] and [connectOnPhoneBluetooth], so
+     * the three switches cannot contradict each other.
+     */
+    fun resumeCarPlayOnOpen(context: Context) =
+        prefs(context).getBoolean("resume_carplay_on_open", true)
+    fun saveResumeCarPlayOnOpen(context: Context, value: Boolean) {
+        prefs(context).edit().putBoolean("resume_carplay_on_open", value).apply()
+    }
 }

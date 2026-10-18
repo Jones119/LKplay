@@ -1,4 +1,9 @@
 <resources>
+    <string name="audio_decoder">音频解码器</string>
+    <string name="audio_decoder_platform">平台（MediaCodec）</string>
+    <string name="audio_decoder_freescale">Freescale AAC（厂商）</string>
+    <string name="audio_decoder_description">选择由哪个解码器播放 CarPlay 音频。平台（MediaCodec）为默认且始终可用。厂商 Freescale 解码器从车机自带的系统库加载，作为实验项提供；若不存在或无法启动，会自动改用平台解码器，并把原因写入诊断日志。</string>
+    <string name="audio_decoder_unavailable">本车机不可用（%1$s）</string>
     <string name="existing_wifi_title">现有 Wi-Fi / 同一局域网</string>
     <string name="existing_wifi_description">使用已有路由器或随身 Wi-Fi。让 iPhone 和车机保持连接同一网络，并通过它上网。</string>
     <string name="existing_wifi_hint">现有 Wi-Fi · 两台设备保持连接同一 Wi-Fi，蓝牙保持开启，无需开启车机热点。</string>
@@ -28,8 +33,8 @@
     <string name="hotspot_mode_manual_desc">使用车辆自带热点。若车机支持，请在车机设置中选择 5 GHz。</string>
     <string name="hotspot_mode_p2p_desc">备选方案。需要打开车机 Wi-Fi 开关；2.4 GHz 连接可能会卡顿。</string>
     <string name="hotspot_details_off">热点已关闭 · 请在车机设置中开启。</string>
-    <string name="hotspot_details_saved">详情已保存 · 连接前请确认车载热点已开启。</string>
     <string name="hotspot_details_read_from_car">已自动读取本车热点（%1$s）· 无需手动填写。</string>
+    <string name="turn_on_the_car_hotspot_in_the_car_settings_then_connect_again">无法从本车机读取热点信息。请在车机设置中开启车载热点后重试。</string>
     <string name="permission_enabled_ready">权限已启用 · 可以使用</string>
     <string name="permission_not_enabled">权限尚未启用</string>
     <string name="clipboard_usage_access">DiPlay 使用情况访问权限</string>
@@ -79,7 +84,6 @@
     <string name="audio_saved_value">已保存：%1$d</string>
     <string name="about_public_preview_prefix">公开预览 ·\u0020</string>
     <string name="msg_car_hotspot_connect">DiPlay 通过车机热点“%1$s”连接。请在车机设置中开启热点后连接。</string>
-    <string name="edit_saved_hotspot_prefix">编辑已保存的热点 ·\u0020</string>
     <string name="cluster_adb_multi_device">如果 ADB 列出多个设备，请使用 adb -s &lt;car-device-ID&gt; shell appops set %1$s GET_USAGE_STATS allow。用 adb devices 查询 ID。</string>
     <string name="status_ready_for_prefix">已准备连接：</string>
     <string name="audio_stream_unavailable">流类型 %1$d 在此不可用（状态=%2$s）</string>
@@ -162,6 +166,8 @@
     <string name="connect_when_diplay_opens">打开 DiPlay 时连接</string>
     <string name="connect_when_iphone_bluetooth_connects">已选 iPhone 重连蓝牙时自动连接</string>
     <string name="connect_when_iphone_bluetooth_connects_description">车机唤醒后，已选 iPhone 连上蓝牙时打开 DiPlay 并启动无线 CarPlay。部分车机会限制后台启动。</string>
+    <string name="resume_carplay_on_open">打开 DiPlay 时直接回到 CarPlay</string>
+    <string name="resume_carplay_on_open_description">CarPlay 运行中时，点击 DiPlay 直接回到 CarPlay 画面，而不是应用主界面。关闭后每次都会先进入主界面。仅影响已连接的车辆。</string>
     <string name="connect_with_usb">通过 USB 连接</string>
     <string name="connect_your_iphone_with_a_usb_cable">请使用 USB 数据线连接 iPhone</string>
     <string name="connecting_bluetooth">正在连接蓝牙</string>
@@ -198,12 +204,9 @@
     <string name="enable_the_car_s_bluetooth_and_pair_your_iphone_first">请先打开车机蓝牙并配对 iPhone。</string>
     <string name="error">错误</string>
     <string name="exit_application">退出应用</string>
-    <string name="finish_setup_save_your_hotspot_details_to_use_this_mode">完成设置 · 保存热点信息以使用此模式。</string>
     <string name="follow_instrument_theme_and_map_card">跟随仪表盘主题和地图卡片</string>
     <string name="frame_rate">帧率</string>
     <string name="full_screen">全屏显示</string>
-    <string name="adapt_pip_resolution">画中画与分屏自适应</string>
-    <string name="adapt_pip_resolution_description">切换至桌面画中画或分屏悬浮小窗口时，自动断开重连以适应窗口分辨率，消除上下左右黑边。保持关闭可实现 0 毫秒 GPU 秒级自适应且不重连。</string>
     <string name="fullscreen">全屏</string>
     <string name="getting_carplay_ready">正在准备 CarPlay…</string>
     <string name="got_it">知道了</string>
@@ -314,7 +317,8 @@
     <string name="s_1_0x">1.0x</string>
     <string name="s_1_choose_your_connection">1 · 选择连接方式</string>
     <string name="s_1_connect_a_computer_with_adb_installed_to_the_car_using">1. 用装有 ADB 的电脑，通过现有的 USB 或无线调试连接连接到车机。如有调试授权提示请批准。\n\n2. 在电脑终端中运行此命令：</string>
-    <string name="s_1_open_car_hotspot_settings_turn_the_hotspot_on_and_sele">1. 打开车机热点设置，开启热点，如有 5 GHz 请选择。\n2. 在下方准确复制热点名称和密码。\n3. 连接时保持车机热点开启。DiPlay 通过蓝牙发送热点信息，iPhone 会自动加入。</string>
+    <string name="s_1_open_car_hotspot_settings_turn_the_hotspot_on_and_sele">1. 打开车机热点设置，开启热点；如有 5 GHz 请选择。
+2. 连接时保持车机热点开启。DiPlay 会自动读取本车热点的名称和密码，并通过蓝牙发送给 iPhone，手机会自行加入热点，无需手动填写。</string>
     <string name="s_2_4_ghz">2.4 GHz</string>
     <string name="s_2_pair_your_iphone">2 · 配对你的 iPhone</string>
     <string name="s_300_ms_default">300 毫秒 · 默认</string>
@@ -333,9 +337,6 @@
     <string name="save_and_reconnect">保存并重新连接</string>
     <string name="save_details">保存详情</string>
     <string name="save_diagnostic_report">保存诊断报告</string>
-    <string name="save_hotspot_details_and_use_this_mode">保存热点信息并使用此模式</string>
-    <string name="save_the_name_and_password_from_the_car_s_hotspot_settings">请先保存车机热点设置中的名称和密码</string>
-    <string name="save_your_hotspot_details_in_connection_setup_first">请先在“连接设置”中保存热点信息</string>
     <string name="saved_for_your_next_connection">已保存，将在下次连接时生效</string>
     <string name="saving_report">正在保存报告…</string>
     <string name="security">安全类型</string>
@@ -658,4 +659,5 @@
     <string name="screen_corner_mask">屏幕四角圆角遮罩</string>
     <string name="screen_corner_mask_description">车机可视屏幕的开口是圆角的，满屏的 CarPlay 画面在四角会被车身边框裁掉。开启后在屏幕四角按相同弧度涂黑，让 CarPlay 画面正好贴合影屏开口。默认关闭；只有车机确实裁掉画面四角时才需要打开。</string>
     <string name="settings_category_other">其他</string>
+  <string name="exit_application_description">完全关闭 DiPlay：CarPlay 连接、车载热点和所有后台线程一起结束。</string>
 </resources>

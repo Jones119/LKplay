@@ -5,7 +5,8 @@
     <string name="carplay_night_ambient">تلقائي (الإضاءة المحيطة)</string>
     <string name="carplay_night_day">نهار دائمًا</string>
     <string name="carplay_night_night">ليل دائمًا</string>
-    <string name="carplay_night_hint">احفظ ثم عد إلى CarPlay للتطبيق.</string>
+    <string name="carplay_night_hint">يُطبَّق على هذه الشاشة فورًا، وتأخذه صورة CarPlay عند الاتصال التالي.</string>
     <string name="carplay_night_ambient_hint">يستخدم الوضع التلقائي العتبة والتأخير أدناه؛ ويتبع Android عند غياب مستشعر الضوء.</string>
     <string name="carplay_night_time_note">يراعي مظهر CarPlay التلقائي وقت iPhone أيضًا؛ لذا قد يبقى داكنًا ليلًا حتى عند اختيار نهار دائمًا.</string>
+    <string name="carplay_night_auto_unavailable">لا يستطيع DiPlay قراءة مستشعر الضوء ولا حالة الليل/النهار من هذا الجهاز، لذا قد يبقى الوضعان التلقائيان نهاريين. استخدم «نهار دائم» أو «ليل دائم».</string>
 </resources>
