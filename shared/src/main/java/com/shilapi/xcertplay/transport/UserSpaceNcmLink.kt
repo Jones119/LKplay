@@ -83,7 +83,19 @@ internal class UserSpaceNcmLink(
         while (running.get()) {
             if (jni.nativeTxPending() <= 0) {
                 // Short enough for the audio path (12 ms frames) and cheap enough on this SoC.
-                Thread.sleep(TRANSMIT_POLL_MILLIS)
+                //
+                // The sleep is guarded: `close()` interrupts this thread, and an InterruptedException
+                // escaping a thread body is an uncaught exception, which kills the whole process. The pump
+                // spends nearly all of its time in this sleep, so a teardown (a reconnect, a display-size
+                // change) hit it often - measured on the car 2026-10-18 as
+                // `FATAL EXCEPTION: ncm-us-tx / java.lang.InterruptedException ... pumpTransmit`.
+                // Being interrupted here is the normal way out, not a failure to report.
+                try {
+                    Thread.sleep(TRANSMIT_POLL_MILLIS)
+                } catch (interrupted: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    return
+                }
                 continue
             }
             val length = jni.nativePollTxFrame(frame)
