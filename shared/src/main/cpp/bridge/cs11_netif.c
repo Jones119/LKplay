@@ -175,8 +175,21 @@ int cs11_netif_input(const u8_t *frame, size_t length) {
     }
     g_cs11.rx_frames++;
     g_cs11.rx_bytes += (u32_t)length;
+    /* The input function must be checked for NULL: `netif_add` sets it, and a netif that was rebuilt or
+     * zeroed would leave it empty, which is a jump to address zero. */
+    if (g_cs11.netif.input == NULL) {
+        pbuf_free(p);
+        return -5;
+    }
     if (g_cs11.netif.input(p, &g_cs11.netif) != ERR_OK) {
-        /* tcpip_input already freed the pbuf on failure. */
+        /* The pbuf is ours to free.
+         *
+         * This used to claim "tcpip_input already freed the pbuf on failure", which is wrong: lwIP 2.2.0's
+         * tcpip_inpkt() returns ERR_MEM on both of its failure paths - a failed memp_malloc and a failed
+         * sys_mbox_trypost - and in neither of them does it touch `p`. Only the message is freed. Leaving the
+         * claim in place leaked a pool buffer for every packet the mailbox refused, which is exactly the load
+         * a burst of swipes produces. */
+        pbuf_free(p);
         return -4;
     }
     return 0;

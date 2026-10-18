@@ -192,7 +192,16 @@ void sys_mbox_free(sys_mbox_t *mbox) {
     if (m == NULL) {
         return;
     }
-    /* lwIP requires an empty mailbox here; a non-empty one is a leak in its own bookkeeping. */
+    /* lwIP requires an empty mailbox here; a non-empty one is a leak in its own bookkeeping.
+     *
+     * Wake anyone blocked on this mailbox first. A thread parked in sys_mbox_post() on `not_full` (or in
+     * sys_arch_mbox_fetch on `not_empty`) resumes inside a condition variable and mutex that this function is
+     * about to destroy, which is undefined behaviour - and the teardown path does free mailboxes while pump
+     * threads are still running. */
+    pthread_mutex_lock(&m->mutex);
+    pthread_cond_broadcast(&m->not_empty);
+    pthread_cond_broadcast(&m->not_full);
+    pthread_mutex_unlock(&m->mutex);
     pthread_mutex_destroy(&m->mutex);
     pthread_cond_destroy(&m->not_empty);
     pthread_cond_destroy(&m->not_full);

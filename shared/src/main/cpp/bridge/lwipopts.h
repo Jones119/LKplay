@@ -114,6 +114,12 @@
 #define TCPIP_THREAD_STACKSIZE          (8 * 1024)
 #define TCPIP_THREAD_PRIO               2
 #define TCPIP_MBOX_SIZE                 256
+/*
+ * How many received-packet messages may be queued at once. lwIP's default is 8, and a burst of touch events
+ * makes the receive pump post faster than the tcpip thread drains, so posts were refused - and refused posts
+ * used to leak their pbuf. Sized with the mailbox instead of left at the default.
+ */
+#define MEMP_NUM_TCPIP_MSG_INPKT        64
 #define DEFAULT_THREAD_STACKSIZE        (4 * 1024)
 #define DEFAULT_THREAD_PRIO             1
 #define LWIP_TCPIP_CORE_LOCKING         0
