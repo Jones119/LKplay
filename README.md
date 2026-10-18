@@ -13,7 +13,7 @@ claims support for the CS11. See [Scope](#scope) before installing it anywhere e
 > Geely or ECARX affiliation or endorsement is implied.
 
 - Package: `com.shihab.diplay` (`com.shihab.diplay.hudtest` for the debug variant)
-- Version: `0.2.15-cs11.1` (`-hud-test`), versionCode 34
+- Version: `0.2.21-cs11.1` (`-hud-test`), versionCode 40
 - Engines: `minSdk 19`, `targetSdk 37`, `armeabi-v7a` only, core library desugaring on, multidex
 
 ## Status (2026-10-12)
