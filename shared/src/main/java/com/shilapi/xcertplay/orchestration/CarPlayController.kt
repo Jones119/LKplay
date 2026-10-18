@@ -1701,27 +1701,21 @@ class CarPlayController(
             when (result) {
                 is IphoneUsbHost.Iap2SessionResult.Connected -> {
                     try {
-                        // CS11: the kernel cannot create TUN interfaces, so the raw-USB NCM bridge can
-                        // never carry media; `openNcm` is raw-USB only. On API 19 the kernel cdc_ncm
-                        // netdev + system network stack replace it end to end (Cs11NetdevBootstrap,
-                        // whose `supported` is exactly "SDK_INT < 21"), so the bridge is not attempted
-                        // and `ncm` stays null for attachSystemNetdev() in runStack().
-                        //
-                        // This used to read `< 21 && Cs11NetdevBootstrap.supported`, which degenerates
-                        // into the same level test, and it left a second, unreachable `< 21` degradation
-                        // branch below that suppressed the diagnostic. The raw-USB NCM path was
-                        // superseded by the kernel netdev in 5b0f5774, so the API-19 half of `openNcm`
-                        // is gone and this is now the single explicit decision; see docs/_digest/49.
+                        // Both older wired data paths are gone from this fork: the kernel cdc_ncm netdev
+                        // needed root+adb to fire (docs/_digest/49) and the VpnService/TUN transport was
+                        // deleted in 6620ad61 because the CS11 kernel has no TUN. The userspace lwIP
+                        // bridge is therefore the only transport that can carry media, on API 19 and on
+                        // the tablet bench alike, so it is attempted first on every API level; `openNcm`
+                        // stays only as a last-resort probe on 21+.
                         val mode = NcmLegacyPolicy.current()
                         val decision = wiredTransportDecision(
                             Build.VERSION.SDK_INT,
                             mode,
                             UserspaceNcmTransport.readiness(LegacyUsbNative.available),
                         )
-                        // API 19 carries the link with lwIP on the userspace bridge; API 21+ uses the raw
-                        // USB NCM path. FORCE with a missing stack or library is still worth a probe, because
-                        // it reports what the descriptors and the negotiation actually did.
-                        val userspaceLink = if (decision.userspace && Build.VERSION.SDK_INT < 21) {
+                        // FORCE with a missing stack or library is still worth a probe: it reports what
+                        // the descriptors and the negotiation actually did.
+                        val userspaceLink = if (decision.userspace) {
                             openUserspaceNcm(device)
                         } else {
                             null
@@ -1729,7 +1723,7 @@ class CarPlayController(
                         if (userspaceLink == null && mode == NcmLegacyMode.FORCE && !decision.userspace) {
                             probeUserspaceNcm(device)
                         }
-                        val ncm = if (decision.userspace && Build.VERSION.SDK_INT >= 21) {
+                        val ncm = if (decision.userspace && userspaceLink == null && Build.VERSION.SDK_INT >= 21) {
                             openNcm(device)
                         } else {
                             null
