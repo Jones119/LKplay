@@ -247,6 +247,8 @@ class CarPlayHostActivity : ComponentActivity() {
     private var gestureOverlay: View? = null
     private var cornerMaskOverlay: CarPlayCornerMaskOverlay? = null
     private var settingsMenu: View? = null
+    /** Marks where the settings menu goes; the menu itself is built on first open. */
+    private var settingsMenuAnchor: ViewGroup? = null
     private var mfiTargetGroup: RadioGroup? = null
     private var mfiRemoteFields: View? = null
     private var mfiErrorView: TextView? = null
@@ -1211,8 +1213,15 @@ class CarPlayHostActivity : ComponentActivity() {
             insets
         }
         ViewCompat.requestApplyInsets(viewport)
-        settingsMenu = buildSettingsMenu().apply { visibility = View.GONE }
-        root.addView(settingsMenu, FrameLayout.LayoutParams(-1, -1))
+        // The settings menu is built on first open, not here.
+        //
+        // `openSettingsMenu` already rebuilds it every time (`buildSettingsMenu()` replaces the previous
+        // instance), so the one built during `onCreate` was discarded unread - and building it cost part of
+        // the several seconds of black screen between plugging in the iPhone and the connecting screen
+        // (measured: Host started -> Starting controller took 2203 ms on the car, 2026-10-18). The anchor
+        // keeps the menu's z-order without building anything.
+        settingsMenuAnchor = FrameLayout(this)
+        root.addView(settingsMenuAnchor, FrameLayout.LayoutParams(-1, -1))
         safeAreaEditor = buildSafeAreaEditor().apply { visibility = View.GONE }
         root.addView(safeAreaEditor, FrameLayout.LayoutParams(-1, -1))
         videoView = video
@@ -4154,12 +4163,22 @@ class CarPlayHostActivity : ComponentActivity() {
         loadPersistedSettings()
         settingsBaseline = captureSettingsBaseline()
         // Rebuild controls from saved values so a cancelled edit cannot reappear on reopening.
-        settingsMenu?.let { previous ->
+        val previous = settingsMenu
+        if (previous != null) {
             val parent = previous.parent as ViewGroup
             val index = parent.indexOfChild(previous)
             parent.removeView(previous)
             settingsMenu = buildSettingsMenu()
             parent.addView(settingsMenu, index, FrameLayout.LayoutParams(-1, -1))
+        } else {
+            // First open: build it now and put it where the anchor sits, so the z-order is unchanged.
+            val anchor = settingsMenuAnchor
+            val parent = anchor?.parent as? ViewGroup
+            if (parent != null && anchor != null) {
+                val index = parent.indexOfChild(anchor)
+                settingsMenu = buildSettingsMenu()
+                parent.addView(settingsMenu, index, FrameLayout.LayoutParams(-1, -1))
+            }
         }
         menuOpen = true
         gestureOverlay?.visibility = View.GONE
@@ -4574,7 +4593,12 @@ class CarPlayHostActivity : ComponentActivity() {
         stageStatusView?.text = friendly
         // The recent stages are the connecting screen's own list: it says how far the bring-up got, which is
         // what a driver waiting at the screen - and a log read afterwards - needs (docs/_digest/60).
-        if (recentStages.isEmpty() || recentStages.last() != friendly) {
+        // Wired redraws the checklist on every status, not only when the friendly text changes: the friendly
+        // mapper collapses many stages into one sentence, so the dedup below swallowed most node advances and
+        // the screen sat on "preparing MFi" until CarPlay appeared (measured: two redraws, node=0 both times).
+        if (!wirelessEnabled) {
+            renderConnectChecklist()
+        } else if (recentStages.isEmpty() || recentStages.last() != friendly) {
             recentStages.addLast(friendly)
             while (recentStages.size > recentStageLimit) recentStages.removeFirst()
             renderRecentStages()
