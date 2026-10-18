@@ -1,20 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.Xcertplay" parent="android:Theme.Material.NoActionBar">
+    <!--
+        The API 19 theme (head unit / CS11).
+
+        The parent used to be `android:Theme.Material.NoActionBar`, which does not exist before API 21:
+        the platform silently falls back to a default theme and every Material attribute below is lost.
+        `colorAccent`, `statusBarColor`, `navigationBarColor` and `windowLightStatusBar` are API 21/23 as
+        well, so they live in values-v21/themes.xml now.
+
+        `windowBackground` has to be a **drawable**, not `@color/...`: on 4.4 `Resources.loadDrawable`
+        rejects a colour with `Resources$NotFoundException: Resource is not a Drawable (color or path)` —
+        the warning that kept appearing in the car's logcat from `FrameLayout.<init>`. API 21+ wraps a
+        colour into a ColorDrawable, which is why this only ever broke on the head unit.
+    -->
+    <style name="Theme.Xcertplay" parent="android:Theme.Holo.NoActionBar">
         <item name="android:fontFamily">sans</item>
-        <item name="android:colorAccent">@color/diplay_color_accent</item>
-        <item name="android:windowLightStatusBar">false</item>
-        <item name="android:navigationBarColor">@color/diplay_navigation_bar</item>
-        <item name="android:statusBarColor">@color/diplay_status_bar</item>
-        <item name="android:windowBackground">@color/diplay_window_background</item>
+        <item name="android:windowBackground">@drawable/diplay_window_background</item>
         <item name="android:windowActionModeOverlay">true</item>
-        <!-- CS11: Theme.Material does not exist before API 21; the fallback theme would show the
-             legacy title/action bar. These two flags strip it regardless of the resolved parent. -->
         <item name="android:windowActionBar">false</item>
         <item name="android:windowNoTitle">true</item>
     </style>
-    <style name="Theme.AdbCluster" parent="android:Theme.Material.NoActionBar">
+
+    <style name="Theme.AdbCluster" parent="android:Theme.Holo.NoActionBar">
         <item name="android:windowIsTranslucent">true</item>
-        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowBackground">@drawable/diplay_window_transparent</item>
         <item name="android:windowNoTitle">true</item>
         <item name="android:backgroundDimEnabled">false</item>
         <item name="android:windowDisablePreview">true</item>

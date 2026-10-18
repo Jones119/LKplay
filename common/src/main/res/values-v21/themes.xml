@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        API 21+ keeps the Material theme and the attributes that only exist there.
+        `windowLightStatusBar` arrived in API 23, but declaring it here is harmless: 21–22 ignore an
+        attribute they do not know instead of failing.
+    -->
+    <style name="Theme.Xcertplay" parent="android:Theme.Material.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:colorAccent">@color/diplay_color_accent</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:navigationBarColor">@color/diplay_navigation_bar</item>
+        <item name="android:statusBarColor">@color/diplay_status_bar</item>
+        <item name="android:windowBackground">@color/diplay_window_background</item>
+        <item name="android:windowActionModeOverlay">true</item>
+        <item name="android:windowActionBar">false</item>
+        <item name="android:windowNoTitle">true</item>
+    </style>
+
+    <style name="Theme.AdbCluster" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:backgroundDimEnabled">false</item>
+        <item name="android:windowDisablePreview">true</item>
+    </style>
+</resources>

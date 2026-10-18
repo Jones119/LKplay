@@ -275,12 +275,35 @@ object SettingsWidgets {
             setColor(theme.surfaceElevated)
             setStroke(theme.dp(context, 2), theme.controlBorder)
         }
-        val states = android.graphics.drawable.StateListDrawable().apply {
+        val states = SizedStateList(theme.dp(context, 20).coerceAtLeast(1)).apply {
             addState(intArrayOf(android.R.attr.state_checked), dotOn)
             addState(intArrayOf(), dotOff)
         }
         setButtonDrawable(states)
-        if (Build.VERSION.SDK_INT >= 16) buttonDrawable?.setBounds(0, 0, theme.dp(context, 20), theme.dp(context, 20))
+        // Size the dot through the drawables we already hold.
+        //
+        // This used to read the button drawable back with `buttonDrawable`, which is `getButtonDrawable()`
+        // — an API 22 method. The guard said `>= 16`, so on the API 19 head unit it threw
+        // `NoSuchMethodError: android.widget.RadioButton.getButtonDrawable` out of
+        // `CarPlayHostActivity.onCreate`, which meant the CarPlay screen never appeared at all
+        // (found the moment an iPhone was plugged in, 2026-10-18). `StateListDrawable` has no `setSize`
+        // and reports no intrinsic size, so the size comes from the subclass instead; `CompoundButton`
+        // measures the dot from that intrinsic size.
+        val dotSize = theme.dp(context, 20).coerceAtLeast(1)
+        dotOn.setSize(dotSize, dotSize)
+        dotOff.setSize(dotSize, dotSize)
+        states.setBounds(0, 0, dotSize, dotSize)
+    }
+
+    /**
+     * A [android.graphics.drawable.StateListDrawable] that reports a size.
+     *
+     * `StateListDrawable` draws its children but answers -1 for `getIntrinsicWidth`/`getIntrinsicHeight`,
+     * and `CompoundButton` sizes the button from exactly that, so the dot needs the size declared here.
+     */
+    private class SizedStateList(private val side: Int) : android.graphics.drawable.StateListDrawable() {
+        override fun getIntrinsicWidth(): Int = side
+        override fun getIntrinsicHeight(): Int = side
     }
 
     /**

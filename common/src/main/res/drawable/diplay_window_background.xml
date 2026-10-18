@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    真正可当 windowBackground 用的 drawable（API 19 必需）。
+
+    API 21 起 `TypedArray.getDrawable` 会把颜色资源包成 ColorDrawable，所以 `@color/...` 直接挂在
+    `android:windowBackground` 上在 21+ 能跑；但 4.4 的 `Resources.loadDrawable` 遇到颜色会抛
+    `Resources$NotFoundException: Resource is not a Drawable (color or path)`——这正是车机 logcat
+    里反复出现的 `WindowManager: ... at android.widget.FrameLayout.<init>` 的来源。
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="@color/diplay_window_background" />
+</shape>

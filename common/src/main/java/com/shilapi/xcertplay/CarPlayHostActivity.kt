@@ -259,6 +259,20 @@ class CarPlayHostActivity : ComponentActivity() {
     private var stageStatusView: TextView? = null
     /** The connecting screen's stage list, newest last, so bring-up progress is visible and loggable. */
     private val recentStages = java.util.ArrayDeque<String>()
+    /**
+     * Node progress for the wired bring-up, so the connecting screen can say which step is running and which
+     * one failed instead of only a rolling list of vague texts (owner request, 2026-10-18).
+     */
+    private var connectNodeIndex = 0
+    private var connectNodeFailed = false
+    /**
+     * True once any controller status has been reported.
+     *
+     * The checklist is only drawn after that: rendering eight pending rows on the idle screen made the panel
+     * taller than a 720 dp viewport before a connection had even started, which `PreparationLayoutTest`
+     * catches (`top=-98`). The idle screen keeps its original layout.
+     */
+    private var connectNodeSeen = false
     private var stageListView: LinearLayout? = null
     private val recentStageLimit = 5
     private var resolutionValueView: TextView? = null
@@ -3639,6 +3653,41 @@ class CarPlayHostActivity : ComponentActivity() {
             }
         }
 
+    /**
+     * The wired bring-up in the order the controller runs it: label and the status that marks it current.
+     *
+     * Labels reuse the strings `CarPlayStatus.describe()` already shows, so the checklist needs no new
+     * translations and stays in step with the status texts.
+     */
+    private val connectNodes: List<Pair<CarPlayStatus, Int>>
+        get() = listOf(
+            CarPlayStatus.DiscoveringMfi to R.string.preparing_mfi_authentication,
+            CarPlayStatus.DiscoveringIphone to R.string.discovering_iphone,
+            CarPlayStatus.SelectingConfiguration to R.string.selecting_carplay_configuration,
+            CarPlayStatus.WaitingForReenumeration to R.string.status_waiting_reenumeration,
+            CarPlayStatus.OpeningDataPaths to R.string.opening_usb_data_paths,
+            CarPlayStatus.Pairing to R.string.pairing_with_iphone,
+            CarPlayStatus.AttachingNetwork to R.string.status_attaching_ncm,
+            CarPlayStatus.RunningControl to R.string.carplay_control_running,
+        )
+
+    /**
+     * Moves the checklist cursor. A failure marks the node it happened on and stays there: that is the
+     * answer to "where did it stop", which a rolling log cannot give once the retry overwrites it.
+     */
+    private fun trackConnectNode(status: CarPlayStatus) {
+        connectNodeSeen = true
+        if (status is CarPlayStatus.Failed) {
+            connectNodeFailed = true
+            return
+        }
+        val index = connectNodes.indexOfFirst { it.first == status }
+        if (index >= 0) {
+            connectNodeIndex = index
+            connectNodeFailed = false
+        }
+    }
+
     private fun createStatusReporter(
         controllerGeneration: Int,
     ): (CarPlayStatus) -> Unit = report@{ status ->
@@ -3648,6 +3697,7 @@ class CarPlayHostActivity : ComponentActivity() {
             return@report
         }
         updateHotspotStatus(status)
+        trackConnectNode(status)
         val description = status.describe()
         setConnectionStage(description)
         when (status) {
@@ -4532,8 +4582,19 @@ class CarPlayHostActivity : ComponentActivity() {
         updateDebugOverlays()
     }
 
-    /** Draws [recentStages] the way the system lists things: an index, the text, and a hairline under it. */
+    /**
+     * Draws the connecting screen's step list.
+     *
+     * Wired shows a **fixed checklist** of the bring-up nodes (`connectNodes`), each with its state, so the
+     * driver can see which step is running, which ones are done, and - when it fails - which node it died on
+     * and where the retry is. Wireless keeps the rolling [recentStages] list, because its pipeline branches
+     * (hotspot, Bluetooth, handoff) in ways a single ordered checklist would misrepresent.
+     */
     private fun renderRecentStages() {
+        if (!wirelessEnabled) {
+            renderConnectChecklist()
+            return
+        }
         val list = stageListView ?: return
         val colors = WaitingScreenColors.of(darkMode)
         list.removeAllViews()
@@ -4561,6 +4622,60 @@ class CarPlayHostActivity : ComponentActivity() {
                     setTextColor(if (current) colors.text else colors.secondary)
                     typeface = Typeface.create(
                         if (current) "sans-serif-medium" else "sans-serif",
+                        Typeface.NORMAL,
+                    )
+                },
+                LinearLayout.LayoutParams(0, -2, 1f),
+            )
+            list.addView(row, LinearLayout.LayoutParams(-1, -2))
+            list.addView(
+                View(this).apply { setBackgroundColor(Color.rgb(0x2A, 0x29, 0x26)) },
+                LinearLayout.LayoutParams(-1, dp(1)),
+            )
+        }
+    }
+
+    /** The wired checklist: every node, with a marker for done / running / pending / failed. */
+    private fun renderConnectChecklist() {
+        val list = stageListView ?: return
+        list.removeAllViews()
+        if (!connectNodeSeen) return
+        val colors = WaitingScreenColors.of(darkMode)
+        val failedColor = Color.rgb(0xFF, 0x6B, 0x6B)
+        list.removeAllViews()
+        val nodes = connectNodes
+        nodes.forEachIndexed { index, (_, labelRes) ->
+            val done = index < connectNodeIndex
+            val active = index == connectNodeIndex
+            val failed = active && connectNodeFailed
+            val marker = when {
+                failed -> "\u2716"
+                done -> "\u2714"
+                active -> "\u25CF"
+                else -> "\u25CB"
+            }
+            // Compact on purpose: `PreparationLayoutTest` requires this panel to fit a 200 dp viewport
+            // without scrolling, and eight rows of the roomier rolling-list style overflow it.
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(0, dp(3), 0, dp(3))
+            }
+            row.addView(
+                TextView(this).apply {
+                    text = marker
+                    textSize = 13f
+                    setTextColor(if (failed) failedColor else if (active) colors.text else colors.secondary)
+                },
+                LinearLayout.LayoutParams(dp(26), -2),
+            )
+            row.addView(
+                TextView(this).apply {
+                    text = getString(labelRes)
+                    textSize = 15f
+                    setTextColor(if (failed) failedColor else if (active) colors.text else colors.secondary)
+                    typeface = Typeface.create(
+                        if (active) "sans-serif-medium" else "sans-serif",
                         Typeface.NORMAL,
                     )
                 },
