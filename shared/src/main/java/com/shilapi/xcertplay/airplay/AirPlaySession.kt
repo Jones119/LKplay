@@ -149,13 +149,41 @@ class AirPlaySession(
         mainScreenToken = null
         clearClusterContent()
         safeClose(socket)
+        // Tell the owner before the media teardown below. Closing a stream on the userspace stack can
+        // park on a reader blocked in recv(), and when that happened (tablet bench, 2026-10-19:
+        // "airplay event connection closed" was the last line, the NCM link froze, and no
+        // "AirPlay session ended" ever arrived) the owner never learned the session was over, so
+        // nothing tore the connection down or reconnected. The notification is idempotent and only
+        // touches this session's state, so it is safe ahead of the teardown.
+        if (notified.compareAndSet(false, true)) {
+            try {
+                listener.onSessionEnded(this)
+            } catch (error: Exception) {
+                Log.w(TAG, "airplay session ended callback failed", error)
+            }
+        }
         try {
-            media.onSessionClosed(this)
-        } catch (error: Exception) {
-            Log.w(TAG, "airplay media stream teardown failed", error)
+            // Off this thread on purpose: closing a stream whose reader is parked in a userspace recv()
+            // can wait for that reader forever (tablet bench, 2026-10-19 - the teardown never returned,
+            // so the session-end callback below never ran either). The reconnect must not depend on a
+            // stream thread waking up.
+            WorkerThreads.create(
+                {
+                    try {
+                        media.onSessionClosed(this)
+                    } catch (error: Exception) {
+                        Log.w(TAG, "airplay media stream teardown failed", error)
+                    }
+                },
+                "airplay-media-close",
+            ).apply {
+                isDaemon = true
+                start()
+            }
+        } catch (error: Throwable) {
+            Log.w(TAG, "airplay media teardown thread failed", error)
         }
         teardown()
-        if (notified.compareAndSet(false, true)) listener.onSessionEnded(this)
     }
 
     /** Stable identity of the usable primary screen; replaced on SETUP, absent after teardown/close. */
