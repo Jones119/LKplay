@@ -138,12 +138,32 @@ internal class UserSpaceNcmLink(
 
     override fun close() {
         if (!running.compareAndSet(true, false)) return
-        receiveThread?.interrupt()
-        transmitThread?.interrupt()
-        statisticsThread?.interrupt()
+        val threads = listOfNotNull(receiveThread, transmitThread, statisticsThread)
+        threads.forEach { it.interrupt() }
         receiveThread = null
         transmitThread = null
         statisticsThread = null
+        // Wait for the pumps to actually stop before anyone starts another link.
+        //
+        // Returning here while a pump still runs lets two links feed the same process-wide lwIP stack at
+        // once. Measured on the car 2026-10-18: seven `ncm-status-in` threads were alive after six attempts,
+        // and the tcpip thread then died calling a handler it read as 0x08000000 - a message whose memory had
+        // already been reused, not a NULL one. A pump blocked inside a native call cannot be interrupted, so
+        // it is reported instead of waited on forever.
+        val deadline = System.currentTimeMillis() + CLOSE_JOIN_MILLIS
+        for (thread in threads) {
+            val remaining = deadline - System.currentTimeMillis()
+            if (remaining <= 0) break
+            try {
+                thread.join(remaining)
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+                break
+            }
+            if (thread.isAlive) {
+                onDiagnostic("userspace NCM pump ${thread.name} did not stop within ${CLOSE_JOIN_MILLIS}ms")
+            }
+        }
     }
 
     internal companion object {
@@ -158,5 +178,12 @@ internal class UserSpaceNcmLink(
 
         /** One Ethernet frame plus room for a VLAN tag; lwIP caps frames at the MTU anyway. */
         private const val TRANSMIT_BUFFER_BYTES = 1600
+
+        /** How long `close` waits for a pump to stop before giving up and reporting it. */
+        private const val CLOSE_JOIN_MILLIS = 1_500L
+
+        /** The one live link; see the `init` block. */
+        @Volatile
+        private var activeInstance: UserSpaceNcmLink? = null
     }
 }
