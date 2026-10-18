@@ -152,6 +152,22 @@ tcpip_thread(void *arg)
 /* Handle a single tcpip_msg
  * This is in its own function for access by tests only.
  */
+/*
+ * CS11: every handler below is checked before it is called.
+ *
+ * The head unit crashed with `pc 00000000` on the `lwip-tcpip` thread, at
+ * tcpip_thread_handle_msg+40, right after a connection that had been torn down and
+ * re-established twice while packets were still in flight:
+ *
+ *   #00  pc 00000000  <unknown>
+ *   #01  pc 0000f889  liblwip_bridge.so (tcpip_thread_handle_msg+40)
+ *
+ * `netif_remove()` clears `netif->input`, and `tcpip_input()` copies that pointer
+ * into the queued message, so a packet posted as the interface goes away arrives
+ * here with a NULL handler and an indirect call jumps to address zero. Dropping
+ * such a message loses at most that packet, which is what a torn-down interface
+ * would do anyway; calling it kills the process.
+ */
 static void
 tcpip_thread_handle_msg(struct tcpip_msg *msg)
 {
@@ -159,16 +175,31 @@ tcpip_thread_handle_msg(struct tcpip_msg *msg)
 #if !LWIP_TCPIP_CORE_LOCKING
     case TCPIP_MSG_API:
       LWIP_DEBUGF(TCPIP_DEBUG, ("tcpip_thread: API message %p\n", (void *)msg));
-      msg->msg.api_msg.function(msg->msg.api_msg.msg);
+      if (msg->msg.api_msg.function != NULL) {
+        msg->msg.api_msg.function(msg->msg.api_msg.msg);
+      } else {
+        LWIP_DEBUGF(TCPIP_DEBUG, ("tcpip_thread: API message without a handler, dropped\n"));
+      }
       break;
     case TCPIP_MSG_API_CALL:
       LWIP_DEBUGF(TCPIP_DEBUG, ("tcpip_thread: API CALL message %p\n", (void *)msg));
-      msg->msg.api_call.arg->err = msg->msg.api_call.function(msg->msg.api_call.arg);
+      if (msg->msg.api_call.function != NULL && msg->msg.api_call.arg != NULL) {
+        msg->msg.api_call.arg->err = msg->msg.api_call.function(msg->msg.api_call.arg);
+      } else {
+        LWIP_DEBUGF(TCPIP_DEBUG, ("tcpip_thread: API CALL message without a handler, dropped\n"));
+        if (msg->msg.api_call.arg != NULL) {
+          msg->msg.api_call.arg->err = ERR_ARG;
+        }
+      }
+      /* Signalled either way: the caller is blocked on this semaphore. */
       sys_sem_signal(msg->msg.api_call.sem);
       break;
     case TCPIP_MSG_CALLBACK_STATIC_WAIT:
       LWIP_DEBUGF(TCPIP_DEBUG, ("tcpip_thread: CALLBACK WAIT message %p\n", (void *)msg));
-      msg->msg.cb_wait.function(msg->msg.cb_wait.ctx);
+      if (msg->msg.cb_wait.function != NULL) {
+        msg->msg.cb_wait.function(msg->msg.cb_wait.ctx);
+      }
+      /* Signalled even when there was no handler, so the waiter is never stranded. */
       sys_sem_signal(msg->msg.cb_wait.sem);
       break;
 #endif /* !LWIP_TCPIP_CORE_LOCKING */
@@ -176,7 +207,13 @@ tcpip_thread_handle_msg(struct tcpip_msg *msg)
 #if !LWIP_TCPIP_CORE_LOCKING_INPUT
     case TCPIP_MSG_INPKT:
       LWIP_DEBUGF(TCPIP_DEBUG, ("tcpip_thread: PACKET %p\n", (void *)msg));
-      if (msg->msg.inp.input_fn(msg->msg.inp.p, msg->msg.inp.netif) != ERR_OK) {
+      if (msg->msg.inp.input_fn != NULL) {
+        if (msg->msg.inp.input_fn(msg->msg.inp.p, msg->msg.inp.netif) != ERR_OK) {
+          pbuf_free(msg->msg.inp.p);
+        }
+      } else {
+        /* The interface this packet arrived on has been removed; see the note above. */
+        LWIP_DEBUGF(TCPIP_DEBUG, ("tcpip_thread: packet for a removed interface, dropped\n"));
         pbuf_free(msg->msg.inp.p);
       }
       memp_free(MEMP_TCPIP_MSG_INPKT, msg);
@@ -198,13 +235,17 @@ tcpip_thread_handle_msg(struct tcpip_msg *msg)
 
     case TCPIP_MSG_CALLBACK:
       LWIP_DEBUGF(TCPIP_DEBUG, ("tcpip_thread: CALLBACK %p\n", (void *)msg));
-      msg->msg.cb.function(msg->msg.cb.ctx);
+      if (msg->msg.cb.function != NULL) {
+        msg->msg.cb.function(msg->msg.cb.ctx);
+      }
       memp_free(MEMP_TCPIP_MSG_API, msg);
       break;
 
     case TCPIP_MSG_CALLBACK_STATIC:
       LWIP_DEBUGF(TCPIP_DEBUG, ("tcpip_thread: CALLBACK_STATIC %p\n", (void *)msg));
-      msg->msg.cb.function(msg->msg.cb.ctx);
+      if (msg->msg.cb.function != NULL) {
+        msg->msg.cb.function(msg->msg.cb.ctx);
+      }
       break;
 
     default:
