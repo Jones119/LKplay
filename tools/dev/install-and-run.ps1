@@ -47,7 +47,9 @@ $component = "$pkg/com.shilapi.xcertplay.$Activity"
 "`n[1/4] 安装"
 $install = & $adb @adbArgs install -r $apkPath 2>&1
 $install | Where-Object { $_ -match 'Success|Failure|INSTALL_' } | ForEach-Object { "  $_" }
-if ($install -notmatch 'Success') { throw "安装失败：$($install -join ' ')" }
+# -notmatch on an array filters elements and returns the non-matching ones, so a successful
+# "Performing Streamed Install" line would make the old form throw even when Success was present.
+if (($install -join "`n") -notmatch 'Success') { throw "安装失败：$($install -join ' ')" }
 
 "`n[2/4] 停掉旧进程"
 & $adb @adbArgs shell am force-stop $pkg 2>&1 | Out-Null
