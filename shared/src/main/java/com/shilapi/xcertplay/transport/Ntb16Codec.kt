@@ -24,19 +24,19 @@ object Ntb16Codec {
 
         val blockLength = DATAGRAM_INDEX + frame.size
         val block = ByteArray(blockLength)
-        putU32(block, 0, NTH16_SIG)
-        putU16(block, 4, NTH_LENGTH)
-        putU16(block, 6, sequence)
-        putU16(block, 8, blockLength)
-        putU16(block, 10, NTH_LENGTH)
+        writeU32Le(block, 0, NTH16_SIG)
+        writeU16Le(block, 4, NTH_LENGTH)
+        writeU16Le(block, 6, sequence)
+        writeU16Le(block, 8, blockLength)
+        writeU16Le(block, 10, NTH_LENGTH)
 
-        putU32(block, 12, NDP16_SIG)
-        putU16(block, 16, NDP_LENGTH)
-        putU16(block, 18, 0)
-        putU16(block, 20, DATAGRAM_INDEX)
-        putU16(block, 22, frame.size)
-        putU16(block, 24, 0)
-        putU16(block, 26, 0)
+        writeU32Le(block, 12, NDP16_SIG)
+        writeU16Le(block, 16, NDP_LENGTH)
+        writeU16Le(block, 18, 0)
+        writeU16Le(block, 20, DATAGRAM_INDEX)
+        writeU16Le(block, 22, frame.size)
+        writeU16Le(block, 24, 0)
+        writeU16Le(block, 26, 0)
 
         frame.copyInto(block, DATAGRAM_INDEX)
         // A transfer that ends exactly on a USB packet boundary is read as a short packet.
@@ -57,22 +57,22 @@ object Ntb16Codec {
             "NTB16 range is outside the source buffer"
         }
         val end = offset + length
-        if (length < NTH_LENGTH || readU32(block, offset) != NTH16_SIG) return emptyList()
+        if (length < NTH_LENGTH || readU32Le(block, offset) != NTH16_SIG) return emptyList()
 
         val datagrams = ArrayList<ByteArray>(1)
-        var ndpOffset = offset + readU16(block, offset + 10)
+        var ndpOffset = offset + readU16Le(block, offset + 10)
         var hops = 0
         val maxHops = maxOf(1, length / 4)
         while (ndpOffset != 0 && hops < maxHops) {
             if (ndpOffset < offset || ndpOffset + 12 > end) break
-            if (readU32(block, ndpOffset) and 0x00ffffff != NDP16_SIG and 0x00ffffff) break
-            val ndpLength = readU16(block, ndpOffset + 4)
-            val nextNdp = readU16(block, ndpOffset + 6)
+            if (readU32Le(block, ndpOffset) and 0x00ffffff != NDP16_SIG and 0x00ffffff) break
+            val ndpLength = readU16Le(block, ndpOffset + 4)
+            val nextNdp = readU16Le(block, ndpOffset + 6)
             var entry = ndpOffset + 8
             val ndpEnd = minOf(ndpOffset + ndpLength, end)
             while (entry + 4 <= ndpEnd) {
-                val datagramIndex = readU16(block, entry)
-                val datagramLength = readU16(block, entry + 2)
+                val datagramIndex = readU16Le(block, entry)
+                val datagramLength = readU16Le(block, entry + 2)
                 if (datagramIndex == 0 || datagramLength == 0) break
                 val datagramStart = offset + datagramIndex
                 val datagramEnd = datagramStart + datagramLength
@@ -86,27 +86,6 @@ object Ntb16Codec {
         }
         return datagrams
     }
-
-    private fun putU16(target: ByteArray, offset: Int, value: Int) {
-        target[offset] = value.toByte()
-        target[offset + 1] = (value ushr 8).toByte()
-    }
-
-    private fun putU32(target: ByteArray, offset: Int, value: Int) {
-        target[offset] = value.toByte()
-        target[offset + 1] = (value ushr 8).toByte()
-        target[offset + 2] = (value ushr 16).toByte()
-        target[offset + 3] = (value ushr 24).toByte()
-    }
-
-    private fun readU16(source: ByteArray, offset: Int): Int =
-        (source[offset].toInt() and 0xff) or ((source[offset + 1].toInt() and 0xff) shl 8)
-
-    private fun readU32(source: ByteArray, offset: Int): Int =
-        (source[offset].toInt() and 0xff) or
-            ((source[offset + 1].toInt() and 0xff) shl 8) or
-            ((source[offset + 2].toInt() and 0xff) shl 16) or
-            ((source[offset + 3].toInt() and 0xff) shl 24)
 
     private const val MAX_DATAGRAM_BYTES = 0xffff - DATAGRAM_INDEX
 }

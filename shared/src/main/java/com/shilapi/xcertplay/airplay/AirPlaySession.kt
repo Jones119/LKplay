@@ -436,13 +436,37 @@ class AirPlaySession(
     }
 
     private fun sendHidReport(uid: Int, report: ByteArray): Boolean =
-        sendCommand(
-            linkedMapOf(
-                "type" to "hidSendReport",
-                "uuid" to uid.toString(16),
-                "hidReport" to report,
-            ),
-        )
+        sendCommandBody(BplistCodec.encodeHidReport(uid, report))
+
+    /**
+     * [sendCommandLocked] for a body that is already encoded.
+     *
+     * Why (docs/_digest/69 P0-4, docs/_digest/81): a drag sends 60-120 `hidSendReport` commands per
+     * second, and going through `BplistCodec.encode` built roughly 60 objects each time (a `Node` plus
+     * several temporary lists and arrays per string and value). [BplistCodec.encodeHidReport] produces
+     * byte-identical output from a fixed layout, so this path now allocates only the body itself.
+     */
+    private fun sendCommandBody(body: ByteArray): Boolean = synchronized(eventWriteLock) {
+        val socket = eventSocket ?: return false
+        val cipher = eventCipher ?: return false
+        eventCseq++
+        val head = "POST /command RTSP/1.0\r\n" +
+            "Content-Type: $PLIST_CONTENT_TYPE\r\n" +
+            "Content-Length: ${body.size}\r\n" +
+            "CSeq: $eventCseq\r\n\r\n"
+        trace { "airplay event tx headers=$head bodyHex=${body.toHex()}" }
+        return try {
+            val bytes = cipher.encrypt(head.toByteArray(Charsets.US_ASCII) + body)
+            val output = socket.outputStream
+            output.write(bytes)
+            output.flush()
+            true
+        } catch (error: Exception) {
+            Log.w(TAG, "airplay event command body failed bytes=${body.size}", error)
+            close()
+            false
+        }
+    }
 
     private fun runControl() {
         // TcpLiveness tunes keepalive through the socket's file descriptor, which only the kernel

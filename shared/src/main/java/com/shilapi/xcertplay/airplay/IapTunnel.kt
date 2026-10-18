@@ -13,6 +13,8 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
+import com.shilapi.xcertplay.transport.readU16Le
+import com.shilapi.xcertplay.transport.readU32Be
 
 /**
  * Receive-only iAP2-over-CarPlay DataStream tunnel (stream type 130).
@@ -187,9 +189,6 @@ class IapTunnel(
         return concatBytes(*output.toTypedArray()) to buffer.copyOfRange(offset, buffer.size)
     }
 
-    private fun readU16Le(source: ByteArray, offset: Int): Int =
-        (source[offset].toInt() and 0xff) or ((source[offset + 1].toInt() and 0xff) shl 8)
-
     private companion object {
         const val FRAME_HEADER_LEN = 2
         const val TAG_SIZE = 16
@@ -230,12 +229,6 @@ internal class IapPackageParser(private val onPackage: (Int, ByteArray) -> Unit)
         }
         return buffer.copyOfRange(offset, buffer.size)
     }
-
-    private fun readU32Be(source: ByteArray, offset: Int): Int =
-        ((source[offset].toInt() and 0xff) shl 24) or
-            ((source[offset + 1].toInt() and 0xff) shl 16) or
-            ((source[offset + 2].toInt() and 0xff) shl 8) or
-            (source[offset + 3].toInt() and 0xff)
 
     private companion object {
         const val PACKAGE_HEADER_LEN = 32

@@ -35,6 +35,16 @@ class NcmUsbBridge internal constructor(
      */
     private val readChunkBytes: Int = READ_CHUNK_BYTES,
 ) : Closeable {
+    /**
+     * The IN endpoint's real packet size, used for the optional short-packet pad.
+     *
+     * A block whose length is an exact multiple of the link's packet size must be followed by a zero byte (or
+     * a ZLP) or the host cannot tell it finished. That multiple is the endpoint's `maxPacketSize`, which is
+     * not always 512: a full-speed link uses 64. Ported from upstream 5a5b5328 ("the optional short-packet
+     * pad now follows the IN endpoint's packet size, so a full-speed (64-byte) link is framed correctly").
+     */
+    private val usbPacketSize = inEndpoint.maxPacketSize.takeIf { it > 0 } ?: USB_PACKET_SIZE
+
     private val descriptorMac = descriptorHostMac?.copyOf()
     val hostMac: ByteArray? get() = descriptorMac?.copyOf()
     private val stateLock = Any()
@@ -206,17 +216,17 @@ class NcmUsbBridge internal constructor(
                 optionalShortPacketPad = false
             }
             if (bufferedSize < 12) return
-            if (readU32(buffered, 0) != Ntb16Codec.NTH16_SIG) {
+            if (readU32Le(buffered, 0) != Ntb16Codec.NTH16_SIG) {
                 throw failSession("NCM read buffer does not begin with an NTB16 header")
             }
-            val blockLength = readU16(buffered, 8)
+            val blockLength = readU16Le(buffered, 8)
             if (blockLength < 28) throw failSession("Invalid NTB16 block length $blockLength")
             if (bufferedSize < blockLength) return
             for (frame in Ntb16Codec.parse(buffered, 0, blockLength)) enqueueFrame(frame)
             val remaining = bufferedSize - blockLength
             buffered.copyInto(buffered, 0, blockLength, bufferedSize)
             bufferedSize = remaining
-            optionalShortPacketPad = blockLength % USB_PACKET_SIZE == 0
+            optionalShortPacketPad = blockLength % usbPacketSize == 0
         }
     }
 
@@ -338,15 +348,6 @@ class NcmUsbBridge internal constructor(
         failure?.let { throw it }
         if (closed) throw IphoneUsbException.DeviceUnavailable("NCM bridge is closed")
     }
-
-    private fun readU16(source: ByteArray, offset: Int): Int =
-        (source[offset].toInt() and 0xff) or ((source[offset + 1].toInt() and 0xff) shl 8)
-
-    private fun readU32(source: ByteArray, offset: Int): Int =
-        (source[offset].toInt() and 0xff) or
-            ((source[offset + 1].toInt() and 0xff) shl 8) or
-            ((source[offset + 2].toInt() and 0xff) shl 16) or
-            ((source[offset + 3].toInt() and 0xff) shl 24)
 
     companion object {
         private const val READ_CHUNK_BYTES = 32 * 1024

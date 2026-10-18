@@ -109,6 +109,95 @@ object BplistCodec {
         return concatBytes(*parts.toTypedArray())
     }
 
+    /**
+     * The `hidSendReport` command body, written from a fixed layout instead of through [encode].
+     *
+     * Why (docs/_digest/69 P0-4): a drag emits 60-120 touch states per second, and [encode] built a
+     * `Node` plus several temporary lists and arrays for every string and value — roughly 60 objects
+     * per report, by far the largest per-event allocation in the app. The shape is completely fixed:
+     * one 3-entry dictionary (uuid / type / hidReport) whose keys and whose `type` value are
+     * constants, so only the uid string and the report bytes vary.
+     *
+     * **The output is byte-identical to `encode(command)`** for that map; `BplistHidReportTest`
+     * asserts it across uid values and report lengths, and the earlier touch-equivalence test
+     * (docs/_digest/54) set the precedent for pinning this against the generic encoder.
+     */
+    fun encodeHidReport(uid: Int, report: ByteArray): ByteArray {
+        val uidString = uid.toString(16)
+        val uidBody = encodeString(uidString)
+        val reportBody = marker(0x4, report.size) + report
+
+        // Node order is the order encode() adds them: the root map, then **all keys**, then **all
+        // values** — encode() walks `entries.map { key }` and `entries.map { value }` as two separate
+        // passes, so the keys are not interleaved with their values.
+        // The two key strings repeat because add() does not deduplicate.
+        // Offsets are locals: this object is a singleton shared by the touch and control threads, so
+        // anything stored in a field here would race.
+        val offsetRoot = magic.size
+        val offsetTypeKey = offsetRoot + ROOT_MAP_BODY
+        val offsetUuidKey = offsetTypeKey + TYPE_KEY_BODY
+        val offsetHidReportKey = offsetUuidKey + UUID_KEY_BODY
+        val offsetTypeValue = offsetHidReportKey + HID_REPORT_KEY_BODY
+        val offsetUidValue = offsetTypeValue + TYPE_VALUE_BODY
+        val offsetReport = offsetUidValue + uidBody.size
+        val offsets = intArrayOf(
+            offsetRoot,
+            offsetTypeKey,
+            offsetUuidKey,
+            offsetHidReportKey,
+            offsetTypeValue,
+            offsetUidValue,
+            offsetReport,
+        )
+
+        val parts = ArrayList<ByteArray>(magic.size + offsets.size + 1)
+        parts.add(magic)
+        parts.add(ROOT_MAP_BODY_BYTES)
+        parts.add(TYPE_KEY_BODY_BYTES)
+        parts.add(UUID_KEY_BODY_BYTES)
+        parts.add(HID_REPORT_KEY_BODY_BYTES)
+        parts.add(TYPE_VALUE_BODY_BYTES)
+        parts.add(uidBody)
+        parts.add(reportBody)
+
+        val offsetTableOffset = offsetReport + reportBody.size
+        val total = offsetTableOffset + offsets.size + BPLIST_TRAILER_BYTES
+        val offsetSize = when {
+            total > 0xffff -> 4
+            total > 0xff -> 2
+            else -> 1
+        }
+        for (offset in offsets) parts.add(bigEndian(offset.toLong(), offsetSize))
+
+        val trailer = ByteArray(32)
+        trailer[6] = offsetSize.toByte()
+        // refSize: a 1-byte reference addresses all seven nodes.
+        trailer[7] = REF_SIZE.toByte()
+        writeBigEndian(trailer, 8, offsets.size.toLong(), 8)
+        writeBigEndian(trailer, 16, 0L, 8) // topObject: the root map is node 0
+        writeBigEndian(trailer, 24, offsetTableOffset.toLong(), 8)
+        parts.add(trailer)
+        return concatBytes(*parts.toTypedArray())
+    }
+
+    // Precomputed constant bodies. The sizes are pinned by BplistHidReportTest against the generic
+    // encoder, so a wrong marker byte cannot ship silently.
+    private const val ROOT_MAP_BODY = 7 // 0xD3 + three 1-byte refs
+    private const val UUID_KEY_BODY = 5 // 0x54 "uuid"
+    private const val TYPE_KEY_BODY = 5 // 0x54 "type"
+    private const val TYPE_VALUE_BODY = 14 // 0x5D "hidSendReport"
+    private const val HID_REPORT_KEY_BODY = 10 // 0x59 "hidReport"
+    private const val REF_SIZE = 1
+    private const val BPLIST_TRAILER_BYTES = 32
+
+    private val ROOT_MAP_BODY_BYTES = byteArrayOf(0xd3.toByte(), 1.toByte(), 2.toByte(), 3.toByte(), 4.toByte(), 5.toByte(), 6.toByte())
+    private val UUID_KEY_BODY_BYTES = byteArrayOf(0x54) + "uuid".toByteArray(Charsets.US_ASCII)
+    private val TYPE_KEY_BODY_BYTES = byteArrayOf(0x54) + "type".toByteArray(Charsets.US_ASCII)
+    private val TYPE_VALUE_BODY_BYTES =
+        byteArrayOf(0x5d) + "hidSendReport".toByteArray(Charsets.US_ASCII)
+    private val HID_REPORT_KEY_BODY_BYTES =
+        byteArrayOf(0x59) + "hidReport".toByteArray(Charsets.US_ASCII)
+
     private fun readObject(bytes: ByteArray, offsets: LongArray, refSize: Int, index: Int): Any? {
         var position = offsets[index].toInt()
         val markerByte = bytes[position].toInt() and 0xff

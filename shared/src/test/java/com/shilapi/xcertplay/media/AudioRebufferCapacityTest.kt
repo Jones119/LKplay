@@ -19,7 +19,7 @@ import org.robolectric.annotation.Implements
  * the PCM still queued in the track must count toward the restart threshold, otherwise a blocking
  * write fills the paused track before `play()` is ever called.
  *
- * Adapted to this fork's `AudioRenderer`, which takes 9 constructor parameters (upstream has 11).
+ * Adapted to this fork's `AudioRenderer`, which takes 10 constructor parameters (upstream has 11).
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [25, 28, 33], manifest = Config.NONE, shadows = [AudioRebufferCapacityTest.CapacityTrack::class])
@@ -41,10 +41,25 @@ class AudioRebufferCapacityTest {
                 )
                 .setBufferSizeInBytes(plan.trackBufferBytes).build()
             val type = Class.forName("com.shilapi.xcertplay.media.AudioRenderer")
-            val renderer = type.declaredConstructors.single { it.parameterCount == 9 }
-                .apply { isAccessible = true }.newInstance(
+            // 定位构造器：**别**只按参数个数（加一个参数就炸，且错误信息指不出原因），
+            // 也别只按首参类型（Kotlin 默认参数会生成合成的重载，会撞多个）。
+            // 两个条件一起用，并在找不到时把实际签名打出来，省下一次盲猜。
+            val renderer = type.declaredConstructors
+                .singleOrNull {
+                    it.parameterTypes.firstOrNull() == AudioFormat::class.java &&
+                        it.parameterTypes.lastOrNull() == AudioDecoderChoice::class.java
+                }
+                ?.apply { isAccessible = true }
+                ?.newInstance(
                     AudioFormat(AudioCodecKind.LPCM, 48_000, 2, 96, "media"), false, false, 0, 0,
                     AudioFocusCoordinator(null, false), 0, millis, { _: String -> },
+                    AudioDecoderChoice.DEFAULT,
+                )
+                ?: error(
+                    "AudioRenderer 构造器签名变了。当前候选: " +
+                        type.declaredConstructors.joinToString("; ") { c ->
+                            c.parameterTypes.joinToString(",") { p -> p.simpleName }
+                        },
                 )
             fun set(name: String, value: Any) =
                 type.getDeclaredField(name).apply { isAccessible = true }.set(renderer, value)

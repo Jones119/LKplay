@@ -105,7 +105,7 @@ class LockdownPlistChannel(
             throw IphoneUsbException.Protocol("Lockdown plist message length ${xml.size} is outside 1..$maximumMessageBytes")
         }
         val frame = ByteArray(LENGTH_BYTES + xml.size)
-        putU32(frame, 0, xml.size.toLong())
+        writeU32Be(frame, 0, xml.size.toLong())
         xml.copyInto(frame, LENGTH_BYTES)
         connection.send(frame)
     }
@@ -114,7 +114,7 @@ class LockdownPlistChannel(
         validateTimeout(timeoutMillis)
         val deadlineNanos = System.nanoTime() + timeoutMillis * NANOS_PER_MILLISECOND
         val header = readFully(LENGTH_BYTES, deadlineNanos)
-        val length = readU32(header, 0)
+        val length = readU32BeLong(header, 0)
         if (length !in 1..maximumMessageBytes.toLong()) {
             throw IphoneUsbException.Protocol("Invalid Lockdown plist message length $length (maximum $maximumMessageBytes)")
         }
@@ -314,18 +314,5 @@ class LockdownPlistChannel(
         const val MAXIMUM_NESTING = 64
         const val MAXIMUM_DICTIONARY_ENTRIES = 1_024
         const val NANOS_PER_MILLISECOND = 1_000_000L
-
-        fun putU32(target: ByteArray, offset: Int, value: Long) {
-            target[offset] = (value ushr 24).toByte()
-            target[offset + 1] = (value ushr 16).toByte()
-            target[offset + 2] = (value ushr 8).toByte()
-            target[offset + 3] = value.toByte()
-        }
-
-        fun readU32(source: ByteArray, offset: Int): Long =
-            ((source[offset].toLong() and 0xff) shl 24) or
-                ((source[offset + 1].toLong() and 0xff) shl 16) or
-                ((source[offset + 2].toLong() and 0xff) shl 8) or
-                (source[offset + 3].toLong() and 0xff)
     }
 }

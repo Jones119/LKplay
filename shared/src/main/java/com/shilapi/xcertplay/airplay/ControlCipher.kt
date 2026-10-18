@@ -1,5 +1,7 @@
 package com.shilapi.xcertplay.airplay
 
+import com.shilapi.xcertplay.transport.readU16Le
+
 /**
  * ChaCha20-Poly1305 framing for the CarPlay control channel.
  *
@@ -43,9 +45,6 @@ class ControlCipher(private val readKey: ByteArray, private val writeKey: ByteAr
         } while (offset < plaintext.size)
         return concatBytes(*output.toTypedArray())
     }
-
-    private fun readU16Le(source: ByteArray, offset: Int): Int =
-        (source[offset].toInt() and 0xff) or ((source[offset + 1].toInt() and 0xff) shl 8)
 
     private companion object {
         const val HEADER_SIZE = 2

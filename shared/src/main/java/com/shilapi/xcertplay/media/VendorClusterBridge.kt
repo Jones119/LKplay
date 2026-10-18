@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.SystemClock
 import android.util.Log
 import com.shilapi.xcertplay.glance.CarPlayGlance
+import com.shilapi.xcertplay.hud.ClusterCall
 import java.lang.reflect.InvocationHandler
 import java.lang.reflect.Method
 import java.lang.reflect.Proxy
@@ -76,6 +77,20 @@ object VendorClusterBridge {
 
     /** The last payload the vendor was handed, so an unchanged one is not dispatched again (G9). */
     private val mediaPushGate = ClusterMediaPushGate()
+
+    /**
+     * The last call payload the vendor was handed, plus the floor on how often the card is re-sent.
+     *
+     * A call change is rare (ringing, connected, ended), so this is mostly the same de-duplication
+     * [mediaPushGate] does; the interval only keeps a flapping status from filling the frame queue. An
+     * update the floor coalesces is not lost -- it stays in [pendingCall] and the existing re-push tick
+     * flushes it.
+     */
+    private val callPushGate = ClusterCallPushGate()
+
+    /** The call payload still owed to the vendor, if the last attempt was coalesced or failed. */
+    @Volatile
+    private var pendingCall: ClusterCallUpdate? = null
 
     /** When the next while-playing re-push or post-failure retry is due (G7). */
     private val pushSchedule = ClusterPushSchedule()
@@ -231,6 +246,7 @@ object VendorClusterBridge {
      */
     internal fun repushTick() {
         if (!enabled) return
+        flushPendingCall()
         val now = lastMedia ?: return
         if (!pushSchedule.isDue(elapsedNow(), now.playing)) return
         // Logged before the dispatch, and worded as "due": whether anything actually reached the vendor
@@ -461,6 +477,70 @@ object VendorClusterBridge {
     }
 
     /**
+     * Shows the CarPlay call on the cluster's own phone card, or clears it when [call] is null.
+     *
+     * The card is not ours to draw: the vendor service builds it from the status we send -- caller,
+     * avatar, and its own answer / decline buttons with its own labels -- so one binder call per change
+     * is the whole job here. `callStatus` is the switch between the four cards it knows
+     * (docs/_digest/86 §2.3), and the mapping lives in [clusterCallUpdate] so it is unit-tested.
+     *
+     * Only `callCount == 1` is ever sent. The service's two-party and three-party branches are chosen by
+     * that field alone, and the three-party branch relabels the answer button to "accept and hold" --
+     * which would be a lie for an ordinary call. Answering a waiting call from the cluster is a separate
+     * feature ([ClusterCallState] already tracks the second call) and is not wired yet.
+     *
+     * Whatever the caller does here stays local: a failed push drops the cached vendor handle and is
+     * retried by the re-push tick, exactly like the media path (G4/G7).
+     *
+     * Internal because [ClusterCall] is: the only caller is `CarPlayGlance`, in this module.
+     */
+    internal fun pushCall(call: ClusterCall?) {
+        if (!enabled) return
+        val context = appContext ?: return
+        val update = clusterCallUpdate(call, elapsedNow())
+        // The tick is also what flushes a coalesced or failed call payload, so it has to run even when
+        // no media was ever pushed (this is the only other starter of that timer).
+        startRepushLoop()
+        synchronized(pushLock) {
+            pendingCall = update
+            dispatchCall(context, update)
+        }
+    }
+
+    /**
+     * Hands [update] to the vendor unless [callPushGate] says otherwise, remembering what is still owed.
+     *
+     * A push that the gate coalesces stays pending; a push that *fails* also stays pending, because the
+     * vendor can hand back an interaction whose internal DI is null or a binder left dead by a service
+     * restart, and both look exactly like success from here.
+     */
+    private fun dispatchCall(context: Context, update: ClusterCallUpdate): Boolean {
+        val now = elapsedNow()
+        if (!callPushGate.shouldPush(update, now)) return false
+        val target = phoneInteraction(context) ?: return false
+        val info = callInfo(update) ?: return false
+        if (!call(target, "updateCallInfo", info)) {
+            callPushGate.forget()
+            interactions.invalidatePhone()
+            Log.w(TAG, "cluster call push failed; cached vendor interaction dropped for re-resolution")
+            return false
+        }
+        callPushGate.notePushed(update, now)
+        pendingCall = null
+        // One line per change: this is what the on-car check greps to tell "we sent it" from "the card
+        // never appeared" -- the second is the vendor's template-negotiation window (docs/_digest/66 §7).
+        Log.i(TAG, "cluster call pushed status=${update.status} name=${update.name} number=${update.number}")
+        return true
+    }
+
+    /** Re-sends a call payload the gate coalesced or a failed push left owed; runs on the tick. */
+    private fun flushPendingCall() {
+        val update = pendingCall ?: return
+        val context = appContext ?: return
+        synchronized(pushLock) { dispatchCall(context, update) }
+    }
+
+    /**
      * The vendor object behind [ClusterGuidanceSink], one reflective setter per call.
      *
      * The indirection exists so the submission sequence -- which setters, in which order, and the
@@ -518,6 +598,23 @@ object VendorClusterBridge {
         return value
     }
 
+    /**
+     * The vendor's phone-call interaction, the one facade getter that is not a null stub
+     * (`getContactsInteraction()` and `getVrInteraction()` are, docs/_digest/86 §2).
+     *
+     * Resolved on first use and cached like the media handle, with the same asynchronous-bind caveat:
+     * `create()` binds the service in the background and the getter answers null until it is up, so a
+     * miss is retried on the next call rather than remembered.
+     */
+    private fun phoneInteraction(context: Context): Any? {
+        val owner = dimInstance(context) ?: return null
+        return interactions.phone {
+            read(owner, "getPhoneCallInteraction")?.also { value ->
+                Log.i(TAG, "cluster phone interaction=${value.javaClass.name}")
+            }
+        }
+    }
+
     private fun dimInstance(context: Context): Any? = interactions.dim {
         val type = runCatching { Class.forName(DIM) }.getOrNull() ?: run {
             Log.i(TAG, "cluster dim api not on the classpath ($DIM)")
@@ -567,6 +664,48 @@ object VendorClusterBridge {
         java.lang.Float.TYPE -> 0f
         java.lang.Double.TYPE -> 0.0
         else -> null
+    }
+
+    /**
+     * A dynamic proxy for the vendor's plain `IPhoneCallInteraction$ICallInfo`.
+     *
+     * The interface has no implementation in the jar and no builder either, so the proxy is the whole
+     * object (docs/_digest/86 §2). Of its ten methods the vendor's `PhoneDimInteraction` reads only
+     * six -- name, number, avatar, status, call count and duration; `callId`, `activeCallId`,
+     * `isHandFree` and `isMicOnVehicleMuted` are written into the parcel and never looked at.
+     */
+    private fun callInfo(update: ClusterCallUpdate): Any? {
+        val type = runCatching {
+            Class.forName("com.ecarx.xui.adaptapi.diminteraction.IPhoneCallInteraction\$ICallInfo")
+        }.getOrNull() ?: return null
+        return runCatching {
+            Proxy.newProxyInstance(type.classLoader, arrayOf(type), CallInfoHandler(update))
+        }.getOrElse {
+            Log.w(TAG, "cluster call info proxy failed", it)
+            null
+        }
+    }
+
+    private class CallInfoHandler(private val update: ClusterCallUpdate) : InvocationHandler {
+        override fun invoke(proxy: Any?, method: Method, args: Array<out Any?>?): Any? = when (method.name) {
+            "getCallStatus" -> update.status
+            "getCallCount" -> update.callCount
+            "getContactName" -> update.name
+            "getContactNumber" -> update.number
+            "getCallDuration" -> update.durationSeconds
+            // No avatar: the vendor then draws its own placeholder for slot 2. Its own avatar cache is
+            // keyed by the number, so an avatar is only ever sent once per number anyway
+            // (`sendAvatar`'s `mLastShowNumber` gate, docs/_digest/86 §2.1) -- sending one from here
+            // would be wasted on the second call from the same person.
+            "getAvatar" -> null
+            "getCallId", "getActiveCallId" -> 0
+            "isHandFree" -> true
+            "isMicOnVehicleMuted" -> false
+            "hashCode" -> System.identityHashCode(proxy)
+            "equals" -> proxy === args?.firstOrNull()
+            "toString" -> "DiPlayCallInfo(status=${update.status}, name=${update.name})"
+            else -> defaultValue(method.returnType)
+        }
     }
 
     private fun read(target: Any, method: String): Any? =
@@ -734,6 +873,120 @@ internal class ClusterMediaPushGate {
 }
 
 /**
+ * How often the cluster's phone card may be re-sent, in milliseconds.
+ *
+ * The card is built by the *vendor* service -- one small foreground frame carrying the caller and the
+ * icon ids its own buttons need -- so a push costs one binder transaction plus that frame. The floor is
+ * therefore not about our own cost: it keeps a flapping call status from filling the frame queue that
+ * the navigation and media cards share. A coalesced change is kept in `VendorClusterBridge.pendingCall`
+ * and flushed by the 2 s re-push tick, so nothing is dropped, only deferred.
+ */
+internal const val CLUSTER_CALL_MIN_INTERVAL_MILLIS = 200L
+
+/** A caller name longer than this is cut: the card is one line, and the frame is paid for per byte. */
+internal const val MAX_CALL_NAME_CHARS = 60
+
+/** A remote id longer than this is cut; real numbers are far shorter, and the card shows one line. */
+internal const val MAX_CALL_NUMBER_CHARS = 40
+
+/** The vendor's `CallStatus` values that pick a card; the rest of its 0..15 are ignored by the service. */
+internal const val CALL_STATUS_IDLE = 0
+internal const val CALL_STATUS_DIALING = 6
+internal const val CALL_STATUS_OFFHOOK = 11
+internal const val CALL_STATUS_IN_COMING = 12
+
+/**
+ * What one call push actually puts in front of the vendor.
+ *
+ * Field for field what the vendor's phone card reads out of `PhoneInfo` and nothing else, so a change
+ * that the cluster cannot see does not cost a reflective dispatch and a proxy allocation -- the same
+ * rule [ClusterMediaUpdate] follows. [callCount] is always 1: the service's three-party branch is chosen
+ * by that field alone and relabels the answer button, so it is only ever sent for a real waiting call.
+ */
+internal data class ClusterCallUpdate(
+    val status: Int,
+    val callCount: Int,
+    val name: String,
+    val number: String,
+    val durationSeconds: Long,
+)
+
+/**
+ * The payload for [call], as the vendor's getters will see it.
+ *
+ * Null -- no call, or a session that just ended -- becomes the vendor's idle status, which is the one
+ * value that clears the card regardless of the call count (`PhoneDimInteraction` calls `endPhone()`
+ * before it looks at `callCount`), so a card left over from a finished call cannot linger.
+ *
+ * The status mapping is the service's own vocabulary (docs/_digest/86 §2.3): `12` is an incoming call,
+ * `11` an established one, `6` an outgoing one. The duration is what the service feeds its 600 ms call
+ * timer from, hence it is computed from the call's own start rather than from "now".
+ */
+internal fun clusterCallUpdate(call: ClusterCall?, nowMillis: Long): ClusterCallUpdate = when (call?.phase) {
+    null -> ClusterCallUpdate(CALL_STATUS_IDLE, 1, "", "", 0)
+    ClusterCall.Phase.RINGING -> ClusterCallUpdate(CALL_STATUS_IN_COMING, 1, clusterCallName(call.name), number(call), 0)
+    ClusterCall.Phase.ACTIVE -> ClusterCallUpdate(
+        CALL_STATUS_OFFHOOK,
+        1,
+        clusterCallName(call.name),
+        number(call),
+        call.activeSinceMillis?.let { ((nowMillis - it) / 1000).coerceAtLeast(0) } ?: 0,
+    )
+    ClusterCall.Phase.DIALING -> ClusterCallUpdate(CALL_STATUS_DIALING, 1, clusterCallName(call.name), number(call), 0)
+}
+
+private fun number(call: ClusterCall): String = call.number.trim().take(MAX_CALL_NUMBER_CHARS)
+
+/**
+ * The caller text the card will show, trimmed and cut to [MAX_CALL_NAME_CHARS].
+ *
+ * An empty name is passed through as empty rather than replaced by the number: the vendor service owns
+ * that fallback chain (name, then number, then its own "unknown number" string), and duplicating it
+ * here would only be able to disagree with it.
+ */
+internal fun clusterCallName(value: String): String {
+    val trimmed = value.trim()
+    if (trimmed.length <= MAX_CALL_NAME_CHARS) return trimmed
+    var end = MAX_CALL_NAME_CHARS
+    // Never cut a surrogate pair in half: the cluster renders UTF-16 and would show a broken glyph.
+    if (Character.isHighSurrogate(trimmed[end - 1])) end--
+    return trimmed.substring(0, end)
+}
+
+/**
+ * Remembers the last call payload the vendor was handed, and how long ago.
+ *
+ * The navigation path refuses an unchanged frame and the media gate refuses an unchanged payload; a call
+ * is the same idea at a much lower rate, plus the floor in [CLUSTER_CALL_MIN_INTERVAL_MILLIS]. A push
+ * that *failed* must not be remembered as sent, hence [forget].
+ *
+ * [shouldPush] takes the clock instead of reading it, so the rule is JVM-testable (the Android uptime
+ * clock is not available in a plain unit test) -- the same shape [ClusterPushSchedule] uses.
+ */
+internal class ClusterCallPushGate(private val minIntervalMillis: Long = CLUSTER_CALL_MIN_INTERVAL_MILLIS) {
+    private var last: ClusterCallUpdate? = null
+    private var lastPushAt = 0L
+
+    /** True when [update] is new and the previous push is at least [minIntervalMillis] old. */
+    fun shouldPush(update: ClusterCallUpdate, nowMillis: Long): Boolean {
+        if (update == last) return false
+        if (last == null) return true
+        return nowMillis - lastPushAt >= minIntervalMillis
+    }
+
+    /** Records [update] as handed over at [nowMillis]. */
+    fun notePushed(update: ClusterCallUpdate, nowMillis: Long) {
+        last = update
+        lastPushAt = nowMillis
+    }
+
+    /** Drops the record, so the next change is dispatched even if it repeats the last payload. */
+    fun forget() {
+        last = null
+    }
+}
+
+/**
  * The vendor objects resolved so far, and the one rule for giving them up.
  *
  * Caching matters: `DimInteraction.create()` binds a service asynchronously and the interaction
@@ -750,6 +1003,7 @@ internal class ClusterMediaPushGate {
 internal class ClusterInteractionCache {
     private var dim: Any? = null
     private var media: Any? = null
+    private var phone: Any? = null
 
     /** The facade, resolved once. */
     @Synchronized
@@ -769,6 +1023,15 @@ internal class ClusterInteractionCache {
         return value
     }
 
+    /** The phone-call interaction object, resolved once per facade. */
+    @Synchronized
+    fun phone(resolve: () -> Any?): Any? {
+        phone?.let { return it }
+        val value = resolve() ?: return null
+        phone = value
+        return value
+    }
+
     /**
      * Forgets the media handle *and* the facade it came from.
      *
@@ -779,6 +1042,18 @@ internal class ClusterInteractionCache {
     @Synchronized
     fun invalidateMedia() {
         media = null
+        dim = null
+    }
+
+    /**
+     * Forgets the phone handle and the facade it came from, for the same reason as [invalidateMedia].
+     *
+     * The media and phone handles share the facade, so dropping it here costs the media path one
+     * re-resolution as well -- which is the price of not keeping a facade that just proved dead.
+     */
+    @Synchronized
+    fun invalidatePhone() {
+        phone = null
         dim = null
     }
 }

@@ -8,6 +8,12 @@ import java.io.IOException
 import java.net.InetAddress
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import com.shilapi.xcertplay.transport.readU16Be
+import com.shilapi.xcertplay.transport.readU16Le
+import com.shilapi.xcertplay.transport.readU32Be
+import com.shilapi.xcertplay.transport.readU32Le
+import com.shilapi.xcertplay.transport.writeU16Be
+import com.shilapi.xcertplay.transport.writeU32Be
 
 enum class AudioCodecKind { AAC_LC, OPUS, LPCM }
 
@@ -249,12 +255,6 @@ class AudioStream(
             }
         }
     }
-
-    private fun readU32Be(source: ByteArray, offset: Int): Int =
-        ((source[offset].toInt() and 0xff) shl 24) or
-            ((source[offset + 1].toInt() and 0xff) shl 16) or
-            ((source[offset + 2].toInt() and 0xff) shl 8) or
-            (source[offset + 3].toInt() and 0xff)
 
     private fun ByteArray.toHexString(): String =
         joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }

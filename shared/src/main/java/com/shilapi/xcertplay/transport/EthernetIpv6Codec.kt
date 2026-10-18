@@ -26,7 +26,7 @@ object EthernetIpv6Codec {
 
     /** Returns null for tagged frames, non-IPv6 frames, or truncated input. */
     fun parseIpv6(frame: ByteArray): Ipv6Frame? {
-        if (frame.size < HEADER_BYTES || readU16(frame, 12) != ETHERTYPE_IPV6) return null
+        if (frame.size < HEADER_BYTES || readU16Be(frame, 12) != ETHERTYPE_IPV6) return null
         return Ipv6Frame(
             sourceMac = frame.copyOfRange(6, 12),
             destinationMac = frame.copyOfRange(0, 6),
@@ -36,7 +36,7 @@ object EthernetIpv6Codec {
 
     /** Returns an allocation-light view for callers that can consume the payload in place. */
     fun parseIpv6View(frame: ByteArray): Ipv6FrameView? {
-        if (frame.size <= HEADER_BYTES || readU16(frame, 12) != ETHERTYPE_IPV6) return null
+        if (frame.size <= HEADER_BYTES || readU16Be(frame, 12) != ETHERTYPE_IPV6) return null
         return Ipv6FrameView(
             sourceMac = frame.copyOfRange(6, 12),
             payloadOffset = HEADER_BYTES,
@@ -52,7 +52,7 @@ object EthernetIpv6Codec {
         val frame = ByteArray(HEADER_BYTES + ipv6.size)
         destinationMac.copyInto(frame, 0)
         sourceMac.copyInto(frame, 6)
-        putU16(frame, 12, ETHERTYPE_IPV6)
+        writeU16Be(frame, 12, ETHERTYPE_IPV6)
         ipv6.copyInto(frame, HEADER_BYTES)
         return frame
     }
@@ -83,7 +83,7 @@ object EthernetIpv6Codec {
             (ipv6[IPV6_HEADER_BYTES].toInt() and 0xff) != ICMPV6_NEIGHBOR_ADVERTISEMENT
         ) return ipv6
 
-        val payloadBytes = readU16(ipv6, IPV6_PAYLOAD_LENGTH_OFFSET)
+        val payloadBytes = readU16Be(ipv6, IPV6_PAYLOAD_LENGTH_OFFSET)
         if (payloadBytes < ICMPV6_NA_BYTES || IPV6_HEADER_BYTES + payloadBytes > ipv6.size) return ipv6
         var optionOffset = IPV6_HEADER_BYTES + ICMPV6_NA_BYTES
         val payloadEnd = IPV6_HEADER_BYTES + payloadBytes
@@ -112,7 +112,7 @@ object EthernetIpv6Codec {
     }
 
     private fun writeIcmpv6Checksum(ipv6: ByteArray) {
-        val payloadBytes = readU16(ipv6, IPV6_PAYLOAD_LENGTH_OFFSET)
+        val payloadBytes = readU16Be(ipv6, IPV6_PAYLOAD_LENGTH_OFFSET)
         ipv6[IPV6_HEADER_BYTES + 2] = 0
         ipv6[IPV6_HEADER_BYTES + 3] = 0
         var sum = 0L
@@ -120,7 +120,7 @@ object EthernetIpv6Codec {
             var offset = start
             val end = start + bytes
             while (offset + 1 < end) {
-                sum += readU16(ipv6, offset).toLong()
+                sum += readU16Be(ipv6, offset).toLong()
                 offset += 2
             }
             if (offset < end) sum += (ipv6[offset].toInt() and 0xff).toLong() shl 8
@@ -136,13 +136,7 @@ object EthernetIpv6Codec {
         ipv6[IPV6_HEADER_BYTES + 3] = checksum.toByte()
     }
 
-    private fun putU16(target: ByteArray, offset: Int, value: Int) {
-        target[offset] = (value ushr 8).toByte()
-        target[offset + 1] = value.toByte()
-    }
 
-    private fun readU16(source: ByteArray, offset: Int): Int =
-        ((source[offset].toInt() and 0xff) shl 8) or (source[offset + 1].toInt() and 0xff)
 
     private const val IPV6_HEADER_BYTES = 40
     private const val IPV6_PAYLOAD_LENGTH_OFFSET = 4

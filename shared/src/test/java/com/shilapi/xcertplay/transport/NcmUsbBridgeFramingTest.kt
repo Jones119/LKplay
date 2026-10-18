@@ -121,16 +121,34 @@ class NcmUsbBridgeFramingTest {
         catch (error: IphoneUsbException.DeviceUnavailable) { return error }
     }
 
-    private fun withBridge(block: (NcmUsbBridge) -> Unit) {
+    private fun withBridge(packetSize: Int = 512, block: (NcmUsbBridge) -> Unit) {
         val connection = ReflectionHelpers.callConstructor(UsbDeviceConnection::class.java,
             ClassParameter.from(UsbDevice::class.java, null))
         fun endpoint(address: Int): UsbEndpoint = ReflectionHelpers.callConstructor(UsbEndpoint::class.java,
             ClassParameter.from(Int::class.javaPrimitiveType, address),
             ClassParameter.from(Int::class.javaPrimitiveType, 2),
-            ClassParameter.from(Int::class.javaPrimitiveType, 512),
+            ClassParameter.from(Int::class.javaPrimitiveType, packetSize),
             ClassParameter.from(Int::class.javaPrimitiveType, 0))
         val ncm = NcmUsbBridge(connection, endpoint(0x06), endpoint(0x85), null, emptyList(), null)
         try { block(ncm) } finally { ncm.close() }
+    }
+
+    /**
+     * The pad is required by the *link's* packet size, not by a constant 512.
+     *
+     * A full-speed link is 64 bytes, so a 64-byte NTB needs the pad while a 512-byte multiple does not. Before
+     * this the bridge compared every block length against 512, so on a 64-byte link it either waited for a pad
+     * that never came or ate the next header. Ported from upstream 5a5b5328.
+     */
+    @Test fun fullSpeedLinkAcceptsThePadAfterA64ByteAlignedBlock() {
+        val frame64 = ByteArray(36) { (it * 7).toByte() } // 28-byte NTB header + 36-byte frame = 64 bytes
+        val block = Ntb16Codec.build(frame64, 1)
+        assertEquals(64, block.size)
+        NcmFramingReplay.chunks.add(block + byteArrayOf(0) + Ntb16Codec.build(smallFrame, 2))
+        withBridge(packetSize = 64) { ncm ->
+            assertArrayEquals(frame64, ncm.recv(50))
+            assertArrayEquals(smallFrame, ncm.recv(50))
+        }
     }
 
     companion object {

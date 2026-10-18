@@ -40,7 +40,7 @@ internal class UsbMuxFrameBuffer(private val diagnostic: (String) -> Unit = {}) 
 
     fun takeFrame(): UsbMuxFrame? {
         if (bufferedBytes < HEADER_BYTES) return null
-        var length = readU32(bytes, start + 4)
+        var length = readU32Be(bytes, start + 4)
         if (length !in HEADER_BYTES..MAX_FRAME_BYTES) {
             val previous = optionalReplyPadding
             // The captured iOS 27 VERSION and valid RX TCP replies, including payload-bearing
@@ -49,12 +49,12 @@ internal class UsbMuxFrameBuffer(private val diagnostic: (String) -> Unit = {}) 
             // A normal or split next header at offset zero is always preserved.
             // Wait for the complete candidate MUX header and base TCP header. A timeout
             // leaves these bytes in place; a legitimate split frame must never be lost.
-            if (previous != null && readU32(bytes, start) != PROTOCOL_TCP &&
+            if (previous != null && readU32Be(bytes, start) != PROTOCOL_TCP &&
                 bufferedBytes < PADDING_BYTES + HEADER_BYTES) return null
-            val followingProtocol = readU32(bytes, start + PADDING_BYTES)
-            val followingLength = readU32(bytes, start + PADDING_BYTES + 4)
-            val candidateHeader = previous != null && readU32(bytes, start) != PROTOCOL_TCP &&
-                readU32(bytes, start + PADDING_BYTES + 8) == CAPTURED_REPLY_MAGIC
+            val followingProtocol = readU32Be(bytes, start + PADDING_BYTES)
+            val followingLength = readU32Be(bytes, start + PADDING_BYTES + 4)
+            val candidateHeader = previous != null && readU32Be(bytes, start) != PROTOCOL_TCP &&
+                readU32Be(bytes, start + PADDING_BYTES + 8) == CAPTURED_REPLY_MAGIC
             val validTarget = when {
                 candidateHeader && followingProtocol == PROTOCOL_TCP &&
                     followingLength in (HEADER_BYTES + TCP_HEADER_BYTES)..MAX_FRAME_BYTES -> {
@@ -62,8 +62,8 @@ internal class UsbMuxFrameBuffer(private val diagnostic: (String) -> Unit = {}) 
                     val tcpHeaderBytes =
                         ((bytes[start + PADDING_BYTES + HEADER_BYTES + 12].toInt() ushr 4) and 0x0f) * 4
                     tcpHeaderBytes in TCP_HEADER_BYTES..(followingLength - HEADER_BYTES) &&
-                        readU16(bytes, start + PADDING_BYTES + HEADER_BYTES) != 0 &&
-                        readU16(bytes, start + PADDING_BYTES + HEADER_BYTES + 2) != 0
+                        readU16Be(bytes, start + PADDING_BYTES + HEADER_BYTES) != 0 &&
+                        readU16Be(bytes, start + PADDING_BYTES + HEADER_BYTES + 2) != 0
                 }
                 candidateHeader && followingProtocol == PROTOCOL_DIAGNOSTIC &&
                     followingLength in (HEADER_BYTES + 2)..(HEADER_BYTES + MAX_DIAGNOSTIC_PAYLOAD_BYTES) -> {
@@ -86,7 +86,7 @@ internal class UsbMuxFrameBuffer(private val diagnostic: (String) -> Unit = {}) 
                         "nextProtocol=$followingProtocol nextLength=$followingLength " +
                         "lastUsbReadBytes=$lastUsbReadBytes bufferedBytes=$bufferedBytes")
                 if (bufferedBytes < HEADER_BYTES) return null
-                length = readU32(bytes, start + 4)
+                length = readU32Be(bytes, start + 4)
             } else {
                 report("USBMUX framing rejected declaredLength=$length bufferedBytes=$bufferedBytes " +
                     "lastUsbReadBytes=$lastUsbReadBytes optionalReplyPadding=${previous != null}")
@@ -95,7 +95,7 @@ internal class UsbMuxFrameBuffer(private val diagnostic: (String) -> Unit = {}) 
         }
         if (bufferedBytes < length) return null
         val frame = UsbMuxFrame(
-            protocol = readU32(bytes, start), length = length, word8 = readU32(bytes, start + 8),
+            protocol = readU32Be(bytes, start), length = length, word8 = readU32Be(bytes, start + 8),
             sequence = ((bytes[start + 12].toInt() and 0xff) shl 8) or (bytes[start + 13].toInt() and 0xff),
             payload = bytes.copyOfRange(start + HEADER_BYTES, start + length),
         )
@@ -148,7 +148,7 @@ internal class UsbMuxFrameBuffer(private val diagnostic: (String) -> Unit = {}) 
             frame.payload.size < TCP_HEADER_BYTES) return false
         val tcpHeaderBytes = ((frame.payload[12].toInt() ushr 4) and 0x0f) * 4
         return tcpHeaderBytes in TCP_HEADER_BYTES..frame.payload.size &&
-            readU16(frame.payload, 0) != 0 && readU16(frame.payload, 2) != 0
+            readU16Be(frame.payload, 0) != 0 && readU16Be(frame.payload, 2) != 0
     }
 
     /** Only the captured diagnostic subtype followed by bounded printable ASCII qualifies. */
@@ -158,15 +158,6 @@ internal class UsbMuxFrameBuffer(private val diagnostic: (String) -> Unit = {}) 
             (offset + 1 until offset + length).all { source[it].toInt() in 0x20..0x7e }
 
     private fun report(line: String) { runCatching { diagnostic(line) } }
-
-    private fun readU16(source: ByteArray, offset: Int): Int =
-        ((source[offset].toInt() and 0xff) shl 8) or (source[offset + 1].toInt() and 0xff)
-
-    private fun readU32(source: ByteArray, offset: Int): Int =
-        ((source[offset].toInt() and 0xff) shl 24) or
-            ((source[offset + 1].toInt() and 0xff) shl 16) or
-            ((source[offset + 2].toInt() and 0xff) shl 8) or
-            (source[offset + 3].toInt() and 0xff)
 
     private companion object {
         /** One USB read is at most 16 KiB (docs/_digest/44 §1.7), so this holds a read plus a frame. */

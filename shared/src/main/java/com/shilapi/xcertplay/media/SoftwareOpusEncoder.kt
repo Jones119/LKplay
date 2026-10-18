@@ -12,11 +12,14 @@ internal class SoftwareOpusEncoder(
     bitrate: Int,
     complexity: Int = DEFAULT_COMPLEXITY,
     private val onError: (String, Throwable) -> Unit = { _, _ -> },
+    create: () -> org.concentus.OpusEncoder = {
+        org.concentus.OpusEncoder(SAMPLE_RATE, CHANNELS, OpusApplication.OPUS_APPLICATION_VOIP)
+    },
 ) : MicrophoneOpusEncoder {
     override val implementation: String = "software"
 
     private var encoder: org.concentus.OpusEncoder? = try {
-        org.concentus.OpusEncoder(SAMPLE_RATE, CHANNELS, OpusApplication.OPUS_APPLICATION_VOIP).apply {
+        create().apply {
             setBitrate(bitrate)
             setComplexity(complexity)
             setSignalType(OpusSignal.OPUS_SIGNAL_VOICE)
@@ -39,9 +42,20 @@ internal class SoftwareOpusEncoder(
             val length = encoder.encode(pcm, 0, FRAME_SAMPLES, output, 0, output.size)
             if (length > 0) listOf(output.copyOf(length)) else emptyList()
         } catch (error: Exception) {
-            if (failures++ < MAX_REPORTED_FAILURES) onError("software Opus encode failed", error)
-            emptyList()
+            failed(encoder, error)
+        } catch (error: AssertionError) {
+            // Concentus compiles the reference library's debug asserts into every build and throws an
+            // Error, not an Exception. Letting one escape ended the microphone thread and took DiPlay with
+            // it (upstream #865, fixed in 4791f5d0). A failed check costs this frame, nothing more.
+            failed(encoder, error)
         }
+    }
+
+    private fun failed(encoder: org.concentus.OpusEncoder, error: Throwable): List<ByteArray> {
+        if (failures++ < MAX_REPORTED_FAILURES) onError("software Opus encode failed", error)
+        // The frame stopped part way through, so the next one has to start from a clean encoder state.
+        runCatching { encoder.resetState() }
+        return emptyList()
     }
 
     override fun close() {

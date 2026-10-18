@@ -85,13 +85,13 @@ class Iap2UsbMuxHost private constructor(
     ) {
         if (payload.size > 512) Log.i("xcertplay-usb", "usbmux TX source=$sourcePort destination=$destinationPort bytes=${payload.size} seq=$sequence ack=$acknowledgement")
         val tcp = ByteArray(TCP_HEADER_BYTES + payload.size)
-        putU16(tcp, 0, sourcePort)
-        putU16(tcp, 2, destinationPort)
-        putU32(tcp, 4, sequence)
-        putU32(tcp, 8, acknowledgement)
+        writeU16Be(tcp, 0, sourcePort)
+        writeU16Be(tcp, 2, destinationPort)
+        writeU32Be(tcp, 4, sequence)
+        writeU32Be(tcp, 8, acknowledgement)
         tcp[12] = (TCP_HEADER_BYTES / 4 shl 4).toByte()
         tcp[13] = flags.toByte()
-        putU16(tcp, 14, TCP_WINDOW_FIELD)
+        writeU16Be(tcp, 14, TCP_WINDOW_FIELD)
         payload.copyInto(tcp, TCP_HEADER_BYTES)
         sendFrame(PROTOCOL_TCP, tcp)
     }
@@ -106,9 +106,9 @@ class Iap2UsbMuxHost private constructor(
 
     private fun begin() {
         val version = ByteArray(VERSION_MESSAGE_BYTES)
-        putU32(version, 0, PROTOCOL_VERSION)
-        putU32(version, 4, VERSION_MESSAGE_BYTES)
-        putU32(version, 8, USBMUX_VERSION)
+        writeU32Be(version, 0, PROTOCOL_VERSION)
+        writeU32Be(version, 4, VERSION_MESSAGE_BYTES)
+        writeU32Be(version, 8, USBMUX_VERSION)
         pipe.write(version, HANDSHAKE_TIMEOUT_MILLIS.toInt())
         // The phone replies with the same proto=0, length=20, version=2 packet. Protocol 1 is not
         // a distinct "version reply" here; waiting for it discards the valid reply and times out.
@@ -184,11 +184,11 @@ class Iap2UsbMuxHost private constructor(
             nextMuxSequence to nextMuxAcknowledgement
         }
         val frame = ByteArray(MUX_HEADER_BYTES + payload.size)
-        putU32(frame, 0, protocol)
-        putU32(frame, 4, frame.size)
-        putU32(frame, 8, MUX_MAGIC)
-        putU16(frame, 12, sequenceAndAcknowledgement.first)
-        putU16(frame, 14, sequenceAndAcknowledgement.second)
+        writeU32Be(frame, 0, protocol)
+        writeU32Be(frame, 4, frame.size)
+        writeU32Be(frame, 8, MUX_MAGIC)
+        writeU16Be(frame, 12, sequenceAndAcknowledgement.first)
+        writeU16Be(frame, 14, sequenceAndAcknowledgement.second)
         payload.copyInto(frame, MUX_HEADER_BYTES)
         try {
             pipe.write(frame, WRITE_TIMEOUT_MILLIS)
@@ -227,12 +227,12 @@ class Iap2UsbMuxHost private constructor(
         if (tcpHeaderBytes < TCP_HEADER_BYTES || tcpHeaderBytes > length) {
             throw IphoneUsbException.Protocol("Invalid USBMUX TCP header length")
         }
-        val destinationPort = readU16(frame, offset + 2)
-        if (length == tcpHeaderBytes) Log.i("xcertplay-usb", "usbmux TCP control destination=$destinationPort flags=${frame[13].toInt() and 0xff} ack=${readU32(frame, 8)} window=${readU16(frame, 14)}")
+        val destinationPort = readU16Be(frame, offset + 2)
+        if (length == tcpHeaderBytes) Log.i("xcertplay-usb", "usbmux TCP control destination=$destinationPort flags=${frame[13].toInt() and 0xff} ack=${readU32Be(frame, 8)} window=${readU16Be(frame, 14)}")
         val connection = synchronized(stateLock) { connections[destinationPort] } ?: return
         connection.onPacket(
             flags = frame[offset + 13].toInt() and 0xff,
-            sequence = readU32(frame, offset + 4),
+            sequence = readU32Be(frame, offset + 4),
             payload = frame.copyOfRange(offset + tcpHeaderBytes, offset + length),
         )
     }
@@ -323,26 +323,6 @@ class Iap2UsbMuxHost private constructor(
             }
         }
 
-        private fun putU16(target: ByteArray, offset: Int, value: Int) {
-            target[offset] = (value ushr 8).toByte()
-            target[offset + 1] = value.toByte()
-        }
-
-        private fun putU32(target: ByteArray, offset: Int, value: Int) {
-            target[offset] = (value ushr 24).toByte()
-            target[offset + 1] = (value ushr 16).toByte()
-            target[offset + 2] = (value ushr 8).toByte()
-            target[offset + 3] = value.toByte()
-        }
-
-        private fun readU16(source: ByteArray, offset: Int): Int =
-            ((source[offset].toInt() and 0xff) shl 8) or (source[offset + 1].toInt() and 0xff)
-
-        private fun readU32(source: ByteArray, offset: Int): Int =
-            ((source[offset].toInt() and 0xff) shl 24) or
-                ((source[offset + 1].toInt() and 0xff) shl 16) or
-                ((source[offset + 2].toInt() and 0xff) shl 8) or
-                (source[offset + 3].toInt() and 0xff)
     }
 }
 

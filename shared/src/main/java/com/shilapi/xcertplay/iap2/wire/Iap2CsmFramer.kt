@@ -1,5 +1,8 @@
 package com.shilapi.xcertplay.iap2.wire
 
+import com.shilapi.xcertplay.transport.readU16Be
+import com.shilapi.xcertplay.transport.writeU16Be
+
 /**
  * Pure CSM framing for iAP2 control-session bytes.
  *
@@ -113,9 +116,9 @@ class Iap2CsmFramer {
                 "CSM payload exceeds $MAX_BODY_BYTES bytes"
             }
             val frame = ByteArray(HEADER_BYTES + payload.size)
-            writeU16(frame, 0, START)
-            writeU16(frame, 2, frame.size)
-            writeU16(frame, 4, messageId)
+            writeU16Be(frame, 0, START)
+            writeU16Be(frame, 2, frame.size)
+            writeU16Be(frame, 4, messageId)
             payload.copyInto(frame, HEADER_BYTES)
             return frame
         }
@@ -127,8 +130,8 @@ class Iap2CsmFramer {
                 "CSM parameter payload exceeds ${MAX_PARAM_BYTES - Iap2Parameter.HEADER_BYTES} bytes"
             }
             val parameter = ByteArray(Iap2Parameter.HEADER_BYTES + payload.size)
-            writeU16(parameter, 0, parameter.size)
-            writeU16(parameter, 2, parameterId)
+            writeU16Be(parameter, 0, parameter.size)
+            writeU16Be(parameter, 2, parameterId)
             payload.copyInto(parameter, Iap2Parameter.HEADER_BYTES)
             return parameter
         }
@@ -156,19 +159,11 @@ class Iap2CsmFramer {
             require(frame.size in MIN_FRAME_BYTES..MAX_FRAME_BYTES) {
                 "CSM frame size must be 6..65535"
             }
-            require(readU16(frame, 0) == START) { "CSM frame must start with 0x4040" }
-            require(readU16(frame, 2) == frame.size) {
+            require(readU16Be(frame, 0) == START) { "CSM frame must start with 0x4040" }
+            require(readU16Be(frame, 2) == frame.size) {
                 "CSM frame length must equal its complete size"
             }
         }
 
-        private fun readU16(bytes: ByteArray, offset: Int): Int =
-            ((bytes[offset].toInt() and 0xff) shl 8) or
-                (bytes[offset + 1].toInt() and 0xff)
-
-        private fun writeU16(bytes: ByteArray, offset: Int, value: Int) {
-            bytes[offset] = (value ushr 8).toByte()
-            bytes[offset + 1] = value.toByte()
-        }
     }
 }

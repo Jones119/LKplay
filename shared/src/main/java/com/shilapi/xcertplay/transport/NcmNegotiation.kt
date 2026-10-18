@@ -63,23 +63,23 @@ internal object NcmNegotiation {
         if (length < NTB_PARAMETERS_BYTES || length > bytes.size) {
             throw IphoneUsbException.Protocol("NCM returned incomplete NTB parameters")
         }
-        val declared = readU16(bytes, 0)
+        val declared = readU16Le(bytes, 0)
         if (declared < NTB_PARAMETERS_BYTES || declared > length) {
             throw IphoneUsbException.Protocol("NCM returned incomplete NTB parameters")
         }
-        val formats = readU16(bytes, 2)
+        val formats = readU16Le(bytes, 2)
         if (formats and NTB16_BIT == 0) {
             throw IphoneUsbException.Protocol("iPhone NCM does not support NTB16")
         }
-        val input = readU32(bytes, 4)
-        val output = readU32(bytes, 16)
+        val input = readU32LeLong(bytes, 4)
+        val output = readU32LeLong(bytes, 16)
         if (input < MINIMUM_NTB_LIMIT || output < MINIMUM_NTB_LIMIT) {
             throw IphoneUsbException.Protocol("NCM NTB limits are too small")
         }
         val boundedOutput = output.coerceAtMost(LEGACY_TRANSFER_BYTES.toLong()).toInt()
-        val divisor = readU16(bytes, 20)
-        val remainder = readU16(bytes, 22)
-        val alignment = readU16(bytes, 24)
+        val divisor = readU16Le(bytes, 20)
+        val remainder = readU16Le(bytes, 22)
+        val alignment = readU16Le(bytes, 24)
         if (!validAlignment(divisor, boundedOutput) || !validAlignment(alignment, boundedOutput) ||
             remainder >= divisor
         ) {
@@ -111,22 +111,22 @@ internal object NcmNegotiation {
      * shape the legacy build treats as invalid. Pure: the RX path calls it before trusting offsets.
      */
     fun validateReceived(block: ByteArray, length: Int) {
-        if (length < NDP16_OFFSET_LOWER_BOUND + NDP16_BYTES || length > block.size || readU16(block, 4) != 12) {
+        if (length < NDP16_OFFSET_LOWER_BOUND + NDP16_BYTES || length > block.size || readU16Le(block, 4) != 12) {
             throw IphoneUsbException.Protocol("NCM returned an invalid NTB16 header")
         }
-        var ndp = readU16(block, 10)
+        var ndp = readU16Le(block, 10)
         val visited = HashSet<Int>()
         while (ndp != 0) {
             if (!visited.add(ndp) || ndp < 12 || ndp > length - NDP16_BYTES ||
-                readU32(block, ndp) != Ntb16Codec.NDP16_SIG.toLong()
+                readU32LeLong(block, ndp) != Ntb16Codec.NDP16_SIG.toLong()
             ) {
                 throw IphoneUsbException.Protocol("NCM returned an invalid or CRC-appended NDP16")
             }
-            val tableLength = readU16(block, ndp + 4)
+            val tableLength = readU16Le(block, ndp + 4)
             if (tableLength < NDP16_BYTES || tableLength % 4 != 0 || tableLength > length - ndp) {
                 throw IphoneUsbException.Protocol("NCM returned an invalid NDP16 length")
             }
-            ndp = readU16(block, ndp + 6)
+            ndp = readU16Le(block, ndp + 6)
         }
     }
 
@@ -261,15 +261,6 @@ internal object NcmNegotiation {
      */
     var lastStall: String? = null
         private set
-
-    private fun readU16(source: ByteArray, offset: Int): Int =
-        (source[offset].toInt() and 0xff) or ((source[offset + 1].toInt() and 0xff) shl 8)
-
-    private fun readU32(source: ByteArray, offset: Int): Long =
-        (source[offset].toLong() and 0xff) or
-            ((source[offset + 1].toLong() and 0xff) shl 8) or
-            ((source[offset + 2].toLong() and 0xff) shl 16) or
-            ((source[offset + 3].toLong() and 0xff) shl 24)
 
     private const val MINIMUM_ALIGNMENT = 4
     private const val ETHERNET_HEADER_BYTES = 14

@@ -74,7 +74,7 @@ class Iap2FileTransferReceiver(
         pending.remove(id)
         if (datagram.size < VERSION_2_SETUP_BYTES) return Outcome(replies = listOf(cancel(id)))
         val size = readU64(datagram, SIZE_OFFSET)
-        val type = readU16(datagram, FILE_TYPE_OFFSET)
+        val type = readU16Be(datagram, FILE_TYPE_OFFSET)
         if (type != NOW_PLAYING_ARTWORK_TYPE) return Outcome(replies = listOf(cancel(id)))
         if (size < 0 || size > maximumArtworkBytes) return rejected(id)
         if (size == 0L) {
@@ -145,9 +145,6 @@ class Iap2FileTransferReceiver(
         }
         return value
     }
-
-    private fun readU16(bytes: ByteArray, offset: Int): Int =
-        ((bytes[offset].toInt() and 0xff) shl 8) or (bytes[offset + 1].toInt() and 0xff)
 
     companion object {
         private const val HEADER_BYTES = 2

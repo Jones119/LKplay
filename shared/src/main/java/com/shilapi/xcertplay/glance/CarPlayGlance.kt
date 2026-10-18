@@ -1,5 +1,7 @@
 package com.shilapi.xcertplay.glance
 
+import com.shilapi.xcertplay.hud.ClusterCall
+import com.shilapi.xcertplay.hud.ClusterCallState
 import com.shilapi.xcertplay.hud.ClusterSongState
 import com.shilapi.xcertplay.hud.RouteGuidanceState
 import com.shilapi.xcertplay.iap2.wire.Iap2Frame
@@ -46,6 +48,13 @@ object CarPlayGlance {
 
     private val route = RouteGuidanceState()
     private val song = ClusterSongState()
+
+    /**
+     * The iPhone's call, from iAP2 CallStateUpdate (0x4155); its own frame family, so it is kept out of
+     * [Snapshot]: the glance snapshot feeds a widget and the guidance card, while a call is a separate
+     * card on the cluster with its own submit path ([callSubmit]).
+     */
+    private val call = ClusterCallState()
     private var connected = false
     private var last = Snapshot()
 
@@ -77,6 +86,19 @@ object CarPlayGlance {
         runCatching { com.shilapi.xcertplay.media.VendorClusterBridge.pushGuidance(snapshot) }
     }
 
+    /**
+     * What one call change does to the instrument cluster, on [clusterWorker].
+     *
+     * A separate hand-off from [clusterSubmit] because a call is not part of [Snapshot]: the vendor's
+     * phone card is driven by its own push (call status, caller, then the cluster draws its own
+     * answer/end buttons), and it must keep working while no route is being guided. Null means "no call",
+     * which submits the vendor's idle status so a card left over from a finished call is cleared.
+     */
+    @Volatile
+    internal var callSubmit: (ClusterCall?) -> Unit = { call ->
+        runCatching { com.shilapi.xcertplay.media.VendorClusterBridge.pushCall(call) }
+    }
+
     /** Refresh time-dependent guidance even when no new metadata frame has arrived. */
     fun snapshot(): Snapshot {
         val (changed, current) = synchronized(this) { publishLocked() to last }
@@ -90,6 +112,12 @@ object CarPlayGlance {
                 RouteGuidanceState.ROUTE_GUIDANCE_UPDATE, RouteGuidanceState.ROUTE_GUIDANCE_MANEUVER_UPDATE ->
                     runCatching { route.accept(frame.messageId, frame.payload) }
                 ClusterSongState.NOW_PLAYING_UPDATE -> runCatching { song.accept(frame) }
+                ClusterCallState.CALL_STATE_UPDATE -> {
+                    // Enqueued under the monitor, executed on the worker: the vendor push is a binder
+                    // transaction and this is the iAP2 control thread (docs/_digest/46 G9).
+                    if (runCatching { call.accept(frame) }.getOrDefault(false)) submitCall(call.current())
+                    return
+                }
                 else -> return
             }
             publishLocked()
@@ -104,6 +132,11 @@ object CarPlayGlance {
             if (!next) {
                 route.clear()
                 song.clear()
+                // A call cannot outlive the session: submit the idle status so the cluster's phone card
+                // is cleared rather than left showing a call nobody can answer any more.
+                val hadCall = call.current() != null
+                call.clear()
+                if (hadCall) submitCall(null)
             }
             publishLocked()
         }
@@ -148,5 +181,14 @@ object CarPlayGlance {
     private fun submitToCluster(snapshot: Snapshot) {
         val submit = clusterSubmit
         clusterWorker.execute { runCatching { submit(snapshot) } }
+    }
+
+    /**
+     * Hands one call change to [clusterWorker] without waiting for it; the same rule as
+     * [submitToCluster], and for the same reason: it is called with this object's monitor held.
+     */
+    private fun submitCall(call: ClusterCall?) {
+        val submit = callSubmit
+        clusterWorker.execute { runCatching { submit(call) } }
     }
 }

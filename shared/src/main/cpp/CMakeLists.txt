@@ -41,3 +41,13 @@ target_compile_options(local_hotspot_radio PRIVATE -Wall -Wextra -Werror)
 
 add_library(legacy_usb SHARED ${JNI_DIR}/legacy_usb.c)
 target_compile_options(legacy_usb PRIVATE -Wall -Wextra -Werror)
+
+# diplay_aac_fsl — 运行时 dlopen 车机上厂商的 Freescale AAC 解码器（docs/_digest/79 A1）。
+# 需要 libdl（dlopen/dlsym），Android 4.4 上它在 libdl.so 里（并入 libc 是 API 21+ 的事）。
+# diplay_aac_dec.c 是**纯 C 调用封装**（不含 JNI），内含 _Static_assert 把与厂商库的
+# ABI 偏移钉死——那些偏移是从 IDA 反编译读出来并与官方 aacd_dec_interface.h 交叉验证的。
+add_library(diplay_aac_fsl SHARED
+    ${JNI_DIR}/diplay_aac_fsl.c
+    ${JNI_DIR}/diplay_aac_dec.c)
+target_compile_options(diplay_aac_fsl PRIVATE -Wall -Wextra -Werror)
+target_link_libraries(diplay_aac_fsl dl log)

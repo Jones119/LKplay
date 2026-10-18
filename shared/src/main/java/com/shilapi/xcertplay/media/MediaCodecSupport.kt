@@ -1,6 +1,8 @@
 package com.shilapi.xcertplay.media
 
 import com.shilapi.xcertplay.airplay.VideoCodec
+import com.shilapi.xcertplay.transport.readU16Be
+import com.shilapi.xcertplay.transport.readU32Be
 
 /**
  * Pure byte helpers that convert the CarPlay screen/audio payloads into the
@@ -96,19 +98,49 @@ object MediaCodecSupport {
      */
     fun adtsFrame(accessUnit: ByteArray, sampleRate: Int, channels: Int): ByteArray {
         if (accessUnit.size > ADTS_MAX_ACCESS_UNIT_BYTES) return ByteArray(0)
+        return ByteArray(ADTS_HEADER_BYTES + accessUnit.size).also { frame ->
+            writeAdtsHeader(frame, 0, accessUnit.size, sampleRate, channels)
+            accessUnit.copyInto(frame, ADTS_HEADER_BYTES)
+        }
+    }
+
+    /**
+     * Writes just the 7-byte ADTS header for an access unit of [accessUnitBytes] into [target].
+     *
+     * Exists so the audio renderer can put the header **straight into the MediaCodec input buffer**
+     * and then stream the access unit after it, instead of building an intermediate
+     * `header + accessUnit` array per packet (docs/_digest/79 A5: the wireless path used to allocate
+     * twice and copy twice for every one of ~48 packets/s).
+     *
+     * Byte-identical to the header [adtsFrame] produces — both go through the same code, so they
+     * cannot drift apart, and `MediaCodecSupportTest` asserts the equality.
+     *
+     * Returns the header size ([ADTS_HEADER_BYTES]), or 0 when the access unit is too large for
+     * ADTS `frame_length` to describe (the caller must drop the packet, as with [adtsFrame]).
+     */
+    fun writeAdtsHeader(
+        target: ByteArray,
+        offset: Int,
+        accessUnitBytes: Int,
+        sampleRate: Int,
+        channels: Int,
+    ): Int {
+        if (accessUnitBytes < 0 || accessUnitBytes > ADTS_MAX_ACCESS_UNIT_BYTES) return 0
+        require(offset >= 0 && offset + ADTS_HEADER_BYTES <= target.size) {
+            "ADTS header does not fit: offset=$offset size=${target.size}"
+        }
         val frequencyIndex = aacFrequencyIndex(sampleRate)
         val channelConfig = channels.coerceIn(1, 7)
-        val frameLength = accessUnit.size + ADTS_HEADER_BYTES
-        val header = ByteArray(ADTS_HEADER_BYTES)
-        header[0] = 0xff.toByte()
-        header[1] = 0xf1.toByte()
-        header[2] = ((1 shl 6) or (frequencyIndex shl 2) or (channelConfig ushr 2)).toByte()
+        val frameLength = accessUnitBytes + ADTS_HEADER_BYTES
+        target[offset] = 0xff.toByte()
+        target[offset + 1] = 0xf1.toByte()
+        target[offset + 2] = ((1 shl 6) or (frequencyIndex shl 2) or (channelConfig ushr 2)).toByte()
         // frame_length is 13 bits: 2 bits of it live next to channel_configuration, hence the mask.
-        header[3] = (((channelConfig and 0x3) shl 6) or ((frameLength ushr 11) and 0x3)).toByte()
-        header[4] = ((frameLength ushr 3) and 0xff).toByte()
-        header[5] = (((frameLength and 0x7) shl 5) or 0x1f).toByte()
-        header[6] = 0xfc.toByte()
-        return header + accessUnit
+        target[offset + 3] = (((channelConfig and 0x3) shl 6) or ((frameLength ushr 11) and 0x3)).toByte()
+        target[offset + 4] = ((frameLength ushr 3) and 0xff).toByte()
+        target[offset + 5] = (((frameLength and 0x7) shl 5) or 0x1f).toByte()
+        target[offset + 6] = 0xfc.toByte()
+        return ADTS_HEADER_BYTES
     }
 
     /** Extracts one RFC 3640 AAC access unit from an RTP payload. */
@@ -144,6 +176,45 @@ object MediaCodecSupport {
 
     private fun emptySet(): Pair<ByteArray, ByteArray> = ByteArray(0) to ByteArray(0)
 
+    /**
+     * ADTS 帧头的字段，供 Freescale 解码器单独传入（它不要 ADTS 字节，只要这些参数 + 裸 AU）。
+     *
+     * 字段布局对应 ISO/IEC 13818-7 的 adts_fixed_header + adts_variable_header，
+     * 与厂商头文件 `aacd_dec_interface.h` 的 `ADTS_Header` 一致。
+     */
+    data class AdtsHeader(
+        val samplingFreqIndex: Int,
+        val channelConfig: Int,
+        val protectionAbsent: Int,
+        val adtsBufferFullness: Int,
+    )
+
+    /**
+     * 解析 ADTS 头。返回 null 表示不是 ADTS（同步字不符或采样率索引非法）。
+     *
+     * 之所以自己解析而不是复用 [writeAdtsHeader] 的生成逻辑：生产者是我们（写头），
+     * 消费者是厂商解码器（读头），两侧独立实现才能在其中一个出错时被发现。
+     */
+    fun parseAdtsHeader(data: ByteArray, offset: Int): AdtsHeader? {
+        if (offset < 0 || offset + ADTS_HEADER_BYTES > data.size) return null
+        // syncword: 12 bits all ones
+        if ((data[offset].toInt() and 0xff) != 0xff) return null
+        if ((data[offset + 1].toInt() and 0xf0) != 0xf0) return null
+        val samplingFreqIndex = (data[offset + 2].toInt() ushr 2) and 0x0f
+        if (samplingFreqIndex >= 0x0c) return null
+        val channelConfig =
+            ((data[offset + 2].toInt() and 0x01) shl 2) or ((data[offset + 3].toInt() ushr 6) and 0x03)
+        val protectionAbsent = (data[offset + 1].toInt() ushr 0) and 0x01
+        val bufferFullness =
+            ((data[offset + 5].toInt() and 0x1f) shl 6) or ((data[offset + 6].toInt() ushr 2) and 0x3f)
+        return AdtsHeader(
+            samplingFreqIndex = samplingFreqIndex,
+            channelConfig = channelConfig,
+            protectionAbsent = protectionAbsent,
+            adtsBufferFullness = bufferFullness,
+        )
+    }
+
     private fun readParameterSets(source: ByteArray, offset: Int, count: Int): List<ByteArray> {
         val sets = ArrayList<ByteArray>(count)
         var cursor = offset
@@ -162,13 +233,11 @@ object MediaCodecSupport {
     private fun readU16Be(source: ByteArray, offset: Int): Int =
         ((source[offset].toInt() and 0xff) shl 8) or (source[offset + 1].toInt() and 0xff)
 
-    private fun readU32Be(source: ByteArray, offset: Int): Int =
-        ((source[offset].toInt() and 0xff) shl 24) or
-            ((source[offset + 1].toInt() and 0xff) shl 16) or
-            ((source[offset + 2].toInt() and 0xff) shl 8) or
-            (source[offset + 3].toInt() and 0xff)
-
-    private const val ADTS_HEADER_BYTES = 7
+    /**
+     * ADTS 头长度。公开是因为音频路径要按它预留输入缓冲空间
+     * （[writeAdtsHeader] 直接写进 MediaCodec 的输入缓冲，见 doc 79 A5）。
+     */
+    const val ADTS_HEADER_BYTES = 7
 
     /** ADTS `frame_length` is 13 bits wide and counts the [ADTS_HEADER_BYTES]-byte header. */
     private const val ADTS_MAX_FRAME_LENGTH = 0x1fff

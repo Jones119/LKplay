@@ -6,6 +6,7 @@ import java.security.MessageDigest
 import javax.crypto.Cipher
 import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
+import com.shilapi.xcertplay.transport.writeU32Be
 
 /**
  * CarPlay /auth-setup MFiSAP responder (accessory side).
@@ -73,9 +74,9 @@ object MfiSapAuthSetup {
     ): ByteArray {
         val response = ByteArray(32 + 4 + certificate.size + 4 + encryptedSignature.size)
         publicKey.copyInto(response, 0)
-        putU32(response, 32, certificate.size)
+        writeU32Be(response, 32, certificate.size)
         certificate.copyInto(response, 36)
-        putU32(response, 36 + certificate.size, encryptedSignature.size)
+        writeU32Be(response, 36 + certificate.size, encryptedSignature.size)
         encryptedSignature.copyInto(response, 40 + certificate.size)
         return response
     }
@@ -91,15 +92,15 @@ object MfiSapAuthSetup {
         )
         publicKey.copyInto(response, 0)
         var offset = 32
-        putU32(response, offset, leaf.size)
+        writeU32Be(response, offset, leaf.size)
         offset += 4
         leaf.copyInto(response, offset)
         offset += leaf.size
-        putU32(response, offset, encryptedSignature.size)
+        writeU32Be(response, offset, encryptedSignature.size)
         offset += 4
         encryptedSignature.copyInto(response, offset)
         offset += encryptedSignature.size
-        putU32(response, offset, baicBlob.size)
+        writeU32Be(response, offset, baicBlob.size)
         offset += 4
         baicBlob.copyInto(response, offset)
         return response
@@ -174,10 +175,4 @@ object MfiSapAuthSetup {
         return cipher.doFinal(data)
     }
 
-    private fun putU32(target: ByteArray, offset: Int, value: Int) {
-        target[offset] = (value ushr 24).toByte()
-        target[offset + 1] = (value ushr 16).toByte()
-        target[offset + 2] = (value ushr 8).toByte()
-        target[offset + 3] = value.toByte()
-    }
 }

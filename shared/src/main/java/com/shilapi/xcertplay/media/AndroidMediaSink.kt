@@ -176,6 +176,11 @@ class AndroidMediaSink(
     private val audioFocusEnabled: Boolean = false,
     private val mediaChannel: Int = 0,
     private val navigationChannel: Int = 0,
+    /**
+     * AAC 解码器偏好（设置页「声音设置」，见 [AudioDecoderChoice]）。
+     * 只是**偏好**：Freescale 那条路不可用时渲染器一律回落到 MediaCodec，用户不会因此没声音。
+     */
+    private val audioDecoderChoice: AudioDecoderChoice = AudioDecoderChoice.DEFAULT,
     context: Context? = null,
     private val navigationStreamType: Int = AudioChannelMapper.DEFAULT_NAVIGATION_STREAM_TYPE,
     onScreenStreamActiveChanged: ((Int, Boolean) -> Unit)? = null,
@@ -492,6 +497,7 @@ class AndroidMediaSink(
             navigationStreamType,
             mediaBufferMillis,
             onAudioDiagnostic,
+            audioDecoderChoice,
         ).also { audioRenderers[id] = it }
     }
 }
@@ -530,6 +536,11 @@ private class VideoDecoder(
     private var failureReports = 0
     private val referenceChain = VideoReferenceChain()
     private var lastKeyFrameRequestNs = 0L
+    /**
+     * `drainOutput` 复用的输出缓冲描述符，而不是每帧 `MediaCodec.BufferInfo()`（doc 41 §5）。
+     * 只在 `carplay-video` 线程上访问，因此不加同步。
+     */
+    private val outputBufferInfo = MediaCodec.BufferInfo()
     // The main screen keeps the historical log format; other screens are labelled.
     private val stats = VideoStats(statsLabel ?: if (streamType == 110) "" else " stream=$streamType")
     private val thread = Thread({
@@ -729,9 +740,25 @@ private class VideoDecoder(
             if (tuned) {
                 setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, MAX_INPUT_SIZE)
                 setInteger(MediaFormat.KEY_PRIORITY, 0)
+                // 4.4 的 vendor OMX 靠这些键决定进高性能档还是省电档（doc 41 §2.3）。
+                // 键名用字符串（MediaFormat.KEY_OPERATING_RATE 是 API 21+），但**值必须是 Int**：
+                // createVideoFormat 在 API 19 就已把 frame-rate 预设成 Int，若这里换成 String，
+                // stagefright 会 toString() 后按 Int 解析并抛异常 —— 而单元测试跑在 SDK 29、
+                // 且没有真解码器，捕不到这个问题。
+                // 只在 tuned 分支设置，所以拒绝这些键的组件会退到 tuned=false 的最小 format，
+                // 不会因此配置失败。
+                setInteger(OPERATING_RATE_KEY, targetFrameRate())
+                setInteger(FRAME_RATE_KEY, targetFrameRate())
             }
             csd.forEachIndexed { index, bytes -> setByteBuffer("csd-$index", ByteBuffer.wrap(bytes)) }
         }
+
+    /**
+     * 给解码器的目标帧率提示。CarPlay 的分辨率请求里 fps 是协商项，但会话建立后 sink 不知道它，
+     * 所以这里读 `debug.diplay.video_fps`（默认 30，与本机实测的稳态帧率一致，doc 78 §1）。
+     * 与项目其余调试属性同形，便于一个点火窗口内 A/B。
+     */
+    private fun targetFrameRate(): Int = VideoFrameRateHint.current()
 
     private fun tryConfigure(
         mime: String,
@@ -800,6 +827,16 @@ private class VideoDecoder(
         lastConfig?.let(::configureDecoder)
     }
 
+    /**
+     * 送进解码器的 PTS：这一帧**从网络到达**的时刻（微秒）。
+     *
+     * [VideoJob.Frame.receivedNs] 由接收线程在构造时打上（[VideoJob.Frame] 的默认参数求值于构造点，
+     * 即 `ScreenStream` 收到帧的那一刻），所以它度量的是真实的"相机→送显"年龄。
+     * 兜底：旧调用点若没打时间戳（0），退回"此刻"，让行为与改动前一致，而不是把所有帧都判成过期。
+     */
+    private fun presentationTimeUsOf(job: VideoJob.Frame): Long =
+        if (job.receivedNs > 0L) job.receivedNs / 1000L else System.nanoTime() / 1000L
+
     private fun feed(job: VideoJob.Frame) {
         try {
             val nalus = job.nalus
@@ -832,8 +869,13 @@ private class VideoDecoder(
             input.clear()
             if (annexBLength <= input.remaining()) {
                 input.put(annexB, 0, annexBLength)
-                codec.queueInputBuffer(index, 0, annexBLength, System.nanoTime() / 1000, 0)
-            inputsSinceConfigure++
+                // 用这一帧**从网络到达的时刻**当 PTS，而不是"轮到这个 worker 处理的时刻"。
+                // drainOutput 拿 now - presentationTimeUs 与 250 ms 比较来决定是否上屏；若这里用
+                // System.nanoTime()，那么在 VideoDecodeQueue 里排队近一秒的旧帧一出队 age≈0，会被
+                // 当成新鲜帧照常上屏 —— 画面滞后但不丢帧，正是 maxGap 尖刺的观感来源（doc 41 §2.2）。
+                // 改成到达时刻后，250 ms 规则才真正度量"相机→送显"年龄：卡顿时只显示最新帧，而不是补播旧帧。
+                codec.queueInputBuffer(index, 0, annexBLength, presentationTimeUsOf(job), 0)
+                inputsSinceConfigure++
                 referenceChain.onQueued()
             } else {
                 recover("video frame exceeded codec input capacity")
@@ -864,7 +906,10 @@ private class VideoDecoder(
     }
 
     private fun drainOutput(codec: MediaCodec) {
-        val info = MediaCodec.BufferInfo()
+        // 复用同一个 BufferInfo，而不是每帧 new 一个（30 fps 下就是 30 个/秒的垃圾）。
+        // 线程约束：drainOutput 只在 carplay-video 线程上跑（run() 主循环，以及同线程内
+        // feed() 经 VideoInputPump.acquire 的重入），所以这个字段不需要同步（doc 41 §5）。
+        val info = outputBufferInfo
         while (running) {
             val index = codec.dequeueOutputBuffer(info, 0)
             when {
@@ -953,6 +998,9 @@ private class VideoDecoder(
         const val NO_OUTPUT_GRACE_NS = 700_000_000L
         /** Minimum spacing between those rebuilds, matching EasyPlay's one second cooldown. */
         const val REBUILD_COOLDOWN_NS = 1_000_000_000L
+        /** 4.4 vendor OMX 读取的调度提示键名（对应的 `MediaFormat.KEY_*` 是 API 21+）；值是 Int。 */
+        const val OPERATING_RATE_KEY = "operating-rate"
+        const val FRAME_RATE_KEY = "frame-rate"
         val START_CODE = byteArrayOf(0x00, 0x00, 0x00, 0x01)
     }
 }
@@ -979,6 +1027,8 @@ private class AudioRenderer(
     private val navigationStreamType: Int,
     private val mediaBufferMillis: Int,
     private val report: (String) -> Unit,
+    /** 设置页的解码器偏好；不可用时回落到 MediaCodec（见 [AudioDecoderChoice]）。 */
+    private val decoderChoice: AudioDecoderChoice = AudioDecoderChoice.DEFAULT,
 ) : Closeable {
     private data class AudioPacket(val rtp: ByteArray, val sample: Int)
 
@@ -1002,6 +1052,25 @@ private class AudioRenderer(
     private var softwareOpus: LegacyNativeOpus.Decoder? = null
     private var track: AudioTrack? = null
     private var pcm = ByteArray(64 * 1024)
+    /**
+     * 复用的 7 字节 ADTS 头缓冲（doc 79 A5：原来是每包新建一个 header+AU 数组）。
+     * 只在 `carplay-audio` 线程的 `handle()` → `feedCodecStreaming` 路径上访问，无需同步。
+     */
+    private var headerScratch = ByteArray(MediaCodecSupport.ADTS_HEADER_BYTES)
+    /**
+     * 厂商软解器输出 short → AudioTrack 要的字节流所用的复用缓冲（A1）。
+     * 只在 `carplay-audio` 线程上访问。
+     */
+    private var pcmBytes = ByteArray(0)
+    /**
+     * 厂商 Freescale AAC 软解器。仅当用户选了它**且**探测判定真能解码时才非 null；
+     * 否则一律走 MediaCodec，绝不静默降级成"没声音"。
+     */
+    private var freescaleAac: FreescaleAacDecoder? = null
+    /**
+     * `drainCodec` 复用的输出缓冲描述符（音频 48–135 包/秒），只在 `carplay-audio` 线程上访问。
+     */
+    private val outputBufferInfo = MediaCodec.BufferInfo()
     /**
      * Reused destination for the wired LPCM byte swap (docs/_digest/51 §12). The wired link carries
      * 137 uncompressed packets per second and every one of them used to allocate a fresh copy of its
@@ -1112,6 +1181,31 @@ private class AudioRenderer(
         thread.interrupt()
     }
 
+    /**
+     * 把「AAC 解码器偏好 → 实际使用哪一个」变成一行诊断，**不静默回落**。
+     *
+     * 各结果可区分，便于在车机上一条日志定性：
+     *   - 选平台码：`decoder=platform reason=selected`（始终成立）
+     *   - 选厂商码但不具备条件：`decoder=platform fallback=freescale-unavailable reason=…`
+     *   - 选厂商码且已具备条件：`decoder=platform note=freescale-bridge-pending …`
+     *     —— **这条目前仍走 MediaCodec 解码**：A1 的 `ctx` 结构初始化尚未恢复
+     *     （见 `work/cs11-aac-jni/evidence/A1-findings.md` E5），所以桥接层只证明"库可加载、可调用，
+     *     入口符号齐全"，还不能真正解码。等 ctx 语义补全后，这一分支才会切到厂商解码器。
+     */
+    private fun describeDecoderChoice(): String = when (decoderChoice) {
+        AudioDecoderChoice.MEDIACODEC -> "Audio: decoder=platform reason=selected"
+
+        AudioDecoderChoice.FREESCALE -> when (val availability = FreescaleAacBridge.availability()) {
+            is FreescaleAacAvailability.Unavailable ->
+                "Audio: decoder=platform fallback=freescale-unavailable reason=${availability.reason}"
+
+            is FreescaleAacAvailability.Ready ->
+                "Audio: decoder=platform note=freescale-bridge-pending " +
+                    "freescalePath=${availability.path} " +
+                    "memDescriptors=${availability.descriptors.take(2).joinToString(",")}"
+        }
+    }
+
     private fun run() {
         try {
             runCatching { report("Audio: starting api=${Build.VERSION.SDK_INT} " +
@@ -1119,11 +1213,28 @@ private class AudioRenderer(
                 "mapping=${if (advancedAudioChannelMapping) "automotive" else "mobile"} " +
                 "mediaChannel=$mediaChannel navigationChannel=$navigationChannel focus=$audioFocusEnabled") }
             when (format.codec) {
-                AudioCodecKind.AAC_LC -> configureCodec(MediaFormat.MIMETYPE_AUDIO_AAC)
+                AudioCodecKind.AAC_LC -> {
+                    // A1：用户选了厂商 Freescale 解码器时先尝试建它。
+                    // 建不起来（库不在 / ABI 不符 / init 失败）就回落 MediaCodec —— 绝不让用户没声音。
+                    if (decoderChoice == AudioDecoderChoice.FREESCALE) {
+                        freescaleAac = FreescaleAacDecoder.create(
+                            maxChannels = format.channels.coerceIn(1, 2),
+                            onDiagnostic = { message -> runCatching { report("Audio: $message") } },
+                        )
+                    }
+                    // 厂商软解器起来了就不需要 MediaCodec；否则照常建一个。
+                    if (freescaleAac == null) configureCodec(MediaFormat.MIMETYPE_AUDIO_AAC)
+                }
                 AudioCodecKind.OPUS -> if (!forcedSoftwareOpus() || !LegacyNativeOpus.available) {
                     configureCodec(MediaFormat.MIMETYPE_AUDIO_OPUS)
                 }
                 AudioCodecKind.LPCM -> Unit
+            }
+            // 解码器偏好只对 AAC 有意义（LPCM 不解码；Opus 走自己的软解路径）。
+            // 这里把"偏好 → 实际使用"的结论写进诊断行，**永远不静默回落**：
+            // 用户选了厂商解码器却拿到平台解码器时，必须能从日志看出是哪一步不成立。
+            if (format.codec == AudioCodecKind.AAC_LC) {
+                runCatching { report(describeDecoderChoice()) }
             }
             if (codec == null && format.codec == AudioCodecKind.OPUS) {
                 softwareOpus = LegacyNativeOpus.Decoder().takeIf { it.isAvailable }
@@ -1446,37 +1557,74 @@ private class AudioRenderer(
                 }
             }
             AudioCodecKind.AAC_LC -> {
-                val accessUnit = rtp.copyOfRange(12, rtp.size)
-                if (accessUnit.isNotEmpty()) {
-                    // ADTS frame_length is 13 bits: a longer access unit cannot be described by an
-                    // ADTS header, and adtsFrame would otherwise have to either truncate the audio or
-                    // describe the wrong stream. Drop the packet like the short Opus packet below -
-                    // dropping one frame keeps the stream alive, while throwing would end the track,
-                    // and a real AAC-LC access unit is far below this bound.
-                    if (accessUnit.size > MediaCodecSupport.ADTS_MAX_ACCESS_UNIT_BYTES) {
-                        inputDropped++
-                        if (!oversizedAacPacketLogged) {
-                            oversizedAacPacketLogged = true
-                            Log.w(
-                                TAG,
-                                "audio AAC skipping oversized access unit bytes=${accessUnit.size} " +
-                                    "max=${MediaCodecSupport.ADTS_MAX_ACCESS_UNIT_BYTES} " +
-                                    "queued=$inputQueued dropped=$inputDropped",
-                            )
-                        }
-                        return
-                    }
-                    if (!firstAacPayloadLogged) {
-                        firstAacPayloadLogged = true
-                        Log.i(
+                // A5：不再把访问单元拷出来、也不再用 adtsFrame 拼一个 header+AU 的新数组。
+                // ADTS 头直接写进 MediaCodec 的输入缓冲，访问单元从原 RTP 数组流式跟在后面 ——
+                // 每包 0 次分配、0 次中间拷贝（原来是 2 次分配 + 2 次拷贝 × ~48 包/秒）。
+                val auBytes = rtp.size - RTP_HEADER_BYTES
+                if (auBytes <= 0) return
+                // ADTS frame_length is 13 bits: a longer access unit cannot be described by an
+                // ADTS header, and the header would otherwise have to either truncate the audio or
+                // describe the wrong stream. Drop the packet like a short Opus packet below -
+                // dropping one frame keeps the stream alive, while throwing would end the track,
+                // and a real AAC-LC access unit is far below this bound.
+                if (auBytes > MediaCodecSupport.ADTS_MAX_ACCESS_UNIT_BYTES) {
+                    inputDropped++
+                    if (!oversizedAacPacketLogged) {
+                        oversizedAacPacketLogged = true
+                        Log.w(
                             TAG,
-                            "audio AAC access unit bytes=${accessUnit.size}",
+                            "audio AAC skipping oversized access unit bytes=$auBytes " +
+                                "max=${MediaCodecSupport.ADTS_MAX_ACCESS_UNIT_BYTES} " +
+                                "queued=$inputQueued dropped=$inputDropped",
                         )
                     }
-                    feedCodec(
-                        MediaCodecSupport.adtsFrame(accessUnit, format.sampleRate, format.channels),
-                        timestampUs,
-                    )
+                    return
+                }
+                if (!firstAacPayloadLogged) {
+                    firstAacPayloadLogged = true
+                    Log.i(TAG, "audio AAC access unit bytes=$auBytes")
+                }
+                // A1：厂商软解器直接吃裸 AU（我们不拼 ADTS 字节），头部字段单独传。
+                freescaleAac?.let { decoder ->
+                    // RTP 载荷必须是 ADTS 帧（CarPlay 的 type-102 就是），才能取出那些字段。
+                    val header = MediaCodecSupport.parseAdtsHeader(rtp, RTP_HEADER_BYTES)
+                    if (header == null) {
+                        inputDropped++
+                        return
+                    }
+                    if (decoder.decode(rtp, RTP_HEADER_BYTES, auBytes, header)) {
+                        outputBuffers++
+                        writePcm(decoder.pcmScratch, decoder.decodedSamples)
+                    } else {
+                        // 单帧失败不致命（错误隐藏会兜），但连续失败要看得见。
+                        if (decoder.failures == FIRST_FREESCALE_FAILURE) {
+                            report("Audio: Freescale AAC decode failing (first at len=$auBytes)")
+                        }
+                    }
+                    return
+                }
+                feedCodecStreaming(timestampUs) { input ->
+                    val total = MediaCodecSupport.ADTS_HEADER_BYTES + auBytes
+                    if (total > input.remaining()) {
+                        0
+                    } else {
+                        headerScratch = if (headerScratch.size < MediaCodecSupport.ADTS_HEADER_BYTES) {
+                            ByteArray(MediaCodecSupport.ADTS_HEADER_BYTES)
+                        } else {
+                            headerScratch
+                        }
+                        val headerBytes = MediaCodecSupport.writeAdtsHeader(
+                            headerScratch, 0, auBytes, format.sampleRate, format.channels,
+                        )
+                        if (headerBytes <= 0) {
+                            0
+                        } else {
+                            input.put(headerScratch, 0, headerBytes)
+                            // 访问单元紧跟头部：一次批量拷贝，来源是原 RTP 数组本身。
+                            input.put(rtp, RTP_HEADER_BYTES, auBytes)
+                            total
+                        }
+                    }
                 }
             }
             AudioCodecKind.OPUS -> {
@@ -1512,14 +1660,47 @@ private class AudioRenderer(
             }
             return
         }
+        feedCodecStreaming(presentationTimeUs) { input ->
+            if (payload.size > input.remaining()) 0 else payload.size.also { input.put(payload) }
+        }
+    }
+
+    /**
+     * Writes one decoder input **straight into the MediaCodec input buffer**, instead of building an
+     * intermediate `header + accessUnit` array first.
+     *
+     * Why (docs/_digest/79 A5): the wireless AAC path used to do `rtp.copyOfRange(12, …)` and then
+     * let `adtsFrame` allocate and copy again — two allocations and two copies for each of ~48
+     * packets/s. Streaming removes all of them.
+     *
+     * [write] must lay the bytes out **contiguously from the buffer's current position** and return
+     * how many bytes it wrote; returning 0 (or a negative) means "does not fit / cannot be
+     * described", which the caller counts as a drop exactly like the previous size check did.
+     * The commit length is validated against `input.position()` rather than against the returned
+     * value alone, so a [write] that mis-reports its length can never enqueue uninitialized bytes.
+     *
+     * Only the MediaCodec path goes through here; the bundled software Opus decoder has its own
+     * buffer protocol and is handled by [feedCodec] before this is reached.
+     */
+    private inline fun feedCodecStreaming(
+        presentationTimeUs: Long,
+        write: (java.nio.ByteBuffer) -> Int,
+    ) {
         val codec = codec ?: run { decoderUnavailablePackets++; return }
         diagnosticStage = "decoder-input"
         // A blocking track write holds this thread while decoded output fills the codec, so a single
         // 10 ms wait would drop the packet (~21 ms of music each time; upstream #381 / daffd2de).
-        // Drain decoded output and keep waiting, exactly as the video decoder's input pump does.
+        // Drain decoded output and wait again, exactly as the video decoder's input pump does.
+        //
+        // But cap that wait at 100 ms rather than the video's 500 ms (upstream 7d974f42 / #649): a
+        // slowed decoder then falls further and further behind, and with the CarPlay screen in the
+        // background the queue grew to 190 packets and the track underran every few seconds. One drain
+        // and retry — which is all #381 needed — always happens before the cap is checked, because
+        // VideoInputPump drains before it looks at the clock.
         val index = VideoInputPump.acquire(
             running = { running }, drain = { drainCodec(codec) },
             dequeue = { codec.dequeueInputBuffer(INPUT_TIMEOUT_US) },
+            timeoutNs = AUDIO_INPUT_WAIT_NS,
         )
         if (index < 0) {
             inputDropped++
@@ -1534,16 +1715,14 @@ private class AudioRenderer(
         }
         val input = codec.inputBufferCompat(index) ?: return
         input.clear()
-        if (payload.size <= input.remaining()) {
-            input.put(payload)
-            codec.queueInputBuffer(index, 0, payload.size, presentationTimeUs, 0)
+        val reported = write(input)
+        val written = input.position()
+        if (reported in 1..written) {
+            codec.queueInputBuffer(index, 0, reported, presentationTimeUs, 0)
             inputQueued++
             if (!firstInputQueuedLogged) {
                 firstInputQueuedLogged = true
-                Log.i(
-                    TAG,
-                    "audio decoder first input codec=${format.codec} bytes=${payload.size}",
-                )
+                Log.i(TAG, "audio decoder first input codec=${format.codec} bytes=$reported")
             }
         } else {
             codec.queueInputBuffer(index, 0, 0, 0, 0)
@@ -1554,7 +1733,9 @@ private class AudioRenderer(
 
     private fun drainCodec(codec: MediaCodec) {
         diagnosticStage = "decoder-output"
-        val info = MediaCodec.BufferInfo()
+        // 同 drainOutput：复用而非每包 new（音频 48–135 包/秒）。只在 carplay-audio 线程上访问
+        //（run() 主循环，以及同线程内 feedCodec() 的调用），所以无需同步。
+        val info = outputBufferInfo
         while (running) {
             diagnosticStage = "decoder-output"
             val index = codec.dequeueOutputBuffer(info, 0)
@@ -1625,6 +1806,27 @@ private class AudioRenderer(
                 else -> return
             }
         }
+    }
+
+    /**
+     * Q15（主机序 short）→ AudioTrack 要的 16-bit 小端字节流。
+     *
+     * 厂商解码器输出的就是 short，而 API 19 只有 `AudioTrack.write(byte[], …)`，
+     * 所以这一次转换躲不掉——但缓冲是复用的，不产生每帧分配。
+     * ARM 是little-endian，因此 short → 两个字节是低字节在前。
+     */
+    private fun writePcm(samples: ShortArray, count: Int) {
+        if (count <= 0) return
+        val needed = count * 2
+        if (pcmBytes.size < needed) pcmBytes = ByteArray(needed)
+        val bytes = pcmBytes
+        var out = 0
+        for (i in 0 until count) {
+            val value = samples[i].toInt()
+            bytes[out++] = (value and 0xFF).toByte()
+            bytes[out++] = ((value shr 8) and 0xFF).toByte()
+        }
+        writePcm(bytes, 0, needed)
     }
 
     private fun writePcm(data: ByteArray, offset: Int = 0, length: Int = data.size) {
@@ -1863,6 +2065,13 @@ private class AudioRenderer(
         const val OPUS_SEEK_PRE_ROLL_NANOS = 80_000_000L
         const val INPUT_TIMEOUT_US = 10_000L
         const val AUDIO_POLL_MILLIS = 10L
+        /**
+         * Ceiling on how long the audio decoder input pump waits for a free input buffer, once its
+         * drain-and-retry has run (upstream 7d974f42 / #649). The video pump keeps the shared 500 ms
+         * default; audio must not, because a decoder that is merely slow would hold every packet and
+         * the track would underrun continuously instead of occasionally.
+         */
+        const val AUDIO_INPUT_WAIT_NS = 100_000_000L
         const val BUFFER_TAIL_WAIT_NS = 500_000_000L
         // Hard ceiling for the jitter queue (~4 s of AAC). The queue is normally trimmed well below it
         // by AudioJitterTarget, so this only bounds a pathological backlog.
@@ -1871,5 +2080,7 @@ private class AudioRenderer(
         const val STATS_TAG = "DiPlay-AudioStats"
         const val STATS_WINDOW_NS = 5_000_000_000L
         const val DECODED_BUFFER_LOG_INTERVAL = 50
+        /** 厂商软解器第几次失败时打一行（只报一次，避免刷屏）。 */
+        const val FIRST_FREESCALE_FAILURE = 1
     }
 }

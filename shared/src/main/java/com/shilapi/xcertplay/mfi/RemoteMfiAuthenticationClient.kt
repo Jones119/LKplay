@@ -9,6 +9,7 @@ import java.security.MessageDigest
 import java.util.Base64
 import java.util.UUID
 import com.shilapi.xcertplay.iap2.message.Iap2AuthenticationMessages
+import com.shilapi.xcertplay.transport.readU32Be
 
 /** Blocking HTTP implementation of the MFI certificate and challenge-signing operations. */
 class RemoteMfiAuthenticationClient(
@@ -165,8 +166,8 @@ class RemoteMfiAuthenticationClient(
         if (encoded.size < BAA_PACKAGE_HEADER_BYTES) {
             throw MfiInvalidDataException("BAA certificate package is too short")
         }
-        val leafLength = readU32(encoded, 0)
-        val intermediateLength = readU32(encoded, 4)
+        val leafLength = readU32Be(encoded, 0)
+        val intermediateLength = readU32Be(encoded, 4)
         if (leafLength <= 0 || intermediateLength <= 0 ||
             BAA_PACKAGE_HEADER_BYTES + leafLength + intermediateLength != encoded.size) {
             throw MfiInvalidDataException("BAA certificate package has invalid lengths")
@@ -178,11 +179,6 @@ class RemoteMfiAuthenticationClient(
         )
     }
 
-    private fun readU32(bytes: ByteArray, offset: Int): Int =
-        ((bytes[offset].toInt() and 0xff) shl 24) or
-            ((bytes[offset + 1].toInt() and 0xff) shl 16) or
-            ((bytes[offset + 2].toInt() and 0xff) shl 8) or
-            (bytes[offset + 3].toInt() and 0xff)
 
     private fun request(
         method: String,

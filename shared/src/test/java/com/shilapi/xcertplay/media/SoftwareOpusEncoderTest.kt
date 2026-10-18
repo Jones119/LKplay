@@ -44,9 +44,11 @@ class SoftwareOpusEncoderTest {
         // Concentus rejects complexity 11, and the OpusEncoderSupport probe builds the encoder
         // before it knows whether the parameters are accepted.
         val reported = mutableListOf<String>()
-        val encoder = SoftwareOpusEncoder(bitrate = 48_000, complexity = 11) { message, _ ->
-            reported.add(message)
-        }
+        val encoder = SoftwareOpusEncoder(
+            bitrate = 48_000,
+            complexity = 11,
+            onError = { message, _ -> reported.add(message) },
+        )
         assertFalse(encoder.available)
         assertTrue(encoder.encode(ByteArray(SoftwareOpusEncoder.FRAME_BYTES)).isEmpty())
         assertEquals(listOf("software Opus encoder unavailable"), reported)
@@ -95,6 +97,45 @@ class SoftwareOpusEncoderTest {
         val created = MicrophoneOpusEncoders.create(48_000, platform = { null }) { SoftwareOpusEncoder(it) }
         assertTrue(created is SoftwareOpusEncoder)
         created!!.close()
+    }
+
+    /**
+     * Concentus compiles the reference library's debug asserts into every build, and a failed check
+     * surfaces as an `AssertionError` — an `Error`, not an `Exception`. Before this, one failing frame
+     * escaped `encode()`, ended the microphone thread, and took DiPlay with it (upstream #865, fixed in
+     * upstream 4791f5d0). A failed check must cost that one frame and nothing else.
+     */
+    @Test
+    fun aFailedConcentusAssertionCostsOneFrameAndNotTheMicrophoneThread() {
+        val reported = mutableListOf<String>()
+        val encoder = SoftwareOpusEncoder(
+            bitrate = 48_000,
+            onError = { message, _ -> reported.add(message) },
+            create = { ThrowingOpusEncoder() },
+        )
+        assertTrue(encoder.available)
+
+        // The call must return normally rather than let the AssertionError escape.
+        assertTrue("an AssertionError must not escape encode()", encoder.encode(toneFrame(0)).isEmpty())
+        assertEquals(1, reported.size)
+        assertEquals("software Opus encode failed", reported.single())
+
+        // And it stays usable: the second failing frame still does not throw. The report counter is
+        // bounded by MAX_REPORTED_FAILURES (3), so it is allowed to speak again here — what matters is
+        // that the count stays bounded and the call still returns.
+        assertTrue(encoder.encode(toneFrame(1)).isEmpty())
+        assertTrue("reports must stay bounded", reported.size in 1..3)
+        assertEquals("software Opus encode failed", reported.last())
+        encoder.close()
+    }
+
+    /** An OpusEncoder whose encode() throws the Error Concentus raises from a failed assertion. */
+    private class ThrowingOpusEncoder :
+        org.concentus.OpusEncoder(48_000, 1, org.concentus.OpusApplication.OPUS_APPLICATION_VOIP) {
+        override fun encode(
+            pcm: ByteArray?, pcm_offset: Int, frame_size: Int,
+            data: ByteArray?, data_offset: Int, max_data_bytes: Int,
+        ): Int = throw AssertionError("concentus assertion")
     }
 
     private fun toneFrame(index: Int): ByteArray {

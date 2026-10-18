@@ -38,6 +38,7 @@ import com.shilapi.xcertplay.airplay.PairingStore
 import com.shilapi.xcertplay.airplay.VideoInCar
 import com.shilapi.xcertplay.airplay.VideoPlaybackDelivery
 import com.shilapi.xcertplay.iap2.session.Iap2Session
+import com.shilapi.xcertplay.media.GovernorController
 import com.shilapi.xcertplay.mfi.Iap2MfiAuthenticationClient
 import com.shilapi.xcertplay.mfi.RemoteMfiAuthenticationClient
 import com.shilapi.xcertplay.mfi.LocalMfiAuthenticationClient
@@ -100,6 +101,7 @@ import java.util.UUID
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.ThreadFactory
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
@@ -183,6 +185,21 @@ class CarPlayController(
     private val diagnosticRun = AtomicInteger()
     private val usbManager: UsbManager? = context.systemServiceOrNull(UsbManager::class.java)
 
+    /**
+     * 会话期间把 CPU 顶到高性能档（docs/_digest/79 的 A6）。
+     *
+     * 固件已经授权：`init.freescale.rc` 把 `scaling_governor`/`scaling_min_freq` 设成
+     * `chown root system` + `chmod 0664`，而 app 属 `system` 组 —— 所以这件事**不需要 root**，
+     * 是本项目里唯一能持久化、能交付的车机侧性能手段（见 doc 78 §3.1）。
+     * `debug.diplay.cpu_governor=off` 可关闭。
+     */
+    private val governorController: GovernorController? =
+        if (GovernorController.enabled()) {
+            GovernorController(report = ::debugLog)
+        } else {
+            null
+        }
+
     init {
         // The file log starts here rather than from an Application subclass, which this app does not have.
         // With USB debugging off there is no `adb logcat` on this car, so this file is the only record a
@@ -204,10 +221,20 @@ class CarPlayController(
             },
         )
     }
-    private val executor: ExecutorService = Executors.newSingleThreadExecutor()
-    private val touchExecutor: ExecutorService = Executors.newSingleThreadExecutor()
+    // Named threads (docs/_digest/69 P0-5): these showed up as `pool-N-thread-1`, which made
+    // `taskset`/systrace attribution and ANR triage guesswork. The media sink already names its
+    // own workers ("carplay-video-recovery"), so this follows the same shape.
+    private val executor: ExecutorService = Executors.newSingleThreadExecutor(namedThread("carplay-usb"))
+    private val touchExecutor: ExecutorService = Executors.newSingleThreadExecutor(namedThread("carplay-touch"))
     private val touchGate = com.shilapi.xcertplay.airplay.TouchDispatchGate()
-    private val tunnelExecutor: ExecutorService = Executors.newSingleThreadExecutor()
+    /**
+     * Slow, user-initiated HID commands (Siri / telephony / media) that used to share
+     * [touchExecutor] (docs/_digest/69 P0-5). They are not on the touch path, and each one sends two
+     * reports under the session's event write lock, so queueing them behind 60-120 touch states per
+     * second added a whole drag's worth of delay to a button press.
+     */
+    private val commandExecutor: ExecutorService = Executors.newSingleThreadExecutor(namedThread("carplay-command"))
+    private val tunnelExecutor: ExecutorService = Executors.newSingleThreadExecutor(namedThread("carplay-iap2-tunnel"))
     private val mainHandler = Handler(Looper.getMainLooper())
     private val hostId = UUID.randomUUID().toString().uppercase(Locale.US)
     private val systemBuid = UUID.randomUUID().toString().uppercase(Locale.US)
@@ -299,6 +326,19 @@ class CarPlayController(
         }
     }
 
+    /**
+     * 会话开始/结束时切换 CPU 档位。**任何失败都不能影响会话**，所以整个调用被包起来：
+     * 这是一项"有则更好"的优化，不是正确性的一部分。
+     */
+    private fun applyGovernorForSession(active: Boolean) {
+        val controller = governorController ?: return
+        runCatching {
+            if (active) controller.enterSession() else controller.exitSession()
+        }.onFailure {
+            debugLog("CPU governor switch failed active=$active ${it.javaClass.simpleName}")
+        }
+    }
+
     private val sessionListener = object : AirPlaySessionListener {
         override fun onSessionActive(session: AirPlaySession) {
             val replacement = activeSession !== session
@@ -317,6 +357,9 @@ class CarPlayController(
                 "AirPlay session active controller=${session.controllerId ?: "unknown"} " +
                     "peer=${session.host}",
             )
+            // 会话已经立起来了，这时才值得占用高频（docs/_digest/79 A6）。放在调试日志之后、
+            // UI 回调之前：它只写两次 sysfs，但绝不能让 UI 回调的异常把它顶掉。
+            applyGovernorForSession(true)
             uiListener?.onSessionActive(session)
         }
 
@@ -326,6 +369,8 @@ class CarPlayController(
                 touchGate.reset()
                 com.shilapi.xcertplay.glance.CarPlayGlance.setConnected(false)
                 videoListener?.onVideoSessionEnded()
+                // 会话结束就把 CPU 交还给原厂策略：这本是我们借来的高频。
+                applyGovernorForSession(false)
                 synchronized(playbackStatus) {
                     val wasPlaying = playbackStatus.playing
                     playbackStatus.clearAll()?.let { it to wasPlaying }
@@ -595,7 +640,7 @@ class CarPlayController(
         if (closed) return false
         val session = activeSession ?: return false
         return try {
-            touchExecutor.execute { session.invokeSiri() }
+            commandExecutor.execute { session.invokeSiri() }
             true
         } catch (_: Exception) {
             false
@@ -612,7 +657,7 @@ class CarPlayController(
         if (closed) return false
         val session = activeSession ?: return false
         return try {
-            touchExecutor.execute { session.sendTelephony(index) }
+            commandExecutor.execute { session.sendTelephony(index) }
             true
         } catch (_: Exception) {
             false
@@ -623,7 +668,7 @@ class CarPlayController(
         if (closed) return false
         val session = activeSession ?: return false
         return try {
-            touchExecutor.execute { session.sendMedia(index) }
+            commandExecutor.execute { session.sendMedia(index) }
             true
         } catch (_: Exception) {
             false
@@ -631,6 +676,10 @@ class CarPlayController(
     }
 
     override fun close() {
+        // 会话若还活着就被拆掉（force-stop、切到别的 App 后被回收、连接失败回滚），
+        // onSessionEnded 不一定会走到 —— 这里必须把借来的高频还回去，否则 CPU 会一直停在性能档。
+        // 已还原过就是空操作（exitSession 有 applied 守卫）。
+        applyGovernorForSession(false)
         synchronized(this) {
             if (closed) return
             closed = true
@@ -653,6 +702,7 @@ class CarPlayController(
         wirelessGeneration.incrementAndGet()
         permissionPollGeneration += 1
         touchExecutor.shutdownNow()
+        commandExecutor.shutdownNow()
         tunnelExecutor.shutdownNow()
         val service = vpnService
         unbindVpn()
@@ -2763,5 +2813,14 @@ class CarPlayController(
         private const val EXECUTOR_CLOSE_TIMEOUT_MILLIS = 2_000L
         private const val ADAPTER_ADDRESS_PLACEHOLDER = "02:00:00:00:00:00"
         private val BLUETOOTH_ADDRESS = Regex("^[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){5}$")
+
+        /**
+         * A [ThreadFactory] that names its threads, so `top -H`, `taskset` and systrace output
+         * identify the pipeline stage instead of `pool-N-thread-1` (docs/_digest/69 P0-5).
+         * Daemon, matching the media sink's workers.
+         */
+        private fun namedThread(name: String): ThreadFactory = ThreadFactory { task ->
+            Thread(task, name).apply { isDaemon = true }
+        }
     }
 }
