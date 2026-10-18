@@ -303,6 +303,12 @@ class CarPlayController(
      * USB bridge, so it is closed with the session (docs/_digest/58 §7).
      */
     @Volatile private var userSpaceLink: UserSpaceNcmLink? = null
+
+    /**
+     * The iPhone this wired session opened its data paths on, kept only so a teardown can make the
+     * phone see a detach (see [requestWiredReenumeration]). Null while no wired session owns one.
+     */
+    @Volatile private var wiredDevice: UsbDevice? = null
     @Volatile private var vpnBound = false
     private val wirelessHandoffRequested = AtomicBoolean(false)
     private val wirelessTunnelReady = AtomicBoolean(false)
@@ -676,6 +682,40 @@ class CarPlayController(
         }
     }
 
+    /**
+     * Makes the iPhone drop its CarPlay session by asking it to re-enumerate.
+     *
+     * The vendor request is the software equivalent of unplugging the cable. Without it the phone keeps
+     * believing the accessory is still connected after our teardown, refuses the next CarPlayStartSession,
+     * and only a physical replug (or deleting the car in iOS settings) clears it - measured on the tablet
+     * bench on 2026-10-19: iAP2 ran, 0x4301 was sent, and the phone sent zero NCM frames.
+     *
+     * Blocking by design: the callers run on the teardown executor and must finish this before [close]
+     * tears the connection down. Returns false when there is no wired device or the request failed.
+     */
+    fun requestWiredReenumeration(): Boolean {
+        val device = wiredDevice ?: return false
+        wiredDevice = null
+        return try {
+            when (val result = iphoneHost.requestCarPlayReenumeration(device)) {
+                IphoneUsbHost.TransitionResult.ReenumerationRequested -> {
+                    debugLog("wired teardown: iPhone asked to re-enumerate")
+                    true
+                }
+                is IphoneUsbHost.TransitionResult.Failed -> {
+                    debugLog("wired teardown: iPhone re-enumeration failed: ${result.error.message}")
+                    false
+                }
+            }
+        } catch (error: Throwable) {
+            debugLog(
+                "wired teardown: iPhone re-enumeration failed: " +
+                    "${error.javaClass.simpleName}: ${error.message}",
+            )
+            false
+        }
+    }
+
     override fun close() {
         // 会话若还活着就被拆掉（force-stop、切到别的 App 后被回收、连接失败回滚），
         // onSessionEnded 不一定会走到 —— 这里必须把借来的高频还回去，否则 CPU 会一直停在性能档。
@@ -684,6 +724,7 @@ class CarPlayController(
         synchronized(this) {
             if (closed) return
             closed = true
+            wiredDevice = null
             dashboardMapOutputVisible = false
         }
         firstTcpWatchdog?.terminate()
@@ -1694,6 +1735,7 @@ class CarPlayController(
 
     private fun openDataPaths(device: UsbDevice) {
         phase = Phase.DATAPATHS
+        wiredDevice = device
         debugLog("wired opening iPhone USB data paths")
         onStatus(CarPlayStatus.SelectingConfiguration)
         onStatus(CarPlayStatus.OpeningDataPaths)

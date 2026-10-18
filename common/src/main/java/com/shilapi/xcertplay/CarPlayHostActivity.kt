@@ -4191,6 +4191,10 @@ class CarPlayHostActivity : ComponentActivity() {
         val diagnosticLog = sessionLog
         teardownExecutor.execute {
             val started = System.nanoTime()
+            // The iPhone must see a detach before the next CarPlayStartSession, or it silently ignores
+            // it (tablet bench 2026-10-19). This is the software equivalent of unplugging the cable.
+            runCatching { oldController?.requestWiredReenumeration() }
+                .onFailure { Log.w(TAG, "wired re-enumeration request failed", it) }
             oldController?.close()
             val completed = oldController?.awaitClosed(CONTROLLER_CLOSE_TIMEOUT_MILLIS) ?: true
             AsyncDiagnosticLog.append(
@@ -4356,6 +4360,11 @@ class CarPlayHostActivity : ComponentActivity() {
         sessionDisplay = null
         Log.i(TAG, "shutdown reason=$reason terminateProcess=$terminateProcess")
         teardownExecutor.execute {
+            // Ask the iPhone to re-enumerate (the software equivalent of unplugging): without it the
+            // phone keeps the CarPlay session and refuses the next one, so a reconnect needs a physical
+            // replug. Runs before close() because the request needs the USB device still open.
+            runCatching { oldController?.requestWiredReenumeration() }
+                .onFailure { Log.w(TAG, "wired re-enumeration request failed", it) }
             oldController?.close()
             val clean = oldController?.awaitClosed(CONTROLLER_CLOSE_TIMEOUT_MILLIS) ?: true
             oldSink?.close()

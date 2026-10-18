@@ -186,25 +186,37 @@ class IphoneUsbHost(
         callback: (TransitionResult) -> Unit,
     ) {
         executor.execute {
-            callback(runTransition(device) { connection ->
-                val response = ByteArray(VENDOR_RESPONSE_LENGTH)
-                val transferred = connection.controlTransfer(
-                    USB_VENDOR_DEVICE_IN,
-                    CARPLAY_CONFIGURATION_REQUEST,
-                    0,
-                    CARPLAY_CONFIGURATION_INDEX,
-                    response,
-                    response.size,
-                    CONTROL_TRANSFER_TIMEOUT_MILLIS,
-                )
-                if (transferred != response.size) {
-                    throw IphoneUsbException.Protocol(
-                        "CarPlay configuration request transferred $transferred of ${response.size} bytes",
-                    )
-                }
-                TransitionResult.ReenumerationRequested
-            })
+            callback(runTransition(device) { connection -> sendCarPlayConfigurationRequest(connection) })
         }
+    }
+
+    /**
+     * Synchronous form of [requestCarPlayReenumerationAsync], for the teardown path.
+     *
+     * A teardown runs on a background thread and closes the session's connection right after this
+     * call, so the vendor request has to be finished before it returns - an executor hop would race
+     * the close and the iPhone would never see the detach that makes it drop the old CarPlay session.
+     */
+    fun requestCarPlayReenumeration(device: UsbDevice): TransitionResult =
+        runTransition(device) { connection -> sendCarPlayConfigurationRequest(connection) }
+
+    private fun sendCarPlayConfigurationRequest(connection: UsbDeviceConnection): TransitionResult {
+        val response = ByteArray(VENDOR_RESPONSE_LENGTH)
+        val transferred = connection.controlTransfer(
+            USB_VENDOR_DEVICE_IN,
+            CARPLAY_CONFIGURATION_REQUEST,
+            0,
+            CARPLAY_CONFIGURATION_INDEX,
+            response,
+            response.size,
+            CONTROL_TRANSFER_TIMEOUT_MILLIS,
+        )
+        if (transferred != response.size) {
+            throw IphoneUsbException.Protocol(
+                "CarPlay configuration request transferred $transferred of ${response.size} bytes",
+            )
+        }
+        return TransitionResult.ReenumerationRequested
     }
 
     /**
