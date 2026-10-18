@@ -42,6 +42,14 @@ struct cs11_netif_state {
     u32_t tx_frames;
     u32_t tx_bytes;
     u32_t tx_dropped;
+    /* IPv6 protocol histogram for the diagnostic line. These were declared by the JNI side but never
+     * filled, so `ipv6Rx/tcpRx/udpRx/icmp6Rx` were printed as zero and hid the one signal needed to
+     * tell "the phone stopped sending" from "lwIP dropped it" (measured on the tablet 2026-10-19). */
+    u32_t ipv6_rx;
+    u32_t tcp_rx;
+    u32_t udp_rx;
+    u32_t icmp6_rx;
+    u32_t last_tcp_dst;
 };
 
 static struct cs11_netif_state g_cs11;
@@ -160,11 +168,41 @@ int cs11_netif_start(const u8_t *host_mac, int mtu) {
     return 0;
 }
 
+/** Counts the IPv6 protocol histogram straight off the Ethernet frame we were handed.
+ *
+ *  Counting here (rather than inside lwIP) keeps the numbers independent of which input hook lwIP
+ *  chose, and it is the only place that still sees a frame lwIP later drops (a neighbour solicitation
+ *  for an address we do not own, say) - which is exactly the difference we need on the diagnostic line. */
+static void count_received(const u8_t *frame, size_t length) {
+    /* Ethernet II header (14) + fixed IPv6 header (40). */
+    if (length < 54) {
+        return;
+    }
+    if (frame[12] != 0x86 || frame[13] != 0xdd) {
+        return;
+    }
+    g_cs11.ipv6_rx++;
+    /* IPv6 "next header" sits at 14 + 6. Extension headers are not expected on the NCM link. */
+    u8_t next = frame[20];
+    if (next == 6) {
+        g_cs11.tcp_rx++;
+        if (length >= 58) {
+            /* TCP destination port is the second 16-bit field of the TCP header (14 + 40 + 2). */
+            g_cs11.last_tcp_dst = ((u32_t)frame[56] << 8) | (u32_t)frame[57];
+        }
+    } else if (next == 17) {
+        g_cs11.udp_rx++;
+    } else if (next == 58) {
+        g_cs11.icmp6_rx++;
+    }
+}
+
 /** Injects one Ethernet II frame (from the USB reader thread). Returns 0 when it was handed to lwIP. */
 int cs11_netif_input(const u8_t *frame, size_t length) {
     if (frame == NULL || length == 0 || length > 0xffff) {
         return -1;
     }
+    count_received(frame, length);
     struct pbuf *p = pbuf_alloc(PBUF_RAW, (u16_t)length, PBUF_POOL);
     if (p == NULL) {
         return -2;
@@ -226,13 +264,19 @@ int cs11_netif_tx_pending(void) {
     return pending;
 }
 
-/** rx frames, rx bytes, tx frames, tx bytes, tx dropped - for one diagnostic line. */
+/** rx frames, rx bytes, tx frames, tx bytes, tx dropped, then the IPv6 histogram:
+ *  ipv6, tcp, udp, icmp6, and the last TCP destination port - for one diagnostic line. */
 void cs11_netif_stats(u32_t *out) {
     out[0] = g_cs11.rx_frames;
     out[1] = g_cs11.rx_bytes;
     out[2] = g_cs11.tx_frames;
     out[3] = g_cs11.tx_bytes;
     out[4] = g_cs11.tx_dropped;
+    out[5] = g_cs11.ipv6_rx;
+    out[6] = g_cs11.tcp_rx;
+    out[7] = g_cs11.udp_rx;
+    out[8] = g_cs11.icmp6_rx;
+    out[9] = g_cs11.last_tcp_dst;
 }
 
 /* The netif this port owns. lwIP's socket-level IPV6_JOIN_GROUP resolves a netif *index* and answered
