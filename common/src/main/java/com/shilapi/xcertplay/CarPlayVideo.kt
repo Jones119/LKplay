@@ -15,6 +15,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
+import com.shilapi.xcertplay.compat.WorkerThreads
 
 /**
  * iOS 27 video in car (see [VideoInCar]). The iPhone hands the car a media URL (insertPlayQueueItem)
@@ -27,7 +28,7 @@ internal object CarPlayVideo : CarPlayVideoListener {
     private const val URL_TIMEOUT_SECONDS = 10L
 
     private val main = Handler(Looper.getMainLooper())
-    private val sender = Executors.newSingleThreadExecutor { Thread(it, "diplay-video-reply").apply { isDaemon = true } }
+    private val sender = Executors.newSingleThreadExecutor { WorkerThreads.create(it, "diplay-video-reply").apply { isDaemon = true } }
     @Volatile private var appContext: Context? = null
     @Volatile private var controller: CarPlayController? = null
 

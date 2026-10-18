@@ -4,6 +4,7 @@ import android.bluetooth.BluetoothSocket
 import java.io.IOException
 import java.util.ArrayDeque
 import kotlin.math.min
+import com.shilapi.xcertplay.compat.WorkerThreads
 
 /**
  * A bounded [BlockingDuplexByteStream] over an already-open RFCOMM socket.
@@ -25,7 +26,7 @@ class BluetoothRfcommDuplexStream(
     private var socketCloseStarted = false
     private var failure: IOException? = null
 
-    private val reader = Thread(::readLoop, "xcertplay-bluetooth-rfcomm-reader").apply {
+    private val reader = WorkerThreads.create(::readLoop, "xcertplay-bluetooth-rfcomm-reader").apply {
         isDaemon = true
     }
 

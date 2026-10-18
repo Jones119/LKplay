@@ -37,6 +37,7 @@ import com.shilapi.xcertplay.compat.outputBufferCompat
 import com.shilapi.xcertplay.compat.trackUnderrunsCompat
 import com.shilapi.xcertplay.compat.trackRouteTypeCompat
 import com.shilapi.xcertplay.compat.trackBufferSizeFramesCompat
+import com.shilapi.xcertplay.compat.WorkerThreads
 
 /** Owns one focus request for all eligible tracks in a CarPlay sink. */
 internal class AudioFocusCoordinator(
@@ -227,7 +228,7 @@ class AndroidMediaSink(
     private val mirrorDecoders = HashMap<Pair<Int, String>, VideoDecoder>()
     private val lastVideoConfig = ConcurrentHashMap<Int, Pair<VideoCodec, ByteArray>>()
     private val recoveryExecutor = Executors.newSingleThreadExecutor { task ->
-        Thread(task, "carplay-video-recovery").apply { isDaemon = true }
+        WorkerThreads.create(task, "carplay-video-recovery").apply { isDaemon = true }
     }
 
     override fun setVideoRecoveryHandler(type: Int, handler: () -> Unit) {
@@ -543,7 +544,7 @@ private class VideoDecoder(
     private val outputBufferInfo = MediaCodec.BufferInfo()
     // The main screen keeps the historical log format; other screens are labelled.
     private val stats = VideoStats(statsLabel ?: if (streamType == 110) "" else " stream=$streamType")
-    private val thread = Thread({
+    private val thread = WorkerThreads.create({
         android.os.Process.setThreadPriority(com.shilapi.xcertplay.airplay.VideoThreadPriority.current())
         run()
     }, "carplay-video").apply { isDaemon = true; start() }
@@ -1125,7 +1126,7 @@ private class AudioRenderer(
     private var decoderOutputReports = 0
     /** Times the decoder's real output format disagreed with the advertised one (see drainCodec). */
     private var decoderFormatMismatches = 0
-    private val thread = Thread({
+    private val thread = WorkerThreads.create({
         android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO)
         run()
     }, "carplay-audio").apply { isDaemon = true }

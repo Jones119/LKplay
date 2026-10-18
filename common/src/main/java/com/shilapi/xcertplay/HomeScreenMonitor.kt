@@ -14,6 +14,7 @@ import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
 import com.shilapi.xcertplay.compat.systemService
 import android.os.Build
+import com.shilapi.xcertplay.compat.WorkerThreads
 
 /**
  * Whether a home screen is in front (the car's normal home, its map home or MyCar, or whichever
@@ -51,7 +52,7 @@ internal class HomeScreenMonitor(context: Context, private val onChange: (Boolea
             since = System.currentTimeMillis() - FIRST_LOOK_BACK_MILLIS
             newestTime = 0L
             newestPackage = null
-            executor = Executors.newSingleThreadScheduledExecutor { Thread(it, "diplay-home-monitor").apply { isDaemon = true } }
+            executor = Executors.newSingleThreadScheduledExecutor { WorkerThreads.create(it, "diplay-home-monitor").apply { isDaemon = true } }
                 .also { it.scheduleWithFixedDelay(::poll, 0, POLL_MILLIS, TimeUnit.MILLISECONDS) }
         }
     }

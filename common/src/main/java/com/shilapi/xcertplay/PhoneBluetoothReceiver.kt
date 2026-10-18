@@ -17,6 +17,8 @@ import android.util.Log
  */
 class PhoneBluetoothReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        // The wireless path can run without any activity being created; capture before it starts threads.
+        com.shilapi.xcertplay.compat.WorkerThreads.capture()
         if (intent.action != BluetoothDevice.ACTION_ACL_CONNECTED ||
             !DiPlayPreferences.connectOnPhoneBluetooth(context) ||
             CarPlayBackgroundSession.hasSession()

@@ -8,6 +8,7 @@ import java.math.BigInteger
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.util.concurrent.atomic.AtomicBoolean
+import com.shilapi.xcertplay.compat.WorkerThreads
 
 /**
  * CarPlay timing-port clock sync.
@@ -46,14 +47,14 @@ class NtpClock(
         // This ROM rejects unscoped IPv6 binds entirely; bind the netdev link-local instead.
         val bound = network.open(serverBindAddress())
         synchronized(socketLock) { socket = bound }
-        receiver = Thread(::runReceiver, "airplay-ntp-rx").apply { isDaemon = true; start() }
+        receiver = WorkerThreads.create(::runReceiver, "airplay-ntp-rx").apply { isDaemon = true; start() }
         return bound.localPort
     }
 
     fun start(peerAddress: InetAddress, port: Int) {
         require(port > 0) { "timing port must be positive" }
         peer = InetSocketAddress(peerAddress, port)
-        sender = Thread(::runSender, "airplay-ntp-tx").apply { isDaemon = true; start() }
+        sender = WorkerThreads.create(::runSender, "airplay-ntp-tx").apply { isDaemon = true; start() }
     }
 
     /** Now in the phone's synchronized clock domain, as an unsigned NTP64 value. */

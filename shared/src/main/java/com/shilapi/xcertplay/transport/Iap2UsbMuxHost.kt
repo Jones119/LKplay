@@ -3,6 +3,7 @@ package com.shilapi.xcertplay.transport
 import android.util.Log
 import java.io.Closeable
 import java.util.ArrayDeque
+import com.shilapi.xcertplay.compat.WorkerThreads
 
 /**
  * USBMUX version-2 host over an already claimed iPhone bulk pipe.
@@ -145,7 +146,7 @@ class Iap2UsbMuxHost private constructor(
         // Optional reply padding is handled by the incremental framer. Retain a possible
         // fragmented/coalesced next frame instead of discarding the entire remainder.
         sendFrame(PROTOCOL_SETUP, byteArrayOf(SETUP_VALUE.toByte()))
-        readerThread = Thread({
+        readerThread = WorkerThreads.create({
             android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO)
             readerLoop()
         }, "iap2-usbmux-reader").apply {

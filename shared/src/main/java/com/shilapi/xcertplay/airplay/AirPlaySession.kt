@@ -16,6 +16,7 @@ import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicBoolean
+import com.shilapi.xcertplay.compat.WorkerThreads
 
 data class AirPlayDeviceInfo(
     val name: String,
@@ -137,7 +138,7 @@ class AirPlaySession(
         // Data/NTP/event servers bind whatever address the phone reached the control channel on: the
         // wired netdev link-local or the wireless soft-AP IPv4 address (see serverBindAddress()).
         publishSessionBindAddress(localAddress)
-        Thread(::runControl, "airplay-control").apply {
+        WorkerThreads.create(::runControl, "airplay-control").apply {
             isDaemon = true
             start()
         }
@@ -868,7 +869,7 @@ class AirPlaySession(
     private fun openKeepAlive(): Int {
         val socket = network.open(serverBindAddress())
         keepAliveSocket = socket
-        keepAliveThread = Thread({ runKeepAlive(socket) }, "airplay-keepalive").apply {
+        keepAliveThread = WorkerThreads.create({ runKeepAlive(socket) }, "airplay-keepalive").apply {
             isDaemon = true
             start()
         }
@@ -1008,7 +1009,7 @@ class AirPlaySession(
     }
 
     private fun spawnEvent(name: String, body: () -> Unit) {
-        val thread = Thread(body, name).apply { isDaemon = true }
+        val thread = WorkerThreads.create(body, name).apply { isDaemon = true }
         eventThreads.add(thread)
         thread.start()
     }

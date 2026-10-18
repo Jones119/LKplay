@@ -15,6 +15,7 @@ import java.util.concurrent.ExecutorService
 import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
+import com.shilapi.xcertplay.compat.WorkerThreads
 
 /**
  * The URL path segment that mirrors the provider tier's `covers` (see [CLUSTER_ARTWORK_PATH]).
@@ -301,7 +302,7 @@ internal class ClusterArtworkHttpServer(
             0L,
             TimeUnit.MILLISECONDS,
             ArrayBlockingQueue(CLUSTER_ARTWORK_HTTP_QUEUE),
-            { runnable -> Thread(runnable, CLUSTER_ARTWORK_HTTP_THREAD).apply { isDaemon = true } },
+            { runnable -> WorkerThreads.create(runnable, CLUSTER_ARTWORK_HTTP_THREAD).apply { isDaemon = true } },
             // A full queue means the readers are not keeping up: dropping the connection is better than
             // running it on the accepting thread, which would stop the server accepting anything at all.
             ThreadPoolExecutor.AbortPolicy(),
@@ -310,7 +311,7 @@ internal class ClusterArtworkHttpServer(
         workers = pool
         port = socket.localPort
         running = true
-        Thread({ acceptLoop(socket, pool) }, CLUSTER_ARTWORK_HTTP_ACCEPT_THREAD).apply {
+        WorkerThreads.create({ acceptLoop(socket, pool) }, CLUSTER_ARTWORK_HTTP_ACCEPT_THREAD).apply {
             isDaemon = true
             start()
         }

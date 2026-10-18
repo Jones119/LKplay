@@ -20,6 +20,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.Executor
 import com.shilapi.xcertplay.compat.systemServiceOrNull
 import com.shilapi.xcertplay.compat.getDrawableCompat
+import com.shilapi.xcertplay.compat.WorkerThreads
 
 /**
  * Steering-wheel and other hardware media buttons for CarPlay.
@@ -49,7 +50,7 @@ internal object CarPlayMediaKeys {
     }
     private val artworkQueue = NowPlayingArtworkQueue(
         worker = Executors.newSingleThreadExecutor { task ->
-            Thread(task, "diplay-now-playing-artwork").apply { isDaemon = true }
+            WorkerThreads.create(task, "diplay-now-playing-artwork").apply { isDaemon = true }
         },
         main = Executor { mainHandler.post(it) },
         decode = ::decodeArtwork,

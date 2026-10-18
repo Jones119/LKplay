@@ -26,6 +26,7 @@ import java.net.Inet6Address
 import java.net.InetAddress
 import java.util.concurrent.atomic.AtomicBoolean
 import android.os.Build
+import com.shilapi.xcertplay.compat.WorkerThreads
 
 /**
  * Hosts the AirPlay TCP listener for both NCM/VPN and local-only Wi-Fi transports.
@@ -69,69 +70,17 @@ class CarPlayVpnService : VpnService() {
      * default (docs/_digest/58 §6 step 7).
      */
     @Volatile internal var network: SessionNetwork = SessionNetwork.kernel
-    private var bridge: Ipv6NcmBridge? = null
-    private var tun: ParcelFileDescriptor? = null
     private var attachGeneration = 0
 
-    override fun onBind(intent: Intent?): IBinder = binder
-
-    @Synchronized
-    fun attach(
-        ncm: NcmUsbBridge,
-        linkLocal: String,
-        hostMac: ByteArray,
-        config: AirPlayConfig,
-        identity: AirPlayIdentity,
-        pairings: PairingStore,
-        mfi: MfiAuthenticator?,
-        listener: AirPlaySessionListener,
-        media: AirPlayMediaHandler,
-    ): AttachResult {
-        if (active.get()) {
-            Log.i(TAG, "replacing stale NCM/VPN attachment")
-            releaseLocked()
-        }
-        active.set(true)
-        val generation = ++attachGeneration
-        return try {
-            val address = InetAddress.getByName(linkLocal)
-            if (address !is Inet6Address || !address.isLinkLocalAddress) {
-                throw IllegalArgumentException("linkLocal must be a link-local IPv6 literal")
-            }
-            require(hostMac.size == 6) { "hostMac must be 6 bytes" }
-
-            val builder = Builder()
-                .addAddress(linkLocal, LINK_PREFIX)
-                .addRoute(LINK_LOCAL_ROUTE, LINK_PREFIX)
-                .setSession(SESSION_NAME)
-                .setMtu(TUN_MTU)
-            // CS11: setBlocking/addAllowedApplication 是 API21+；4.4 上退回非阻塞 + 全应用路由
-            if (Build.VERSION.SDK_INT >= 21) {
-                builder.setBlocking(true)
-                // An empty app list routes every UID through this VPN. Scope it before establish;
-                // rejection must reach the existing attachment cleanup, never an unscoped retry.
-                builder.addAllowedApplication(packageName)
-            }
-            val tunFd = builder.establish()
-                ?: throw IOException("VpnService.establish returned null")
-            tun = tunFd
-
-            val ipv6Bridge = Ipv6NcmBridge(ncm, tunFd, hostMac) { error ->
-                onTransportError(generation, listener, error)
-            }
-            ipv6Bridge.start()
-            bridge = ipv6Bridge
-
-            startAirPlayServer(
-                generation,
-                AirPlayAttachment(address, config, identity, pairings, mfi, listener, media),
-            )
-            AttachResult.Started
-        } catch (error: Exception) {
-            releaseLocked()
-            AttachResult.Failed(error.message ?: error.javaClass.simpleName)
-        }
+    /**
+     * First lifecycle call: this service starts a session's threads and can run with no activity created
+     * after boot, so the ThreadGroup is captured here too (see WorkerThreads).
+     */
+    override fun onBind(intent: Intent?): IBinder {
+        com.shilapi.xcertplay.compat.WorkerThreads.capture()
+        return binder
     }
+
 
     /**
      * Starts the AirPlay listener on the local-only Wi-Fi AP address without establishing a VPN or
@@ -219,7 +168,7 @@ class CarPlayVpnService : VpnService() {
             runCatching { replacement.listener.onDebugLog(
                 "airplay listener ready family=${if (bound.localSocketAddress?.address is Inet6Address) "IPv6" else "IPv4"} port=${bound.localPort}",
             ) }
-            Thread(
+            WorkerThreads.create(
                 { acceptLoop(generation, bound) },
                 "airplay-accept",
             ).apply {
@@ -337,10 +286,10 @@ class CarPlayVpnService : VpnService() {
     ) {
         val message = error.message ?: error.javaClass.simpleName
         Log.e(TAG, "CarPlay transport stopped: $message", error)
-        Thread(
+        WorkerThreads.create(
             {
                 val releasedGeneration = synchronized(this) {
-                    if (generation != attachGeneration) return@Thread
+                    if (generation != attachGeneration) return@create
                     releaseLocked()
                     attachGeneration
                 }
@@ -366,19 +315,10 @@ class CarPlayVpnService : VpnService() {
         additionalServers.forEach { it.close() }
         additionalServers = emptyList()
         closeSessionsLocked()
-        bridge?.close()
-        bridge = null
-        tun?.close()
-        tun = null
     }
 
     companion object {
         private const val TAG = "xcertplay-usb"
-        private const val LINK_PREFIX = 64
-        private const val LINK_LOCAL_ROUTE = "fe80::"
-        private const val SESSION_NAME = "xcertplay CarPlay"
-        private const val TUN_MTU = 1500
-
         /** Returns the VPN consent intent, or null when consent is already granted. */
         fun prepare(context: Context): Intent? = VpnService.prepare(context)
     }

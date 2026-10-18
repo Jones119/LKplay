@@ -31,6 +31,7 @@ import javax.jmdns.JmDNS
 import javax.jmdns.ServiceEvent
 import javax.jmdns.ServiceInfo
 import javax.jmdns.ServiceListener
+import com.shilapi.xcertplay.compat.WorkerThreads
 
 data class CarPlayBonjourEndpoint(
     val serviceName: String,
@@ -317,7 +318,7 @@ class CarPlayBonjour(
                     )
                     discoveryRequested = true
                 }
-                worker = Thread(::runWorker, WORKER_NAME).apply {
+                worker = WorkerThreads.create(::runWorker, WORKER_NAME).apply {
                     isDaemon = true
                     start()
                 }

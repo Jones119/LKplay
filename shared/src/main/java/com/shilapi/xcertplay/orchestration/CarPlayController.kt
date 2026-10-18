@@ -108,6 +108,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 import com.shilapi.xcertplay.compat.systemServiceOrNull
 import com.shilapi.xcertplay.compat.noBackupFilesDirCompat
+import com.shilapi.xcertplay.compat.WorkerThreads
 
 sealed class CarPlayStatus {
     data object DiscoveringMfi : CarPlayStatus()
@@ -287,7 +288,7 @@ class CarPlayController(
     private val wirelessFailureReported = AtomicBoolean(false)
     @Volatile private var firstTcpWatchdog: FirstTcpWatchdog? = null
     private val startupTimer = java.util.concurrent.ScheduledThreadPoolExecutor(1) { task ->
-        Thread(task, "diplay-first-tcp-timeout").apply { isDaemon = true }
+        WorkerThreads.create(task, "diplay-first-tcp-timeout").apply { isDaemon = true }
     }.apply { if (Build.VERSION.SDK_INT >= 21) removeOnCancelPolicy = true } // CS11: setRemoveOnCancelPolicy 是 API21+
     @Volatile private var wirelessDiagnostics: WirelessStartupDiagnostics? = null
     @Volatile private var bluetoothSocket: BluetoothSocket? = null
@@ -706,7 +707,7 @@ class CarPlayController(
         tunnelExecutor.shutdownNow()
         val service = vpnService
         unbindVpn()
-        Thread(
+        WorkerThreads.create(
             {
                 try {
                     if (config.transport == CarPlayTransport.WIRELESS) {
@@ -952,7 +953,7 @@ class CarPlayController(
             firstTcpWatchdog?.terminate()
             wirelessGeneration.incrementAndGet()
         }
-        Thread(
+        WorkerThreads.create(
             {
                 closeWirelessStack(generation = generation)
                 startWireless(generation)
@@ -988,7 +989,7 @@ class CarPlayController(
                     if (!closed && generation == wirelessGeneration.get()) {
                         fail(WirelessStartupException(WirelessStartupFailure.FIRST_TCP_TIMEOUT,
                             "No AirPlay TCP after CarPlay StartSession"), generation)
-                        Thread({ closeWirelessStack(generation = generation) }, "diplay-startup-cleanup")
+                        WorkerThreads.create({ closeWirelessStack(generation = generation) }, "diplay-startup-cleanup")
                             .apply { isDaemon = true; start() }
                     }
                 },
@@ -1443,14 +1444,14 @@ class CarPlayController(
         if (!wirelessHandoffRequested.get() || !wirelessTunnelReady.get()) return
         if (!wirelessActiveReported.compareAndSet(false, true)) return
         val generation = wirelessGeneration.get()
-        Thread(
+        WorkerThreads.create(
             {
                 if (
                     closed ||
                     phase != Phase.WIRELESS ||
                     generation != wirelessGeneration.get()
                 ) {
-                    return@Thread
+                    return@create
                 }
                 debugLog("wireless handoff ready; closing Bluetooth bootstrap transport")
                 closeBluetoothBootstrapTransport()
@@ -1476,7 +1477,7 @@ class CarPlayController(
                     return@postDelayed
                 }
                 debugLog("wireless handoff timed out waiting for tunnel iAP2 readiness")
-                Thread(
+                WorkerThreads.create(
                     { handleWirelessHandoffTimeout(generation) },
                     "xcertplay-wireless-handoff-timeout",
                 ).apply {
@@ -2087,12 +2088,12 @@ class CarPlayController(
                         throw IphoneUsbException.DeviceUnavailable("Could not attach the NCM/VPN AirPlay transport")
                     }
                     debugLog("CS11 degraded mode: no NCM bridge; control channel only")
-                } else if (!attachVpn(ncm, ncmHostMac)) {
-                    if (Build.VERSION.SDK_INT < 21) {
-                        debugLog("CS11 degraded mode: VPN attach failed; control channel only")
-                    } else {
-                        throw IphoneUsbException.DeviceUnavailable("Could not attach the NCM/VPN AirPlay transport")
-                    }
+                } else {
+                    // The VpnService/NCM transport is gone: the CS11 kernel has no TUN driver (no
+                    // /dev/tun, no tun module, no VPN consent dialog either), so it could never attach
+                    // there, and the userspace lwIP bridge above is the transport that works. Anything
+                    // reaching here is a device with neither, and runs control-channel only.
+                    debugLog("no NCM transport; control channel only")
                 }
             }
             ncmOwnedLocally = false
@@ -2346,7 +2347,7 @@ class CarPlayController(
     private fun connectBluetoothSocket(socket: BluetoothSocket, address: String) {
         val result = AtomicReference<Throwable?>()
         val connected = CountDownLatch(1)
-        Thread(
+        WorkerThreads.create(
             {
                 try {
                     socket.connect()
@@ -2533,49 +2534,6 @@ class CarPlayController(
         else -> CONTROL_LOOP_TIMEOUT_MILLIS
     }
 
-    private fun attachVpn(ncm: NcmUsbBridge, hostMac: ByteArray): Boolean {
-        onStatus(CarPlayStatus.AttachingNetwork)
-        val service = awaitVpnService() ?: run {
-            debugLog("wired VPN service bind failed")
-            ncm.close()
-            return false
-        }
-        debugLog("wired VPN service bound; attaching NCM transport")
-        val result = try {
-            service.attach(
-                ncm = ncm,
-                linkLocal = config.linkLocal,
-                hostMac = hostMac,
-                config = airPlayConfig,
-                identity = identity,
-                pairings = pairings,
-                mfi = mfiSession?.client,
-                listener = sessionListener,
-                media = media,
-            )
-        } catch (error: Throwable) {
-            ncm.close()
-            onStatus(CarPlayStatus.Failed(error.message ?: error.javaClass.simpleName))
-            return false
-        }
-        return when (result) {
-            CarPlayVpnService.AttachResult.Started -> {
-                debugLog("wired VPN/NCM transport attach result=started")
-                true
-            }
-            CarPlayVpnService.AttachResult.AlreadyStarted -> {
-                debugLog("wired VPN/NCM transport attach result=already-started")
-                ncm.close()
-                false
-            }
-            is CarPlayVpnService.AttachResult.Failed -> {
-                debugLog("wired VPN/NCM transport attach result=failed ${result.message}")
-                ncm.close()
-                onStatus(CarPlayStatus.Failed(result.message))
-                false
-            }
-        }
-    }
 
     private fun ByteArray.macString(): String =
         joinToString(":") { byte -> "%02x".format(byte.toInt() and 0xff) }
@@ -2820,7 +2778,7 @@ class CarPlayController(
          * Daemon, matching the media sink's workers.
          */
         private fun namedThread(name: String): ThreadFactory = ThreadFactory { task ->
-            Thread(task, name).apply { isDaemon = true }
+            WorkerThreads.create(task, name).apply { isDaemon = true }
         }
     }
 }

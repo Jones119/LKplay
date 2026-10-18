@@ -486,6 +486,9 @@ class CarPlayHostActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // A session can be started from a notification or the Bluetooth receiver, so the group has to be
+        // captured here too and not only in DiPlayActivity; see WorkerThreads.
+        com.shilapi.xcertplay.compat.WorkerThreads.capture()
         super.onCreate(savedInstanceState)
         NavigationWidgetUpdater.attach(applicationContext)
         CenterMapOverlay.requestShow = ::showCenterMap

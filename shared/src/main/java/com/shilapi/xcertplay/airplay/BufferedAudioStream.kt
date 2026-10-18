@@ -10,6 +10,7 @@ import com.shilapi.xcertplay.transport.StreamNetwork
 import java.net.InetAddress
 import java.util.ArrayDeque
 import java.util.concurrent.atomic.AtomicBoolean
+import com.shilapi.xcertplay.compat.WorkerThreads
 
 /**
  * CarPlay's main buffered audio (WWDC23 "Enhanced buffering"). For apps that support it (Apple Music),
@@ -77,8 +78,8 @@ internal class BufferedAudioStream(
 
     fun start() {
         if (closed.get() || !started.compareAndSet(false, true)) return
-        Thread({ receive() }, "airplay-buffered-rx").apply { isDaemon = true; start() }
-        Thread({ feed() }, "airplay-buffered-feed").apply { isDaemon = true; start() }
+        WorkerThreads.create({ receive() }, "airplay-buffered-rx").apply { isDaemon = true; start() }
+        WorkerThreads.create({ feed() }, "airplay-buffered-feed").apply { isDaemon = true; start() }
     }
 
     private fun receive() {

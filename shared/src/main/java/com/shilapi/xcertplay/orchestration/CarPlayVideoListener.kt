@@ -2,6 +2,7 @@ package com.shilapi.xcertplay.orchestration
 
 import com.shilapi.xcertplay.airplay.VideoInCar
 import java.io.Closeable
+import com.shilapi.xcertplay.compat.WorkerThreads
 
 /** iOS 27 video in car, played by the host in the car's own player (see [VideoInCar]). */
 interface CarPlayVideoListener {
@@ -35,13 +36,13 @@ internal class VideoInCarGate(
     private var lastParked: Boolean? = null
 
     fun start() {
-        Thread({
+        WorkerThreads.create({
             while (!closed) {
                 update(runCatching(readParked).getOrNull())
                 try {
                     Thread.sleep(POLL_MILLIS)
                 } catch (_: InterruptedException) {
-                    return@Thread
+                    return@create
                 }
             }
         }, "diplay-video-gate").apply { isDaemon = true }.start()

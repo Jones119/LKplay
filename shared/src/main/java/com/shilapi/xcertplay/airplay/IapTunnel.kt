@@ -15,6 +15,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import com.shilapi.xcertplay.transport.readU16Le
 import com.shilapi.xcertplay.transport.readU32Be
+import com.shilapi.xcertplay.compat.WorkerThreads
 
 /**
  * Receive-only iAP2-over-CarPlay DataStream tunnel (stream type 130).
@@ -81,7 +82,7 @@ class IapTunnel(
             )
         }
         servers.forEach { server ->
-            threads += Thread({ accept(server) }, "airplay-iap-tunnel").apply {
+            threads += WorkerThreads.create({ accept(server) }, "airplay-iap-tunnel").apply {
                 isDaemon = true
                 start()
             }

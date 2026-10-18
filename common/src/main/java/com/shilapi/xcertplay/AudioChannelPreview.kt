@@ -14,12 +14,13 @@ import java.util.concurrent.Future
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.sin
+import com.shilapi.xcertplay.compat.WorkerThreads
 
 /** Plays one short tone through the same legacy stream route used by CarPlay audio. */
 internal class AudioChannelPreview(private val onUnavailable: (Int) -> Unit) : Closeable {
     private val mainHandler = Handler(Looper.getMainLooper())
     private val worker = Executors.newSingleThreadExecutor { task ->
-        Thread(task, "diplay-channel-preview").apply { isDaemon = true }
+        WorkerThreads.create(task, "diplay-channel-preview").apply { isDaemon = true }
     }
     private val generation = AtomicInteger()
     private val activeTrack = AtomicReference<AudioTrack?>()

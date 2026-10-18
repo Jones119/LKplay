@@ -7,6 +7,7 @@ import com.shilapi.xcertplay.hud.RouteGuidanceState
 import com.shilapi.xcertplay.iap2.wire.Iap2Frame
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import com.shilapi.xcertplay.compat.WorkerThreads
 
 /** The thread the instrument-cluster push runs on; it is not the iAP2 control thread. */
 internal const val CLUSTER_PUSH_THREAD = "diplay-cluster-push"
@@ -71,7 +72,7 @@ object CarPlayGlance {
      * a daemon so a finished session (or a unit test) is never held open by a push thread.
      */
     private val clusterWorker: ExecutorService = Executors.newSingleThreadExecutor { runnable ->
-        Thread(runnable, CLUSTER_PUSH_THREAD).apply { isDaemon = true }
+        WorkerThreads.create(runnable, CLUSTER_PUSH_THREAD).apply { isDaemon = true }
     }
 
     /**

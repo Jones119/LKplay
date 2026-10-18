@@ -13,6 +13,7 @@ import java.nio.ByteBuffer
 import java.util.ArrayDeque
 import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
+import com.shilapi.xcertplay.compat.WorkerThreads
 
 /**
  * A blocking NCM data pipe that moves Ethernet frames as NTB16 blocks over bulk endpoints.
@@ -70,7 +71,7 @@ class NcmUsbBridge internal constructor(
     private val readQueuePolicy = UsbReadQueuePolicy.forCurrentPlatform()
     private val statusRunning = AtomicBoolean(statusEndpoint != null)
     private val statusThread = statusEndpoint?.let { endpoint ->
-        Thread({ drainStatus(endpoint) }, "ncm-status-in").apply {
+        WorkerThreads.create({ drainStatus(endpoint) }, "ncm-status-in").apply {
             isDaemon = true
             start()
         }

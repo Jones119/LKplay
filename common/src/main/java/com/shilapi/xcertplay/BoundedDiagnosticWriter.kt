@@ -2,6 +2,7 @@ package com.shilapi.xcertplay
 
 import java.io.Closeable
 import java.util.ArrayDeque
+import com.shilapi.xcertplay.compat.WorkerThreads
 
 /** One daemon writer, with at most [maxPending] queued entries plus its active write. */
 internal class BoundedDiagnosticWriter<T : Any>(
@@ -16,7 +17,7 @@ internal class BoundedDiagnosticWriter<T : Any>(
 
     init {
         require(maxPending > 0)
-        Thread(::drain, "diplay-diagnostic-writer").apply {
+        WorkerThreads.create(::drain, "diplay-diagnostic-writer").apply {
             isDaemon = true
             start()
         }

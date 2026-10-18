@@ -10,6 +10,7 @@ import java.io.InputStream
 import java.net.InetAddress
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
+import com.shilapi.xcertplay.compat.WorkerThreads
 
 /** CS11 / this project decodes H.264 only: the ROM's VPU decodes HEVC in software, so H.265 is not offered. */
 enum class VideoCodec { H264 }
@@ -63,7 +64,7 @@ class ScreenStream(
         this.listener = listener
         val bound = network.listen(serverBindAddress(), port = 0, reuseAddress = true)
         server = bound
-        thread = Thread({
+        thread = WorkerThreads.create({
             // Geely H52's Android 4.3 port runs its video receive/decode threads at -8 rather than
             // the -4 used here; the car session A/Bs whether the extra step helps on this SoC
             // (diplay.video_priority below reverts it without a rebuild). Audio stays at -19.

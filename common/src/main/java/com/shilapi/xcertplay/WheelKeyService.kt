@@ -20,6 +20,7 @@ import com.shilapi.xcertplay.airplay.AirPlayKnobState
 import com.shilapi.xcertplay.airplay.CarPlayMediaButton
 import com.shilapi.xcertplay.glance.CarPlayGlance
 import com.shilapi.xcertplay.host.R
+import com.shilapi.xcertplay.compat.WorkerThreads
 
 /**
  * Optional: steering-wheel keys zoom CarPlay's dashboard map and work as a CarPlay joystick. The head
@@ -352,7 +353,7 @@ class WheelKeyService : AccessibilityService() {
         fun restoreIfNeeded(context: Context) {
             val app = context.applicationContext
             if (!needsRestore(app) || !restoring.compareAndSet(false, true)) return
-            Thread({
+            WorkerThreads.create({
                 try {
                     Thread.sleep(RESTORE_GRACE_MILLIS)
                     if (needsRestore(app)) Log.i(TAG, "wheel key service not running; restoring over adb: ${enableOverAdb(app, mayAsk = false)}")

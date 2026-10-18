@@ -4,6 +4,7 @@ import java.io.Closeable
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
+import com.shilapi.xcertplay.compat.WorkerThreads
 
 /**
  * The userspace NCM link: lwIP's TCP/IP stack carried over the USB bridge (docs/_digest/58 §7).
@@ -54,9 +55,9 @@ internal class UserSpaceNcmLink(
     /** Starts both directions and the periodic statistics line. Safe to call once, after [start]. */
     fun startPump() {
         if (!running.compareAndSet(false, true)) return
-        receiveThread = Thread(::pumpReceive, "ncm-us-rx").apply { isDaemon = true; start() }
-        transmitThread = Thread(::pumpTransmit, "ncm-us-tx").apply { isDaemon = true; start() }
-        statisticsThread = Thread(::reportStatistics, "ncm-us-stats").apply { isDaemon = true; start() }
+        receiveThread = WorkerThreads.create(::pumpReceive, "ncm-us-rx").apply { isDaemon = true; start() }
+        transmitThread = WorkerThreads.create(::pumpTransmit, "ncm-us-tx").apply { isDaemon = true; start() }
+        statisticsThread = WorkerThreads.create(::reportStatistics, "ncm-us-stats").apply { isDaemon = true; start() }
     }
 
     private fun pumpReceive() {

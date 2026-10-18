@@ -7,6 +7,7 @@ import java.net.InetAddress
 import java.net.NetworkInterface
 import java.util.Collections
 import java.util.concurrent.atomic.AtomicBoolean
+import com.shilapi.xcertplay.compat.WorkerThreads
 
 /** Observes startup without changing connection deadlines, address selection or retry behavior. */
 internal class WirelessStartupDiagnostics(
@@ -25,7 +26,7 @@ internal class WirelessStartupDiagnostics(
     private var firstStartRequestNs: Long? = null
     private var firstTcpAfterStartMs: Long? = null
     @Volatile private var lastSnapshot = ""
-    private val worker = Thread(::observe, "diplay-wireless-diagnostics").apply { isDaemon = true }
+    private val worker = WorkerThreads.create(::observe, "diplay-wireless-diagnostics").apply { isDaemon = true }
 
     init { require(intervalMillis > 0) }
 

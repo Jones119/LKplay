@@ -3,6 +3,7 @@ package com.shilapi.xcertplay.transport
 import java.io.IOException
 import java.util.ArrayDeque
 import kotlin.math.min
+import com.shilapi.xcertplay.compat.WorkerThreads
 
 /**
  * Blocking facade for an iAP2 link over a caller-supplied byte stream.
@@ -38,7 +39,7 @@ class Iap2LinkChannel private constructor(
     private var terminalFailure: Throwable? = null
     private var streamCloseStarted = false
 
-    private val worker = Thread(::runPump, "xcertplay-iap2-link").apply {
+    private val worker = WorkerThreads.create(::runPump, "xcertplay-iap2-link").apply {
         isDaemon = true
     }
 

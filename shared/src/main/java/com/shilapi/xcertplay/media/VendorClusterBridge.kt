@@ -11,6 +11,7 @@ import java.lang.reflect.Proxy
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
+import com.shilapi.xcertplay.compat.WorkerThreads
 
 /** The adb override for the cluster push; [VendorClusterBridge.enabled] documents its precedence. */
 private const val CLUSTER_SWITCH = "debug.diplay.cluster"
@@ -261,7 +262,7 @@ object VendorClusterBridge {
         synchronized(pushLock) {
             if (repush != null) return
             val service = Executors.newSingleThreadScheduledExecutor { runnable ->
-                Thread(runnable, CLUSTER_REPUSH_THREAD).apply { isDaemon = true }
+                WorkerThreads.create(runnable, CLUSTER_REPUSH_THREAD).apply { isDaemon = true }
             }
             service.scheduleWithFixedDelay(
                 { runCatching { repushTick() } },

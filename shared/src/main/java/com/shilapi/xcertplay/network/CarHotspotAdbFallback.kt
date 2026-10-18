@@ -3,6 +3,7 @@ package com.shilapi.xcertplay.network
 import java.util.concurrent.FutureTask
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
+import com.shilapi.xcertplay.compat.WorkerThreads
 
 /** Uses only a firmware-advertised command for the saved hotspot; never configures a replacement AP. */
 internal object CarHotspotAdbFallback {
@@ -91,7 +92,7 @@ internal object CarHotspotAdbFallback {
     internal fun bounded(deadline: Long, cancelled: () -> Boolean, abort: () -> Unit, action: () -> Boolean): Boolean {
         if (cancelled() || Thread.currentThread().isInterrupted || System.nanoTime() >= deadline) return false
         val task = FutureTask(action)
-        Thread(task, "diplay-hotspot-adb").apply { isDaemon = true; start() }
+        WorkerThreads.create(task, "diplay-hotspot-adb").apply { isDaemon = true; start() }
         try {
             while (!cancelled() && !Thread.currentThread().isInterrupted) {
                 val remaining = deadline - System.nanoTime()

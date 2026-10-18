@@ -66,6 +66,22 @@ object WorkerThreads {
         return if (pinned != null) Thread(pinned, body, name) else Thread(body, name)
     }
 
+    /**
+     * The same construction with the arguments in [java.lang.Thread]'s own order.
+     *
+     * `Thread(body, name)` and `Thread(body)` are what the rest of this codebase already writes, so
+     * keeping that order means adopting this class is a one-word change per call site
+     * (`Thread(` -> `WorkerThreads.create(`) instead of a rewrite of every argument list. `body` is a
+     * `Runnable` or a Kotlin function, never a `String`, so the two orders cannot be confused.
+     */
+    fun create(body: Runnable, name: String): Thread = create(name, body)
+
+    /** Function-typed overload; see [create]. */
+    fun create(block: () -> Unit, name: String): Thread = create(name, Runnable { block() })
+
+    /** Function-typed overload for a thread that gets no name; see [create]. */
+    fun create(block: () -> Unit): Thread = create("diplay-worker", Runnable { block() })
+
     /** Creates and starts a thread; see [create]. */
     fun start(name: String, body: Runnable): Thread = create(name, body).apply { start() }
 
@@ -75,4 +91,14 @@ object WorkerThreads {
             isDaemon = true
             start()
         }
+
+    /**
+     * A factory for `Executors.newSingleThreadExecutor { … }`-style call sites.
+     *
+     * `Executors` builds its worker threads through a [java.util.concurrent.ThreadFactory], so the group
+     * has to be supplied here or the pool would hit the same firmware bug the moment it lazily creates
+     * its thread.
+     */
+    fun factory(name: String): java.util.concurrent.ThreadFactory =
+        java.util.concurrent.ThreadFactory { body -> create(name, body) }
 }

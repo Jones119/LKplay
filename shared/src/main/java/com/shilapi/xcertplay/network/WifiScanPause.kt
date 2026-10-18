@@ -10,6 +10,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
+import com.shilapi.xcertplay.compat.WorkerThreads
 
 /**
  * The head unit's automatic Wi-Fi network search is paused while wireless CarPlay runs.
@@ -93,7 +94,7 @@ private object ProcessWifiScanPause : WifiScanPauseControl {
     private const val PREFS = "diplay_wifi_scan_pause"
     private const val JOURNAL = "restore_pending"
     private val worker: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor {
-        Thread(it, WifiScanPause.TAG).apply { isDaemon = true }
+        WorkerThreads.create(it, WifiScanPause.TAG).apply { isDaemon = true }
     }
     private val adb = AdbShell(WifiScanPause.TAG)
     private var session: WifiScanPauseSession? = null

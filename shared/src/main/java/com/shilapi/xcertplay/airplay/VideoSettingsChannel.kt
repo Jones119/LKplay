@@ -8,6 +8,7 @@ import java.io.Closeable
 import java.io.OutputStream
 import java.net.InetAddress
 import java.util.concurrent.atomic.AtomicBoolean
+import com.shilapi.xcertplay.compat.WorkerThreads
 
 /**
  * The "CarPlayVideo Settings App" data stream (type 130, [VideoInCar.SETTINGS_CHANNEL_UUID]) the iPhone
@@ -33,7 +34,7 @@ class VideoSettingsChannel(
     fun listen(bindAddress: InetAddress): Int {
         val bound = network.listen(bindAddress, port = 0, reuseAddress = true)
         server = bound
-        Thread({ accept(bound) }, "diplay-video-settings").apply { isDaemon = true }.start()
+        WorkerThreads.create({ accept(bound) }, "diplay-video-settings").apply { isDaemon = true }.start()
         return bound.localPort
     }
 

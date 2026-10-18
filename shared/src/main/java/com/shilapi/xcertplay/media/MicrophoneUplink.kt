@@ -19,6 +19,7 @@ import com.shilapi.xcertplay.transport.KernelDatagramNetwork
 import java.io.Closeable
 import java.net.InetAddress
 import java.util.concurrent.atomic.AtomicBoolean
+import com.shilapi.xcertplay.compat.WorkerThreads
 
 /**
  * Captures one PCM microphone stream and sends it back to the phone as sealed CarPlay RTP.
@@ -194,7 +195,7 @@ internal class MicrophoneUplink(
             }
             nextRecorder.startRecording()
             stats.started(routeType(nextRecorder))
-            thread = Thread({ capture(nextRecorder, nextSocket) }, "carplay-mic").apply {
+            thread = WorkerThreads.create({ capture(nextRecorder, nextSocket) }, "carplay-mic").apply {
                 isDaemon = true
                 start()
             }

@@ -14,6 +14,7 @@ import com.shilapi.xcertplay.transport.readU32Be
 import com.shilapi.xcertplay.transport.readU32Le
 import com.shilapi.xcertplay.transport.writeU16Be
 import com.shilapi.xcertplay.transport.writeU32Be
+import com.shilapi.xcertplay.compat.WorkerThreads
 
 enum class AudioCodecKind { AAC_LC, OPUS, LPCM }
 
@@ -72,14 +73,14 @@ class AudioStream(
         val control = network.open(serverBindAddress())
         dataSocket = data
         controlSocket = control
-        dataThread = Thread({
+        dataThread = WorkerThreads.create({
             android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO)
             runData(data, listener)
         }, "airplay-audio-rx").apply {
             isDaemon = true
             start()
         }
-        controlThread = Thread({ runControl(control) }, "airplay-rtcp-rx").apply {
+        controlThread = WorkerThreads.create({ runControl(control) }, "airplay-rtcp-rx").apply {
             isDaemon = true
             start()
         }
