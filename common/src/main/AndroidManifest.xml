@@ -53,10 +53,6 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-        <!-- Keeps the process resident between connections; see KeepWarmService. -->
-        <service
-            android:name="com.shilapi.xcertplay.KeepWarmService"
-            android:exported="false" />
         <service android:name="com.shilapi.xcertplay.DiPlaySessionService"
             android:exported="false" android:foregroundServiceType="connectedDevice|microphone|location" />
 

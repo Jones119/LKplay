@@ -129,6 +129,26 @@ class CarPlayHostActivity : ComponentActivity() {
     private var wifiRecoveryButton: View? = null
     private var reconnectAttempts = 0
     private val startupRetryBudget = WirelessStartupRetryBudget()
+
+    /**
+     * Restarts the process when the control channel runs but no video ever arrives.
+     *
+     * The userspace lwIP stack and its netif live for the whole process and the native side exposes no way
+     * to reset them - only per-socket close. With the process now kept warm, a wedged stack therefore
+     * survives every reconnect: measured on the car 2026-10-18, after a burst of swipes the video throughput
+     * fell 4276 -> 1444 -> 348 kbps and stopped, audio (UDP) kept playing, and every later attempt sat on
+     * "CarPlay control running" until the app was force-stopped - re-plugging the cable did not help.
+     *
+     * A wedged stack can only be cured by ending the process, so that is what this does: one automatic
+     * restart instead of a device that looks connected and does nothing.
+     */
+    private val noVideoWatchdog = Runnable {
+        if (shuttingDown.get()) return@Runnable
+        if (activeScreenStreamTypes.isNotEmpty()) return@Runnable
+        appendLog("control channel is up but no video arrived; restarting the process to clear the native stack")
+        finish()
+        android.os.Process.killProcess(android.os.Process.myPid())
+    }
     private var startupRetryStopped = false
     private var startupRetryButton: View? = null
     private var startupFailureGeneration = -1
@@ -3631,6 +3651,7 @@ class CarPlayHostActivity : ComponentActivity() {
             }
 
             override fun onVideoFrameRendered(session: AirPlaySession) {
+        mainHandler.removeCallbacks(noVideoWatchdog)
                 runOnUiThread {
                     if (controllerGeneration != restartGeneration || activeAirPlaySession !== session || shuttingDown.get()) return@runOnUiThread
                     if (!startupRetryBudget.firstFrame(session, android.os.SystemClock.elapsedRealtime())) return@runOnUiThread
@@ -3749,6 +3770,10 @@ class CarPlayHostActivity : ComponentActivity() {
         }
         updateHotspotStatus(status)
         trackConnectNode(status)
+        if (status is CarPlayStatus.RunningControl) {
+            mainHandler.removeCallbacks(noVideoWatchdog)
+            mainHandler.postDelayed(noVideoWatchdog, NO_VIDEO_RESTART_MILLIS)
+        }
         val description = status.describe()
         setConnectionStage(description)
         when (status) {
@@ -4916,6 +4941,9 @@ class CarPlayHostActivity : ComponentActivity() {
         const val SCREEN_TYPE_ALT = 111
         private const val CENTER_MAP_IDLE_MILLIS = 3_000L // a reconnect is quicker; a session end is not
         const val LOG_RETENTION_MILLIS = 5 * 60_000L
+
+        /** How long "control running" may pass without a video frame before the process restarts. */
+        private const val NO_VIDEO_RESTART_MILLIS = 12_000L
         const val DISPLAY_CHANGE_DEBOUNCE_MILLIS = 500L
         const val CONFIGURATION_POLL_INTERVAL_MILLIS = 2_000L
         const val RECONNECT_DELAY_MILLIS = 2_000L
