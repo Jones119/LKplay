@@ -335,12 +335,12 @@ class IphoneUsbHost(
 
     private fun permissionPendingIntent(): PendingIntent {
         val intent = Intent(permissionAction).setPackage(appContext.packageName)
-        return PendingIntent.getBroadcast(
-            appContext,
-            0,
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
+        // The system answers by filling EXTRA_DEVICE and EXTRA_PERMISSION_GRANTED into this
+        // intent. An immutable PendingIntent silently discards those extras (API 31+), so the
+        // answer never reaches parsePermissionResult and the connection waits forever.
+        val flags = PendingIntent.FLAG_UPDATE_CURRENT or
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0
+        return PendingIntent.getBroadcast(appContext, 0, intent, flags)
     }
 
     private fun registerReceiver(filter: IntentFilter, onReceive: (Intent) -> Unit): Closeable {
