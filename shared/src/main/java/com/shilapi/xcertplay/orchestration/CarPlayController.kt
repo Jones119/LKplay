@@ -721,7 +721,7 @@ class CarPlayController(
                     closeBestEffort("USBMUX") { mux?.close() }
                     mux = null
                     if (config.transport == CarPlayTransport.WIRED) {
-                        closeBestEffort("VPN/NCM") { service?.detach() }
+                        closeBestEffort("airplay-listener") { service?.detach() }
                     }
                     closeBestEffort("MFi") { mfiSession?.close() }
                     mfiSession = null

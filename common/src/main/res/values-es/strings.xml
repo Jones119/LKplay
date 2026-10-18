@@ -365,7 +365,6 @@
     <string name="use_a_usb_data_cable_and_unlock_your_iphone_allow_trust_an">Usa un cable de datos USB y desbloquea tu iPhone.\nPermite «Confiar» y CarPlay si tu iPhone lo pide.</string>
     <string name="use_usage_content_type_routing_instead_of_stream_type">Usar enrutamiento por uso/tipo de contenido en lugar del tipo de flujo</string>
     <string name="use_your_last_connection_type_and_selected_iphone">Usa tu último tipo de conexión y el iPhone seleccionado.</string>
-    <string name="vpn_consent_was_denied">Se denegó el consentimiento de VPN</string>
     <string name="waiting_for_iphone_over_usb">Esperando iPhone por USB</string>
     <string name="waiting_for_mfi_coprocessor">Esperando al coprocesador MFi</string>
     <string name="waiting_for_paired_iphone">Esperando al iPhone emparejado</string>

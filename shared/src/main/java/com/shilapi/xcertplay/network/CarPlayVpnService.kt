@@ -319,7 +319,5 @@ class CarPlayVpnService : VpnService() {
 
     companion object {
         private const val TAG = "xcertplay-usb"
-        /** Returns the VPN consent intent, or null when consent is already granted. */
-        fun prepare(context: Context): Intent? = VpnService.prepare(context)
     }
 }

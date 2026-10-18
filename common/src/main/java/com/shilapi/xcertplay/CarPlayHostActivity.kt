@@ -108,7 +108,6 @@ import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.roundToInt
 import com.shilapi.xcertplay.compat.systemService
 import com.shilapi.xcertplay.compat.hasPermissionCompat
-import android.content.ActivityNotFoundException
 
 /**
  * Full-screen CarPlay host. It renders decoded video through a [TextureView], forwards touch to
@@ -170,16 +169,6 @@ class CarPlayHostActivity : ComponentActivity() {
         locationReportingEnabled = locationReportingEnabled,
     )
 
-    private val vpnConsent =
-        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-            awaitingVpnConsent = false
-            if (result.resultCode == RESULT_OK) {
-                vpnReady = true
-                maybeStartCarPlay()
-            } else {
-                setStatus(getString(R.string.vpn_consent_was_denied))
-            }
-        }
     private val wirelessPermissions =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
             awaitingWirelessPermissions = false
@@ -361,10 +350,8 @@ class CarPlayHostActivity : ComponentActivity() {
     private var manualHotspotBand = ManualHotspotBand.AUTO
     private var manualHotspotChannel = 0
     private var manualHotspotSecurity = ManualHotspotSecurity.OPEN
-    private var awaitingVpnConsent = false
     private var awaitingWirelessPermissions = false
     private var awaitingLocationPermission = false
-    private var vpnReady = false
     private var hotspotStatus = HotspotStatus(state = "off")
     private var menuOpen = false
     private var latestStage = "Preparing CarPlay"
@@ -623,11 +610,14 @@ class CarPlayHostActivity : ComponentActivity() {
             requestLocationPermission()
             return
         }
-        if (wirelessEnabled) {
-            requestWirelessPermissions()
-        } else {
-            requestVpnConsent()
-        }
+        // The wired transport needs no VPN authorisation any more.
+        //
+        // This used to call `VpnService.prepare` and launch a consent Activity that does not exist on
+        // this head unit (`com.android.vpndialogs` is absent), catch the resulting
+        // ActivityNotFoundException, and show "VPN 授权被拒绝" to the driver on every connection - all to
+        // authorise a tunnel the kernel cannot create (no /dev/tun, no tun module). The VpnService/NCM
+        // path was removed with it, so there is nothing left to authorise before starting.
+        if (wirelessEnabled) requestWirelessPermissions()
     }
 
     private fun requestLocationPermission() {
@@ -644,28 +634,6 @@ class CarPlayHostActivity : ComponentActivity() {
     private fun hasFineLocationPermission(): Boolean =
         hasPermissionCompat(Manifest.permission.ACCESS_FINE_LOCATION)
 
-    private fun requestVpnConsent() {
-        if (awaitingVpnConsent) return
-        val consent = CarPlayVpnService.prepare(this)
-        if (consent == null) {
-            vpnReady = true
-            maybeStartCarPlay()
-        } else {
-            vpnReady = false
-            awaitingVpnConsent = true
-            // CS11: 本车机系统没有 com.android.vpndialogs（VPN 确认对话框）——launch 会抛 ActivityNotFoundException。
-            // 降级：告知用户无法授予 VPN 同意，并以"无 VPN"继续启动（后续建 tun 失败由引擎错误路径兜底，不崩）。
-            try {
-                vpnConsent.launch(consent)
-            } catch (error: ActivityNotFoundException) {
-                awaitingVpnConsent = false
-                Log.w("DiPlayHost", "VPN consent dialog unavailable on this system; continuing without VPN consent", error)
-                setStatus(getString(R.string.vpn_consent_was_denied))
-                vpnReady = true
-                maybeStartCarPlay()
-            }
-        }
-    }
 
     private fun requestWirelessPermissions() {
         val permissions = requiredWirelessPermissions()
@@ -4016,7 +3984,8 @@ class CarPlayHostActivity : ComponentActivity() {
         }
         if (controller == null && adoptBackgroundSession()) return
         val size = activeDisplaySize ?: return
-        val transportReady = if (wirelessEnabled) wirelessPermissionsReady else vpnReady
+        // Wired never needs a VPN gate now; only the wireless path has permissions to wait for.
+        val transportReady = !wirelessEnabled || wirelessPermissionsReady
         val locationReady = !locationReportingEnabled || locationPermissionAvailable
         if (
             !transportReady ||

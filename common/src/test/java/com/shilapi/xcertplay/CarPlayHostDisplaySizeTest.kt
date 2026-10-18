@@ -349,7 +349,8 @@ class CarPlayHostDisplaySizeTest {
         allowStartup()
         startSession()
         applySize(990, 1920)
-        setField("vpnReady", false)
+        // Block the restart with a prerequisite that still exists; the VPN gate this used to use is gone.
+        setField("microphonePermissionResolved", false)
 
         finishTeardown()
 
@@ -466,7 +467,8 @@ class CarPlayHostDisplaySizeTest {
     private fun allowStartup() {
         setField("airPlayIdentity", AirPlayIdentity.generate())
         setField("mfiTarget", MfiTarget.LOCAL)
-        setField("vpnReady", true)
+        // No VPN gate any more: the wired transport stopped needing authorisation when the
+        // VpnService/NCM path was deleted (docs/_digest/90 A1/A2).
         setField("microphonePermissionResolved", true)
     }
 
