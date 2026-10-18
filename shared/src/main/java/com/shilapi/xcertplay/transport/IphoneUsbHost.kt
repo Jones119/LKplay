@@ -272,48 +272,7 @@ class IphoneUsbHost(
         TransitionResult.Failed(IphoneUsbException.DeviceUnavailable("iPhone USB operation failed", error))
     }
 
-    /**
-     * Opens the iAP2 USB session, retrying the interface claim on a fresh connection.
-     *
-     * Measured on the car 2026-10-18: the first claim after re-enumeration fails with
-     * "Android could not claim USBMUX interface 1", the failure bubbles up to the controller, which waits a
-     * fixed 2000 ms, tears the whole connection down and starts a second attempt that succeeds immediately.
-     * That detour cost about 3.3 s of every wired connection.
-     *
-     * The interface only needs a moment: the iPhone has just switched to its CarPlay configuration and the
-     * old `UsbDeviceConnection` no longer refers to it. Re-opening and claiming again (which is what the
-     * successful second attempt did anyway) turns that 3.3 s into tens of milliseconds.
-     */
     private fun openIap2UsbSession(device: UsbDevice): Iap2UsbSession {
-        var lastClaimFailure: IphoneUsbException.DeviceUnavailable? = null
-        for (index in CLAIM_RETRY_DELAYS_MILLIS.indices) {
-            val delay = CLAIM_RETRY_DELAYS_MILLIS[index]
-            if (delay > 0L) {
-                try {
-                    Thread.sleep(delay)
-                } catch (interrupted: InterruptedException) {
-                    Thread.currentThread().interrupt()
-                    break
-                }
-            }
-            try {
-                return openIap2UsbSessionOnce(device)
-            } catch (error: IphoneUsbException.DeviceUnavailable) {
-                // Only a claim collision is worth a retry; a missing device or a protocol error is not.
-                if (!error.message.orEmpty().contains("claim", ignoreCase = true)) throw error
-                lastClaimFailure = error
-                Log.i(
-                    IphoneCarPlayConfiguration.TAG,
-                    "USBMUX claim attempt ${index + 1}/${CLAIM_RETRY_DELAYS_MILLIS.size} failed; " +
-                        "re-opening the iPhone and retrying",
-                )
-            }
-        }
-        throw lastClaimFailure
-            ?: IphoneUsbException.DeviceUnavailable("Android could not claim the USBMUX interface")
-    }
-
-    private fun openIap2UsbSessionOnce(device: UsbDevice): Iap2UsbSession {
         requireConfiguredDevice(device)
         if (!usbManager.hasPermission(device)) {
             throw IphoneUsbException.PermissionDenied("USB permission has not been granted")
@@ -407,15 +366,6 @@ class IphoneUsbHost(
     }
 
     companion object {
-        /**
-         * Claim retry backoff for `claimInterface`.
-         *
-         * The first claim right after re-enumeration loses to the configuration switch; the second attempt
-         * on a fresh connection wins. Four tries span 510 ms — far below the 2000 ms fixed retry this
-         * replaces, and only reached when every attempt fails.
-         */
-        private val CLAIM_RETRY_DELAYS_MILLIS = longArrayOf(0L, 60L, 150L, 300L)
-
         private const val USB_VENDOR_DEVICE_IN = 0xc0
         private const val CARPLAY_CONFIGURATION_REQUEST = 0x52
         private const val CARPLAY_CONFIGURATION_INDEX = 0x0004
