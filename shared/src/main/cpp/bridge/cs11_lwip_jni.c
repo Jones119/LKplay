@@ -76,11 +76,42 @@ CS11_JNI(jint) Java_com_shilapi_xcertplay_transport_UserSpaceNetworkNative_nativ
     return cs11_netif_start(macPtr, mtu);
 }
 
+/*
+ * CS11: bounds-checked array access.
+ *
+ * None of these entry points used to look at `GetArrayLength`; the whole buffer+offset+length contract was
+ * the caller's, and lwIP copied straight out of the Java array. On 2026-10-18 the car crashed inside that
+ * copy:
+ *
+ *   pid: 13159, tid: 13232, name: lwip-tcpip
+ *   signal 11 (SIGSEGV), code 2 (SEGV_ACCERR), fault addr 86d92000
+ *   #00  pc 00022170  /system/lib/libc.so (memcpy+172)
+ *   #01  pc 0001f521  liblwip_bridge.so (tcp_write+716)
+ *
+ * The source pointer was 0x86d91fe4 and the copy asked for 0x84 bytes, so it ran off the end of the array
+ * and over a page that is not mapped. A length that does not fit its array is a caller bug, but it must
+ * surface as -EINVAL, never as a read past the buffer.
+ */
+static jint cs11_check_bounds(JNIEnv *env, jbyteArray array, jint offset, jint length) {
+    if (array == NULL || offset < 0 || length < 0) {
+        return -EINVAL;
+    }
+    jsize size = (*env)->GetArrayLength(env, array);
+    if ((jlong)offset + (jlong)length > (jlong)size) {
+        return -EINVAL;
+    }
+    return 0;
+}
+
 CS11_JNI(jint) Java_com_shilapi_xcertplay_transport_UserSpaceNetworkNative_nativeInjectFrame(
         JNIEnv *env, jobject self, jbyteArray frame, jint length) {
     (void)self;
-    if (frame == NULL || length <= 0) {
+    if (length <= 0) {
         return -EINVAL;
+    }
+    jint bounds = cs11_check_bounds(env, frame, 0, length);
+    if (bounds != 0) {
+        return bounds;
     }
     jbyte *bytes = (*env)->GetByteArrayElements(env, frame, NULL);
     if (bytes == NULL) {
@@ -171,8 +202,12 @@ CS11_JNI(jint) Java_com_shilapi_xcertplay_transport_UserSpaceNetworkNative_nativ
 CS11_JNI(jint) Java_com_shilapi_xcertplay_transport_UserSpaceNetworkNative_nativeRecv(
         JNIEnv *env, jobject self, jint fd, jbyteArray buffer, jint offset, jint length) {
     (void)self;
-    if (buffer == NULL || length <= 0) {
+    if (length <= 0) {
         return -EINVAL;
+    }
+    jint bounds = cs11_check_bounds(env, buffer, offset, length);
+    if (bounds != 0) {
+        return bounds;
     }
     jbyte *bytes = (*env)->GetByteArrayElements(env, buffer, NULL);
     if (bytes == NULL) {
@@ -186,6 +221,10 @@ CS11_JNI(jint) Java_com_shilapi_xcertplay_transport_UserSpaceNetworkNative_nativ
 CS11_JNI(jint) Java_com_shilapi_xcertplay_transport_UserSpaceNetworkNative_nativeSend(
         JNIEnv *env, jobject self, jint fd, jbyteArray buffer, jint offset, jint length) {
     (void)self;
+    jint bounds = cs11_check_bounds(env, buffer, offset, length);
+    if (bounds != 0) {
+        return bounds;
+    }
     jbyte *bytes = (*env)->GetByteArrayElements(env, buffer, NULL);
     if (bytes == NULL) {
         return -ENOMEM;
@@ -199,6 +238,10 @@ CS11_JNI(jint) Java_com_shilapi_xcertplay_transport_UserSpaceNetworkNative_nativ
         JNIEnv *env, jobject self, jint fd, jbyteArray buffer, jint offset, jint length,
         jbyteArray address, jint port) {
     (void)self;
+    jint bounds = cs11_check_bounds(env, buffer, offset, length);
+    if (bounds != 0) {
+        return bounds;
+    }
     struct sockaddr_in6 addr;
     if (to_sockaddr6(env, address, port, &addr) != 0) {
         return -EINVAL;
