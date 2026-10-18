@@ -11,6 +11,7 @@
  * GetPrimitiveArrayCritical: a critical section blocks ART's GC thread flip on this SoC, which the USB
  * path already had to learn (see NcmUsbBridge's read buffer comments).
  */
+#include <android/log.h>
 #include <jni.h>
 #include <errno.h>
 #include "lwip/mld6.h"
@@ -92,12 +93,17 @@ CS11_JNI(jint) Java_com_shilapi_xcertplay_transport_UserSpaceNetworkNative_nativ
  * and over a page that is not mapped. A length that does not fit its array is a caller bug, but it must
  * surface as -EINVAL, never as a read past the buffer.
  */
-static jint cs11_check_bounds(JNIEnv *env, jbyteArray array, jint offset, jint length) {
+static jint cs11_check_bounds(JNIEnv *env, jbyteArray array, jint offset, jint length,
+                             const char *what) {
     if (array == NULL || offset < 0 || length < 0) {
+        __android_log_print(ANDROID_LOG_WARN, "cs11-lwip",
+                            "%s rejected offset=%d length=%d (null array or negative)", what, offset, length);
         return -EINVAL;
     }
     jsize size = (*env)->GetArrayLength(env, array);
     if ((jlong)offset + (jlong)length > (jlong)size) {
+        __android_log_print(ANDROID_LOG_WARN, "cs11-lwip",
+                            "%s rejected offset=%d length=%d size=%d", what, offset, length, size);
         return -EINVAL;
     }
     return 0;
@@ -109,7 +115,7 @@ CS11_JNI(jint) Java_com_shilapi_xcertplay_transport_UserSpaceNetworkNative_nativ
     if (length <= 0) {
         return -EINVAL;
     }
-    jint bounds = cs11_check_bounds(env, frame, 0, length);
+    jint bounds = cs11_check_bounds(env, frame, 0, length, "inject");
     if (bounds != 0) {
         return bounds;
     }
@@ -205,7 +211,7 @@ CS11_JNI(jint) Java_com_shilapi_xcertplay_transport_UserSpaceNetworkNative_nativ
     if (length <= 0) {
         return -EINVAL;
     }
-    jint bounds = cs11_check_bounds(env, buffer, offset, length);
+    jint bounds = cs11_check_bounds(env, buffer, offset, length, "send");
     if (bounds != 0) {
         return bounds;
     }
@@ -221,7 +227,7 @@ CS11_JNI(jint) Java_com_shilapi_xcertplay_transport_UserSpaceNetworkNative_nativ
 CS11_JNI(jint) Java_com_shilapi_xcertplay_transport_UserSpaceNetworkNative_nativeSend(
         JNIEnv *env, jobject self, jint fd, jbyteArray buffer, jint offset, jint length) {
     (void)self;
-    jint bounds = cs11_check_bounds(env, buffer, offset, length);
+    jint bounds = cs11_check_bounds(env, buffer, offset, length, "sendto");
     if (bounds != 0) {
         return bounds;
     }
@@ -238,7 +244,7 @@ CS11_JNI(jint) Java_com_shilapi_xcertplay_transport_UserSpaceNetworkNative_nativ
         JNIEnv *env, jobject self, jint fd, jbyteArray buffer, jint offset, jint length,
         jbyteArray address, jint port) {
     (void)self;
-    jint bounds = cs11_check_bounds(env, buffer, offset, length);
+    jint bounds = cs11_check_bounds(env, buffer, offset, length, "recv");
     if (bounds != 0) {
         return bounds;
     }
