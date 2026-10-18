@@ -47,3 +47,6 @@ release-signing.properties
 # DIPLAY_AUTH_ASSETS_DIR replaces this identity for a build.
 !mobile/src/main/auth-assets/offline-mfi/identity.pk8
 !mobile/src/main/auth-assets/offline-mfi/certificate.p7b
+
+# 崩溃取证与符号归档（本地生成，体积大且与机器相关）
+_artifacts/
