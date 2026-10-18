@@ -15,7 +15,17 @@
     -->
     <style name="Theme.Xcertplay" parent="android:Theme.Holo.NoActionBar">
         <item name="android:fontFamily">sans</item>
-        <item name="android:windowBackground">@drawable/diplay_window_background</item>
+        <!--
+            Transparent, not a colour.
+
+            A window background can only be one fixed resource, while this app paints its own background per
+            screen from the runtime palette (light or dark). Giving the window a dark fill made the light-themed
+            screens look like they had switched to night mode - the connecting screen over CarPlay video in
+            particular, where the window showed through around the panel. Transparent lets each screen own its
+            surface, which is also what the app looked like before the `@color` reference here was fixed to a
+            real drawable.
+        -->
+        <item name="android:windowBackground">@drawable/diplay_window_transparent</item>
         <item name="android:windowActionModeOverlay">true</item>
         <item name="android:windowActionBar">false</item>
         <item name="android:windowNoTitle">true</item>
