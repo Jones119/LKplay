@@ -45,7 +45,41 @@ class LocalMfiAuthenticationClient private constructor(
         const val DIRECTORY = "offline-mfi"
         private const val MAX_FILE_BYTES = 16 * 1024
 
+        /**
+         * Parsed identity: the expensive half of [load].
+         *
+         * Held separately so the work can be done ahead of a connection. Building it costs about 1.2 s on the
+         * CS11 - `KeyFactory`/`CertificateFactory` bring their providers up and the P-256 sign/verify check
+         * runs on a 1 GHz core - which was pure waiting at the start of every wired connection.
+         */
+        private class Material(val privateKey: PrivateKey, val certificate: ByteArray, val directory: File)
+
+        @Volatile
+        private var cachedMaterial: Material? = null
+        private val preloadLock = Any()
+
+        /**
+         * Parses the identity in the background so `load` finds it ready.
+         *
+         * Called from the CarPlay screen as it comes up, which overlaps this with the surface and first-layout
+         * work the activity does anyway. Failures are swallowed here: the real `load` re-parses and reports the
+         * error properly, so a broken identity still fails closed.
+         */
+        fun preload(directory: File) {
+            if (cachedMaterial?.directory == directory) return
+            runCatching {
+                val material = parse(directory)
+                synchronized(preloadLock) { cachedMaterial = material }
+            }
+        }
+
         fun load(directory: File, onSignature: (Int) -> Unit = {}): LocalMfiAuthenticationClient {
+            val material = cachedMaterial?.takeIf { it.directory == directory }
+                ?: parse(directory).also { synchronized(preloadLock) { cachedMaterial = it } }
+            return LocalMfiAuthenticationClient(material.privateKey, material.certificate, onSignature)
+        }
+
+        private fun parse(directory: File): Material {
             require(directory.isDirectory) { "Offline MFi directory is missing or invalid" }
             val encodedKey = readBounded(File(directory, "identity.pk8"))
             val privateKey = try {
@@ -72,7 +106,7 @@ class LocalMfiAuthenticationClient private constructor(
             verifier.initVerify(publicKey)
             verifier.update(challenge)
             require(verifier.verify(signature)) { "Local private key does not match certificate" }
-            return LocalMfiAuthenticationClient(privateKey, certificate, onSignature)
+            return Material(privateKey, certificate, directory)
         }
 
         private fun readBounded(file: File): ByteArray = file.inputStream().use { stream ->

@@ -1,6 +1,7 @@
 package com.shilapi.xcertplay
 
 import android.Manifest
+import com.shilapi.xcertplay.mfi.LocalMfiAuthenticationClient
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -521,6 +522,16 @@ class CarPlayHostActivity : ComponentActivity() {
         @Suppress("DEPRECATION")
         requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
         setContentView(buildContentView())
+        // Parse the offline MFi identity while the surface and first layout are still coming up. `load` costs
+        // about 1.2 s on this CPU (provider init plus a P-256 sign/verify) and used to be pure waiting at the
+        // start of every wired connection.
+        com.shilapi.xcertplay.compat.WorkerThreads.start("diplay-mfi-preload") {
+            runCatching {
+                LocalMfiAuthenticationClient.preload(
+                    java.io.File(noBackupFilesDir, LocalMfiAuthenticationClient.DIRECTORY),
+                )
+            }
+        }
         applyFullscreenMode()
         onBackPressedDispatcher.addCallback(
             this,

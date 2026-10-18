@@ -156,6 +156,9 @@ class DiPlayActivity : ComponentActivity() {
         }
         // Capture the ThreadGroup while the ROM still reports one; see WorkerThreads.
         com.shilapi.xcertplay.compat.WorkerThreads.capture()
+        // Also start it here, not only from the boot receiver: the owner should not have to reboot the head
+        // unit for the process to become resident. Every later plug-in is then a warm start.
+        KeepWarmService.start(this)
         warmUpPreferences()
         render()
         handleWirelessRecovery()

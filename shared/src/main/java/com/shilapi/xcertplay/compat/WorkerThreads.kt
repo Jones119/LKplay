@@ -85,6 +85,9 @@ object WorkerThreads {
     /** Creates and starts a thread; see [create]. */
     fun start(name: String, body: Runnable): Thread = create(name, body).apply { start() }
 
+    /** Function-typed overload so call sites can use a trailing lambda; see [create]. */
+    fun start(name: String, block: () -> Unit): Thread = start(name, Runnable { block() })
+
     /** Creates and starts a daemon thread; see [create]. */
     fun startDaemon(name: String, body: Runnable): Thread =
         create(name, body).apply {
