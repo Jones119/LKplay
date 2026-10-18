@@ -1160,12 +1160,12 @@ class CarPlayHostActivity : ComponentActivity() {
         }
         paintWaitingScreen()
         viewport.addView(panel, FrameLayout.LayoutParams(-1, -2, Gravity.CENTER))
-        // Opaque while connecting, so the wait shows this app's background and the step panel instead of the
-        // black the video TextureView paints until its first frame. The viewport is hidden the moment a stream
-        // becomes active (`onScreenStreamStateChanged` -> `updateDebugOverlays`), so it never covers video.
-        // Measured on the car 2026-10-18: surface creation 1080 ms + first layout 634 ms of black before the
-        // connecting screen appeared at all.
-        viewport.setBackgroundColor(settingsTheme.background)
+        // Left transparent on purpose.
+        //
+        // It was briefly filled with `settingsTheme.background` to hide the black the video TextureView paints
+        // until its first frame, but `settingsTheme` is the OVERLAY palette (the three-finger panel's), so on a
+        // light-themed app the wait turned into four seconds of grey that matched nothing else on screen.
+        // The panel itself stays transparent over video, as it always was.
         root.addView(viewport, FrameLayout.LayoutParams(-1, -1))
         var preparationHeight = -1
         fun updatePreparationLayout() {
@@ -4680,7 +4680,16 @@ class CarPlayHostActivity : ComponentActivity() {
         val failedColor = Color.rgb(0xFF, 0x6B, 0x6B)
         list.removeAllViews()
         val nodes = connectNodes
+        // A moving window of five nodes, not all eight.
+        //
+        // `fitPreparationContent` scales the whole panel when it is taller than the viewport, and a scaled
+        // panel renders its text blurry on this GPU. Eight rows made it tall enough to shrink, which the owner
+        // saw as "content is blurry and the layout is a little off". Five rows matches the height the old
+        // rolling list could reach, so the panel stays unscaled at 1280x650.
+        val first = (connectNodeIndex - 2).coerceIn(0, (nodes.size - CHECKLIST_VISIBLE_NODES).coerceAtLeast(0))
+        val last = (first + CHECKLIST_VISIBLE_NODES - 1).coerceAtMost(nodes.size - 1)
         nodes.forEachIndexed { index, (_, labelRes) ->
+            if (index < first || index > last) return@forEachIndexed
             val done = index < connectNodeIndex
             val active = index == connectNodeIndex
             val failed = active && connectNodeFailed
@@ -4865,6 +4874,8 @@ class CarPlayHostActivity : ComponentActivity() {
 
     private companion object {
         const val TAG = "xcertplay-usb"
+        /** Rows the connecting checklist may occupy; see `renderConnectChecklist`. */
+        private const val CHECKLIST_VISIBLE_NODES = 5
         const val SCREEN_TYPE_MAIN = 110
         const val SCREEN_TYPE_ALT = 111
         private const val CENTER_MAP_IDLE_MILLIS = 3_000L // a reconnect is quicker; a session end is not
