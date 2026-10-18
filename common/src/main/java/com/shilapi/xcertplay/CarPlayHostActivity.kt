@@ -4638,6 +4638,12 @@ class CarPlayHostActivity : ComponentActivity() {
     /** The wired checklist: every node, with a marker for done / running / pending / failed. */
     private fun renderConnectChecklist() {
         val list = stageListView ?: return
+        // Diagnostic: proves whether the checklist is being redrawn as the bring-up advances, and whether it
+        // reaches the screen at all (the owner saw the status line stay on MFi until CarPlay appeared).
+        appendLog(
+            "CHECKLIST render node=$connectNodeIndex failed=$connectNodeFailed seen=$connectNodeSeen " +
+                "attached=${list.parent != null}",
+        )
         list.removeAllViews()
         if (!connectNodeSeen) return
         val colors = WaitingScreenColors.of(darkMode)
