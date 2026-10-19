@@ -31,6 +31,10 @@ class Iap2FileTransferReceiverTest {
         assertArrayEquals(byteArrayOf(2, 2), unsupported.replies.single())
         assertNull(unsupported.completed)
         assertNull(receiver.accept(byteArrayOf(4, 4)).completed)
+        // A frame shorter than the 2-byte header cannot carry an id/flags pair: it must be ignored,
+        // never reach the payload write with a negative length.
+        assertTrue(receiver.accept(byteArrayOf(4)).replies.isEmpty())
+        assertTrue(receiver.accept(ByteArray(0)).replies.isEmpty())
         receiver.accept(setup(3, 4))
         val truncated = receiver.accept(data(3, 0x40, byteArrayOf(1, 2)))
         assertArrayEquals(byteArrayOf(3, 2), truncated.replies.single())

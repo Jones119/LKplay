@@ -110,6 +110,14 @@ class Iap2FileTransferReceiver(
 
     private fun data(id: Int, flags: Int, datagram: ByteArray): Outcome {
         val transfer = pending[id] ?: return Outcome()
+        // Defence in depth: the entry point already refuses a frame shorter than the header, but
+        // `count` below is derived by subtraction and a future caller must not be able to hand
+        // `write` a negative length (which is a silent no-op in the userspace stream and an
+        // exception on the kernel one).
+        if (datagram.size < HEADER_BYTES) {
+            pending.remove(id)
+            return rejected(id)
+        }
         val count = datagram.size - HEADER_BYTES
         if (count > transfer.expectedBytes - transfer.output.size()) {
             pending.remove(id)
