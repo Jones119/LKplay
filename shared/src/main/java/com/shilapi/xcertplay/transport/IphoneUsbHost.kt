@@ -242,20 +242,40 @@ class IphoneUsbHost(
         return try {
             val parsed = connection.rawDescriptors?.let { LegacyNcmDescriptors.parse(it) }.orEmpty()
             val carPlayId = IphoneCarPlayConfiguration.find(device)?.id ?: CARPLAY_CONFIGURATION_FALLBACK_ID
-            val targetId = parsed.map { it.id }.firstOrNull { it != carPlayId }
+            // Prefer a configuration that still carries NCM (a normal data mode) over the first
+            // unrelated one: switching to PTP-only (id 1) was refused on the tablet.
+            val targetId = parsed.filter { it.id != carPlayId }.firstOrNull { it.hasNcm }?.id
+                ?: parsed.map { it.id }.firstOrNull { it != carPlayId }
             if (targetId == null) {
                 Log.i(tag, "configuration reset: no other configuration parsed=${parsed.map { it.id }}")
                 return false
             }
-            val switched = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                Api21Configuration.resetTo(connection, device, targetId)
-            } else if (LegacyUsbNative.available) {
-                // API 19 has no UsbDeviceConnection.setConfiguration; EasyPlay's path is the ioctl.
-                LegacyUsbNative.setConfiguration(connection.fileDescriptor, targetId) == 0
-            } else {
-                false
+            var switched = false
+            // The switch is EBUSY while a just-closed connection still holds an interface, so let the
+            // closes settle and retry briefly before concluding the phone refused it.
+            Thread.sleep(RESET_SETTLE_MILLIS)
+            for (attempt in 0 until RESET_ATTEMPTS) {
+                val viaPlatform = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                    Api21Configuration.resetTo(connection, device, targetId)
+                } else {
+                    false
+                }
+                // The platform API hides errno; the ioctl is the same call and reports it, which is
+                // what separates EBUSY (someone still holds an interface) from a refusal by the phone.
+                val ioctlErrno = if (!viaPlatform && LegacyUsbNative.available) {
+                    LegacyUsbNative.setConfiguration(connection.fileDescriptor, targetId)
+                } else {
+                    0
+                }
+                switched = viaPlatform || ioctlErrno == 0
+                Log.i(
+                    tag,
+                    "configuration reset carPlay=$carPlayId target=$targetId platform=$viaPlatform " +
+                        "ioctl=$ioctlErrno (${LegacyUsbNative.describe(ioctlErrno)}) ok=$switched attempt=$attempt",
+                )
+                if (switched) break
+                Thread.sleep(RESET_RETRY_DELAY_MILLIS)
             }
-            Log.i(tag, "configuration reset carPlay=$carPlayId target=$targetId ok=$switched")
             switched
         } catch (error: Throwable) {
             Log.w(tag, "configuration reset failed", error)
@@ -433,6 +453,11 @@ class IphoneUsbHost(
          * configuration list cannot be inspected (API 19) to pick something else to fall back to.
          */
         private const val CARPLAY_CONFIGURATION_FALLBACK_ID = 6
+
+        /** A configuration switch can be briefly EBUSY after a close; retry a few times. */
+        private const val RESET_ATTEMPTS = 3
+        private const val RESET_RETRY_DELAY_MILLIS = 150L
+        private const val RESET_SETTLE_MILLIS = 250L
         private const val VENDOR_RESPONSE_LENGTH = 1
         private const val CONTROL_TRANSFER_TIMEOUT_MILLIS = 1_000
     }

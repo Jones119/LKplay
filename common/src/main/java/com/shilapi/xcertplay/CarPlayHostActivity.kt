@@ -4195,6 +4195,10 @@ class CarPlayHostActivity : ComponentActivity() {
             // it (tablet bench 2026-10-19). This is the software equivalent of unplugging the cable.
             runCatching { oldController?.requestWiredReenumeration() }
                 .onFailure { Log.w(TAG, "wired re-enumeration request failed", it) }
+            // Synchronous, and before close(): this block ends by killing the process on every exit
+            // path, and the configuration switch has to reach the phone first.
+            runCatching { oldController?.detachWiredForReconnect() }
+                .onFailure { Log.w(TAG, "wired detach failed", it) }
             oldController?.close()
             val completed = oldController?.awaitClosed(CONTROLLER_CLOSE_TIMEOUT_MILLIS) ?: true
             AsyncDiagnosticLog.append(
@@ -4365,6 +4369,10 @@ class CarPlayHostActivity : ComponentActivity() {
             // replug. Runs before close() because the request needs the USB device still open.
             runCatching { oldController?.requestWiredReenumeration() }
                 .onFailure { Log.w(TAG, "wired re-enumeration request failed", it) }
+            // Synchronous, and before close(): this block ends by killing the process on every exit
+            // path, and the configuration switch has to reach the phone first.
+            runCatching { oldController?.detachWiredForReconnect() }
+                .onFailure { Log.w(TAG, "wired detach failed", it) }
             oldController?.close()
             val clean = oldController?.awaitClosed(CONTROLLER_CLOSE_TIMEOUT_MILLIS) ?: true
             oldSink?.close()

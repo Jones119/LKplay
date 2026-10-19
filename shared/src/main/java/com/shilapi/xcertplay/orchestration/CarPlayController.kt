@@ -305,6 +305,14 @@ class CarPlayController(
     @Volatile private var userSpaceLink: UserSpaceNcmLink? = null
 
     /**
+     * The USB bridge behind [userSpaceLink]. The link only pumps frames; this object owns the
+     * connection and the claimed NCM interfaces, so it has to be closed explicitly on teardown.
+     * It never was, which is why a configuration switch on the same device answered EBUSY (errno 16,
+     * tablet bench 2026-10-19).
+     */
+    @Volatile private var userSpaceBridge: NcmUsbBridge? = null
+
+    /**
      * The iPhone this wired session opened its data paths on, kept only so a teardown can make the
      * phone see a detach (see [requestWiredReenumeration]). Null while no wired session owns one.
      */
@@ -699,7 +707,8 @@ class CarPlayController(
             debugLog("wired teardown: no wired device to re-enumerate")
             return false
         }
-        wiredDevice = null
+        // Deliberately NOT cleared here: close() reads the same field to switch the device off the
+        // CarPlay configuration, and it runs right after this call on the teardown thread.
         debugLog("wired teardown: asking the iPhone to re-enumerate")
         return try {
             when (val result = iphoneHost.requestCarPlayReenumeration(device)) {
@@ -719,6 +728,44 @@ class CarPlayController(
             )
             false
         }
+    }
+
+    /**
+     * Releases everything this session holds on the iPhone, then moves the phone off the CarPlay
+     * configuration - synchronously, because every caller ends by killing the process.
+     *
+     * [close] cannot be trusted with this: its heavy teardown runs on a worker thread that the
+     * process exit usually beats, which is why the configuration switch never executed on the tablet
+     * (no `Removed device` in logcat after any disconnect, bench 2026-10-19). Closing the link first
+     * also matters: a configuration switch is EBUSY while any interface is still claimed.
+     */
+    fun detachWiredForReconnect(): Boolean {
+        val device = wiredDevice ?: return false
+        val link = userSpaceLink
+        userSpaceLink = null
+        runCatching { link?.close() }
+            .onFailure { debugLog("wired detach: link close failed: ${it.message}") }
+        // The link does not own the bridge: without this the NCM interfaces stay claimed and the
+        // configuration switch answers EBUSY.
+        val bridge = userSpaceBridge
+        userSpaceBridge = null
+        runCatching { bridge?.close() }
+            .onFailure { debugLog("wired detach: NCM bridge close failed: ${it.message}") }
+        runCatching { csm?.close() }
+            .onFailure { debugLog("wired detach: CSM close failed: ${it.message}") }
+        csm = null
+        // The USBMUX interface lives on the mux's own connection, not on the CSM stream: without this
+        // the configuration switch answers EBUSY (errno 16, measured on the tablet 2026-10-19).
+        val muxHost = mux
+        mux = null
+        runCatching { muxHost?.close() }
+            .onFailure { debugLog("wired detach: USBMUX close failed: ${it.message}") }
+        val reset = runCatching { iphoneHost.resetCarPlayConfiguration(device) }
+            .onFailure { debugLog("wired detach: configuration reset failed: ${it.message}") }
+            .getOrDefault(false)
+        // Logcat on purpose: the app log buffers and loses its tail when the process dies right after.
+        Log.i("xcertplay-usb", "wired detach: configuration reset ok=$reset")
+        return reset
     }
 
     override fun close() {
@@ -741,6 +788,10 @@ class CarPlayController(
         val link = userSpaceLink
         userSpaceLink = null
         runCatching { link?.close() }
+        // The bridge owns the connection and the NCM interfaces; the link only pumps frames.
+        val linkBridge = userSpaceBridge
+        userSpaceBridge = null
+        runCatching { linkBridge?.close() }
         val teardownStarted = System.nanoTime()
         connectionDiagnostic("teardown begin transport=${config.transport}")
         videoGate?.close()
@@ -764,19 +815,18 @@ class CarPlayController(
                     } else {
                         closeBestEffort("CSM") { csm?.close() }
                         csm = null
-                        // Move the phone off the CarPlay configuration. That is what makes the next
-                        // connect re-select it instead of reusing it; reusing it is exactly the case
-                        // where the phone keeps the old session and never starts the media plane.
-                        // Runs here, after the link and the CSM released every interface we held:
-                        // a configuration switch is EBUSY while any of them is still claimed.
-                        if (detachDevice != null) {
-                            closeBestEffort("CarPlay configuration reset") {
-                                iphoneHost.resetCarPlayConfiguration(detachDevice)
-                            }
-                        }
                     }
                     closeBestEffort("USBMUX") { mux?.close() }
                     mux = null
+                    // Only now is every interface we held released. Moving the phone off the CarPlay
+                    // configuration is what makes the next connect re-select it instead of reusing it;
+                    // reusing it is exactly the case where the phone keeps the old session and never
+                    // starts the media plane. A switch before the USBMUX close answers EBUSY.
+                    if (detachDevice != null && config.transport == CarPlayTransport.WIRED) {
+                        closeBestEffort("CarPlay configuration reset") {
+                            iphoneHost.resetCarPlayConfiguration(detachDevice)
+                        }
+                    }
                     if (config.transport == CarPlayTransport.WIRED) {
                         closeBestEffort("airplay-listener") { service?.detach() }
                     }
@@ -1845,6 +1895,7 @@ class CarPlayController(
             }
             link.startPump()
             userSpaceLink = link
+            userSpaceBridge = bridge
             debugLog("userspace NCM bridge ready configuration=$configurationId; lwIP carries the wired link")
             return link
         } catch (error: Throwable) {
