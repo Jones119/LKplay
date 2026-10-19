@@ -211,7 +211,7 @@ CS11_JNI(jint) Java_com_shilapi_xcertplay_transport_UserSpaceNetworkNative_nativ
     if (length <= 0) {
         return -EINVAL;
     }
-    jint bounds = cs11_check_bounds(env, buffer, offset, length, "send");
+    jint bounds = cs11_check_bounds(env, buffer, offset, length, "recv");
     if (bounds != 0) {
         return bounds;
     }
@@ -227,7 +227,7 @@ CS11_JNI(jint) Java_com_shilapi_xcertplay_transport_UserSpaceNetworkNative_nativ
 CS11_JNI(jint) Java_com_shilapi_xcertplay_transport_UserSpaceNetworkNative_nativeSend(
         JNIEnv *env, jobject self, jint fd, jbyteArray buffer, jint offset, jint length) {
     (void)self;
-    jint bounds = cs11_check_bounds(env, buffer, offset, length, "sendto");
+    jint bounds = cs11_check_bounds(env, buffer, offset, length, "send");
     if (bounds != 0) {
         return bounds;
     }
@@ -244,7 +244,7 @@ CS11_JNI(jint) Java_com_shilapi_xcertplay_transport_UserSpaceNetworkNative_nativ
         JNIEnv *env, jobject self, jint fd, jbyteArray buffer, jint offset, jint length,
         jbyteArray address, jint port) {
     (void)self;
-    jint bounds = cs11_check_bounds(env, buffer, offset, length, "recv");
+    jint bounds = cs11_check_bounds(env, buffer, offset, length, "sendto");
     if (bounds != 0) {
         return bounds;
     }

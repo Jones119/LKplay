@@ -98,6 +98,11 @@ internal class UserSpaceSessionNetwork(
             }
 
         override fun send(data: ByteArray, size: Int, address: InetAddress, port: Int) {
+            // Defence in depth before the JNI call: a size that does not fit the array is a caller bug,
+            // and this is the layer that is unit-testable on the host (the JNI side rejects it too, but
+            // only on a device). The crash this guards against was a memcpy inside lwIP's tcp_write
+            // reading past the array (doc 92 §5.1, fixed by e0b2b9ea).
+            require(size in 0..data.size) { "sendto size=$size buffer=${data.size}" }
             requireOk(jni.nativeSendTo(fd, data, 0, size, ipv6Bytes(address), port), "sendto $port")
         }
 
