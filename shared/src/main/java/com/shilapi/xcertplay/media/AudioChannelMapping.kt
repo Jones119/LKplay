@@ -40,16 +40,32 @@ internal object AudioChannelMapper {
     // made the car show media volume while a prompt played).
     const val DEFAULT_NAVIGATION_STREAM_TYPE = 12
 
+    /**
+     * CS11: the ROM's 30-stream table gives stream 0 its own call volume and arbitration that wins over
+     * music and navigation, and HYLink hard-codes it on this same ROM family. Without an explicit stream
+     * the telephony selection fell back to [AudioManager.STREAM_MUSIC], so a CarPlay call played on the
+     * media bus and the wheel's volume key showed the media slider (docs/_digest/68 §5.4).
+     */
+    const val DEFAULT_PHONE_STREAM_TYPE = AudioManager.STREAM_VOICE_CALL
+
+    /**
+     * [assistantStreamType] follows guidance: Siri's downlink is a prompt-like stream that mixes over
+     * music, and leaving it unset had put it on the media stream as well (docs/_digest/68 §5.3).
+     */
     fun map(
         audioType: String,
         payloadType: Int,
         mode: AudioChannelMappingMode,
         navigationStreamType: Int = DEFAULT_NAVIGATION_STREAM_TYPE,
+        assistantStreamType: Int = DEFAULT_NAVIGATION_STREAM_TYPE,
+        phoneStreamType: Int = DEFAULT_PHONE_STREAM_TYPE,
     ): AudioChannelSelection {
         val normalized = audioType.lowercase()
         return when (mode) {
-            AudioChannelMappingMode.MOBILE_COMPATIBLE -> mapMobileCompatible(normalized, payloadType, navigationStreamType)
-            AudioChannelMappingMode.AUTOMOTIVE_BUS -> mapAutomotiveBus(normalized, payloadType, navigationStreamType)
+            AudioChannelMappingMode.MOBILE_COMPATIBLE ->
+                mapMobileCompatible(normalized, payloadType, navigationStreamType, assistantStreamType, phoneStreamType)
+            AudioChannelMappingMode.AUTOMOTIVE_BUS ->
+                mapAutomotiveBus(normalized, payloadType, navigationStreamType, assistantStreamType, phoneStreamType)
         }
     }
 
@@ -60,10 +76,12 @@ internal object AudioChannelMapper {
         audioType: String,
         payloadType: Int,
         navigationStreamType: Int,
+        assistantStreamType: Int,
+        phoneStreamType: Int,
     ): AudioChannelSelection = when (audioType) {
-        "telephony" -> AudioChannelSelection(AudioChannel.PHONE, AudioContentType.SPEECH)
+        "telephony" -> AudioChannelSelection(AudioChannel.PHONE, AudioContentType.SPEECH, phoneStreamType)
         "speechrecognition" ->
-            AudioChannelSelection(AudioChannel.ASSISTANT, AudioContentType.SPEECH)
+            AudioChannelSelection(AudioChannel.ASSISTANT, AudioContentType.SPEECH, assistantStreamType)
         "media" -> AudioChannelSelection(AudioChannel.MEDIA, AudioContentType.MUSIC)
         "default", "alert", "compatibility" ->
             AudioChannelSelection(AudioChannel.NAVIGATION, AudioContentType.SPEECH, navigationStreamType)
@@ -74,10 +92,12 @@ internal object AudioChannelMapper {
         audioType: String,
         payloadType: Int,
         navigationStreamType: Int,
+        assistantStreamType: Int,
+        phoneStreamType: Int,
     ): AudioChannelSelection = when (audioType) {
-        "telephony" -> AudioChannelSelection(AudioChannel.PHONE, AudioContentType.SPEECH)
+        "telephony" -> AudioChannelSelection(AudioChannel.PHONE, AudioContentType.SPEECH, phoneStreamType)
         "speechrecognition" ->
-            AudioChannelSelection(AudioChannel.ASSISTANT, AudioContentType.SPEECH)
+            AudioChannelSelection(AudioChannel.ASSISTANT, AudioContentType.SPEECH, assistantStreamType)
         "media", "compatibility" ->
             AudioChannelSelection(AudioChannel.MEDIA, AudioContentType.MUSIC)
         "default", "alert" -> AudioChannelSelection(AudioChannel.NAVIGATION, AudioContentType.SPEECH, navigationStreamType)

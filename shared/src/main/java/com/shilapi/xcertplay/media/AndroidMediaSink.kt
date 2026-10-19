@@ -148,9 +148,13 @@ internal class AudioFocusCoordinator(
         active.keys.forEach { track -> runCatching { track.setStereoVolume(volume, volume) } }
     }
 
+    // A call must win the focus even while music keeps its track open: the ROM derives its volume key
+    // target (getCurMasterStream) from the focus owner, so ranking MEDIA above PHONE left the wheel
+    // adjusting stream 3 during a call (docs/_digest/68 §5.4). Prompt channels stay below MEDIA until
+    // batch 2 adds their liveness rule, or a lingering prompt entry would hold focus forever.
     private fun AudioChannel.focusPriority(): Int = when (this) {
-        AudioChannel.MEDIA -> 3
-        AudioChannel.PHONE -> 2
+        AudioChannel.PHONE -> 3
+        AudioChannel.MEDIA -> 2
         AudioChannel.ASSISTANT -> 1
         AudioChannel.NAVIGATION -> 0
     }
@@ -1486,7 +1490,7 @@ private class AudioRenderer(
         // 只有 API26+ 的 AudioFocusRequest 才必须有属性，那时仍保持原来的静默跳过。
         val attributes = trackAttributes
         if (attributes == null && Build.VERSION.SDK_INT >= 26) return
-        track?.let { audioFocusCoordinator.acquire(it, channel, attributes) }
+        track?.let { audioFocusCoordinator.acquire(it, channel, attributes, effectiveStreamType) }
     }
 
     private fun abandonAudioFocus() {
