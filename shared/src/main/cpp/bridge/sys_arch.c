@@ -37,16 +37,56 @@ u32_t sys_jiffies(void) {
 void sys_init(void) {
 }
 
+/* ── lightweight protection ──────────────────────────────────────────────────────────────────── */
+
+/*
+ * The critical sections lwIP wraps around memp/mem (SYS_LIGHTWEIGHT_PROT). The RX pump allocates a
+ * tcpip message from the same pool the tcpip thread frees from, so without this the pool's free list is
+ * shared unguarded; the host test (native-tests) reproduced the corruption on its first storm run.
+ *
+ * Recursive on purpose: lwIP documents that SYS_ARCH_PROTECT may be entered while already protected.
+ */
+static pthread_mutex_t g_protect_mutex;
+static pthread_once_t g_protect_once = PTHREAD_ONCE_INIT;
+
+static void create_protect_mutex(void) {
+    pthread_mutexattr_t attributes;
+    pthread_mutexattr_init(&attributes);
+    pthread_mutexattr_settype(&attributes, PTHREAD_MUTEX_RECURSIVE);
+    pthread_mutex_init(&g_protect_mutex, &attributes);
+    pthread_mutexattr_destroy(&attributes);
+}
+
+sys_prot_t sys_arch_protect(void) {
+    pthread_once(&g_protect_once, create_protect_mutex);
+    pthread_mutex_lock(&g_protect_mutex);
+    return 0;
+}
+
+void sys_arch_unprotect(sys_prot_t pval) {
+    (void)pval;
+    pthread_mutex_unlock(&g_protect_mutex);
+}
+
 /* ── mutexes ──────────────────────────────────────────────────────────────────────────────────── */
 
+/*
+ * These primitives allocate with the C library, not with `mem_malloc`.
+ *
+ * lwIP's own heap is initialised by `mem_init()`, which creates `mem_mutex` through this very layer, and
+ * `mem_malloc()` locks that mutex. Allocating the primitives from that heap is therefore circular: with a
+ * real lwIP heap (MEM_LIBC_MALLOC=0, as the host tests use) the first `sys_mutex_new()` locks a mutex that
+ * does not exist yet. The APK happens to mask it because MEM_LIBC_MALLOC=1 makes `mem_malloc` plain
+ * malloc, but the port should not depend on that.
+ */
 err_t sys_mutex_new(sys_mutex_t *mutex) {
-    pthread_mutex_t *m = (pthread_mutex_t *)mem_malloc(sizeof(pthread_mutex_t));
+    pthread_mutex_t *m = (pthread_mutex_t *)malloc(sizeof(pthread_mutex_t));
     if (m == NULL) {
         SYS_STATS_INC_USED(mutex);
         return ERR_MEM;
     }
     if (pthread_mutex_init(m, NULL) != 0) {
-        mem_free(m);
+        free(m);
         return ERR_VAL;
     }
     *mutex = m;
@@ -56,7 +96,7 @@ err_t sys_mutex_new(sys_mutex_t *mutex) {
 
 void sys_mutex_free(sys_mutex_t *mutex) {
     pthread_mutex_destroy(*mutex);
-    mem_free(*mutex);
+    free(*mutex);
     *mutex = NULL;
     SYS_STATS_DEC(mutex.used);
 }
@@ -78,13 +118,13 @@ typedef struct {
 } sys_sem_impl;
 
 err_t sys_sem_new(sys_sem_t *sem, u8_t count) {
-    sys_sem_impl *s = (sys_sem_impl *)mem_malloc(sizeof(sys_sem_impl));
+    sys_sem_impl *s = (sys_sem_impl *)malloc(sizeof(sys_sem_impl));
     if (s == NULL) {
         SYS_STATS_INC(sem.err);
         return ERR_MEM;
     }
     if (pthread_mutex_init(&s->mutex, NULL) != 0 || pthread_cond_init(&s->cond, NULL) != 0) {
-        mem_free(s);
+        free(s);
         return ERR_VAL;
     }
     s->count = count;
@@ -100,7 +140,7 @@ void sys_sem_free(sys_sem_t *sem) {
     }
     pthread_cond_destroy(&s->cond);
     pthread_mutex_destroy(&s->mutex);
-    mem_free(s);
+    free(s);
     *sem = NULL;
     SYS_STATS_DEC(sem.used);
 }
@@ -166,14 +206,14 @@ err_t sys_mbox_new(sys_mbox_t *mbox, int size) {
     if (size <= 0) {
         size = 32;
     }
-    sys_mbox_impl *m = (sys_mbox_impl *)mem_malloc(sizeof(sys_mbox_impl));
+    sys_mbox_impl *m = (sys_mbox_impl *)malloc(sizeof(sys_mbox_impl));
     if (m == NULL) {
         SYS_STATS_INC(mbox.err);
         return ERR_MEM;
     }
-    m->slots = (void **)mem_malloc(sizeof(void *) * (size_t)size);
+    m->slots = (void **)malloc(sizeof(void *) * (size_t)size);
     if (m->slots == NULL) {
-        mem_free(m);
+        free(m);
         SYS_STATS_INC(mbox.err);
         return ERR_MEM;
     }
@@ -182,8 +222,8 @@ err_t sys_mbox_new(sys_mbox_t *mbox, int size) {
         pthread_cond_init(&m->not_empty, NULL) != 0 ||
         pthread_cond_init(&m->not_full, NULL) != 0 ||
         pthread_cond_init(&m->drained, NULL) != 0) {
-        mem_free(m->slots);
-        mem_free(m);
+        free(m->slots);
+        free(m);
         return ERR_VAL;
     }
     m->capacity = (size_t)size;
@@ -221,8 +261,8 @@ void sys_mbox_free(sys_mbox_t *mbox) {
     pthread_cond_destroy(&m->not_empty);
     pthread_cond_destroy(&m->not_full);
     pthread_cond_destroy(&m->drained);
-    mem_free(m->slots);
-    mem_free(m);
+    free(m->slots);
+    free(m);
     *mbox = NULL;
     SYS_STATS_DEC(mbox.used);
 }
@@ -353,7 +393,7 @@ struct cs11_thread_arg {
 
 static void *cs11_thread_entry(void *raw) {
     struct cs11_thread_arg arg = *(struct cs11_thread_arg *)raw;
-    mem_free(raw);
+    free(raw);
     arg.function(arg.argument);
     return NULL;
 }
@@ -361,7 +401,7 @@ static void *cs11_thread_entry(void *raw) {
 sys_thread_t sys_thread_new(const char *name, lwip_thread_fn thread, void *arg, int stacksize, int prio) {
     (void)stacksize;
     (void)prio;
-    struct cs11_thread_arg *boxed = (struct cs11_thread_arg *)mem_malloc(sizeof(struct cs11_thread_arg));
+    struct cs11_thread_arg *boxed = (struct cs11_thread_arg *)malloc(sizeof(struct cs11_thread_arg));
     if (boxed == NULL) {
         return 0;
     }
@@ -370,7 +410,7 @@ sys_thread_t sys_thread_new(const char *name, lwip_thread_fn thread, void *arg, 
 
     pthread_t handle;
     if (pthread_create(&handle, NULL, cs11_thread_entry, boxed) != 0) {
-        mem_free(boxed);
+        free(boxed);
         return 0;
     }
     if (name != NULL) {

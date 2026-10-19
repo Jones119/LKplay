@@ -125,7 +125,14 @@
 #define LWIP_TCPIP_CORE_LOCKING         0
 #define LWIP_NETCONN_FULLDUPLEX         0
 #define LWIP_NETCONN_SEM_PER_THREAD     0
-#define SYS_LIGHTWEIGHT_PROT            0
+/*
+ * Critical sections around memp/mem. Required because the RX pump calls tcpip_input() (which allocates a
+ * tcpip message) while the tcpip thread frees messages from the same pool; without it the pool free list
+ * is shared unguarded and corrupts. native-tests reproduced exactly that on its first storm run. The
+ * sections are tiny (a recursive mutex in bridge/sys_arch.c), not a per-packet cost worth trading for
+ * correctness.
+ */
+#define SYS_LIGHTWEIGHT_PROT            1
 
 /* Diagnostics stay off in the shipping build; flip to 1 locally to trace lwIP itself. */
 #define LWIP_STATS                      0

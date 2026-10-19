@@ -44,4 +44,12 @@
 #undef LWIP_DEBUG
 #define LWIP_DEBUG 0
 
+/* The host does not need select(), and MSYS2's fd_set collides with lwIP's in that TU. */
+#undef LWIP_SOCKET_SELECT
+#define LWIP_SOCKET_SELECT 0
+
+/* The pools here are deliberately small to make exhaustion observable; the production sizing check
+ * (MEMP_NUM_TCP_SEG >= TCP_SND_QUEUELEN) does not matter for these tests. */
+#define LWIP_DISABLE_TCP_SANITY_CHECKS 1
+
 #endif /* CS11_NATIVE_TEST_LWIPOPTS_H */
