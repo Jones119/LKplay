@@ -694,8 +694,13 @@ class CarPlayController(
      * tears the connection down. Returns false when there is no wired device or the request failed.
      */
     fun requestWiredReenumeration(): Boolean {
-        val device = wiredDevice ?: return false
+        val device = wiredDevice
+        if (device == null) {
+            debugLog("wired teardown: no wired device to re-enumerate")
+            return false
+        }
         wiredDevice = null
+        debugLog("wired teardown: asking the iPhone to re-enumerate")
         return try {
             when (val result = iphoneHost.requestCarPlayReenumeration(device)) {
                 IphoneUsbHost.TransitionResult.ReenumerationRequested -> {

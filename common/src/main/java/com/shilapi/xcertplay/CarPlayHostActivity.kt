@@ -5005,18 +5005,32 @@ internal object CarPlayBackgroundSession {
 
     fun stop(completion: () -> Unit = {}) {
         val action: (((() -> Unit)) -> Unit)?
+        val session: CarPlayController?
         synchronized(this) {
             if (stopping) { stopWaiters.add(completion); return }
             action = stopAction
+            session = controller
             if (action != null) { stopping = true; stopWaiters.add(completion) }
         }
         if (action == null) { completion(); return }
-        action.invoke {
-            val callbacks = synchronized(this) {
-                stopping = false
-                stopWaiters.toList().also { stopWaiters.clear() }
+        // Make the iPhone see a detach before the session goes away. Without it the phone keeps the
+        // CarPlay session and the next connect stops at the control channel (tablet bench 2026-10-19).
+        // The vendor request is a USB control transfer, so it runs off the main thread; the stop action
+        // itself already posts back to the UI thread. WorkerThreads, not Thread: the API 19 ROM briefly
+        // nulls the main ThreadGroup and `new Thread` NPEs there (doc 92 §1).
+        com.shilapi.xcertplay.compat.WorkerThreads.create({
+            runCatching { session?.requestWiredReenumeration() }
+                .onFailure { Log.w("DiPlay-Stop", "wired re-enumeration request failed", it) }
+            action.invoke {
+                val callbacks = synchronized(this) {
+                    stopping = false
+                    stopWaiters.toList().also { stopWaiters.clear() }
+                }
+                callbacks.forEach { it() }
             }
-            callbacks.forEach { it() }
+        }, "wired-detach").apply {
+            isDaemon = false
+            start()
         }
     }
 
