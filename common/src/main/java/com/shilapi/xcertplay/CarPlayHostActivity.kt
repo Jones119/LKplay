@@ -1232,34 +1232,104 @@ class CarPlayHostActivity : ComponentActivity() {
         return root
     }
 
+    /**
+     * Full-screen CarPlay settings: a fixed header, a category rail on the left and one scrolling page
+     * per category, with the actions that end the visit pinned to the bottom.
+     *
+     * The panel used to be a narrow centred column with every section stacked in one scroll; on the car's
+     * 1920 px panel that wasted two thirds of the width and put 保存/退出 a long scroll away. Each section
+     * builder still appends to `content`; `newPage()` swaps what `content` points at.
+     */
     private fun buildSettingsMenu(): View {
         val overlay = FrameLayout(this).apply {
             setBackgroundColor(Color.BLACK)
             isClickable = true
         }
-        val panel = FrameLayout(this).apply {
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
             setBackgroundColor(settingsTheme.surface)
         }
-        val content = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER_HORIZONTAL
-            setPadding(dp(48), dp(36), dp(48), dp(36))
+
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(16), dp(16), dp(32), dp(4))
         }
-        content.addView(
-            settingsTitle(getString(R.string.carplay_settings)).apply {
-                setPadding(dp(56), 0, 0, 0)
+        header.addView(
+            SettingsWidgets.createButton(
+                this,
+                "X",
+                theme = settingsTheme,
+                widthDp = 48,
+                minHeightDp = 48,
+                textSizeSp = 22f,
+            ) { cancelSettingsEdits() }.apply {
+                contentDescription = getString(R.string.discard_changes_and_exit_settings)
+                minWidth = dp(48)
+                minHeight = dp(48)
+                setPadding(0, 0, 0, 0)
             },
-            LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-            ),
+            LinearLayout.LayoutParams(dp(48), dp(48)),
         )
+        header.addView(
+            settingsTitle(getString(R.string.carplay_settings)),
+            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(20) },
+        )
+        panel.addView(header, LinearLayout.LayoutParams(-1, -2))
+
+        val body = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        val nav = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(24), dp(8), dp(24), dp(16))
+        }
+        val pageHost = FrameLayout(this)
+        body.addView(nav, LinearLayout.LayoutParams(dp(280), ViewGroup.LayoutParams.MATCH_PARENT))
+        body.addView(pageHost, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
+        panel.addView(body, LinearLayout.LayoutParams(-1, 0, 1f))
+
+        val pages = LinkedHashMap<String, View>()
+        val navLabels = LinkedHashMap<String, TextView>()
+        fun selectPage(name: String) {
+            for ((key, view) in pages) view.visibility = if (key == name) View.VISIBLE else View.GONE
+            for ((key, label) in navLabels) {
+                label.isSelected = key == name
+                label.setTextColor(if (key == name) settingsTheme.textPrimary else settingsTheme.textSecondary)
+            }
+        }
+        fun newPage(name: String, title: String): LinearLayout {
+            val column = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER_HORIZONTAL
+                setPadding(dp(8), dp(8), dp(40), dp(24))
+            }
+            val scroll = ScrollView(this).apply {
+                isFillViewport = true
+                addView(column, ViewGroup.LayoutParams(-1, -2))
+                visibility = View.GONE
+            }
+            pageHost.addView(scroll, FrameLayout.LayoutParams(-1, -1))
+            pages[name] = scroll
+            val label = TextView(this).apply {
+                text = title
+                textSize = 17f
+                setTextColor(settingsTheme.textSecondary)
+                setPadding(dp(16), dp(16), dp(16), dp(16))
+                isClickable = true
+                isFocusable = true
+                setOnClickListener { selectPage(name) }
+            }
+            nav.addView(label, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(2) })
+            navLabels[name] = label
+            return column
+        }
+
+        var content: LinearLayout = newPage("connection", getString(R.string.connection))
         content.addView(
             settingsCategoryHeader(getString(R.string.connection)),
             LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = dp(32) },
+            ).apply { topMargin = dp(8) },
         )
 
         content.addView(
@@ -1317,6 +1387,7 @@ class CarPlayHostActivity : ComponentActivity() {
             ).apply { topMargin = dp(6) },
         )
 
+        content = newPage("location", getString(R.string.location))
         content.addView(
             settingsCategoryHeader(getString(R.string.location)),
             LinearLayout.LayoutParams(
@@ -1332,6 +1403,7 @@ class CarPlayHostActivity : ComponentActivity() {
             ).apply { topMargin = dp(12) },
         )
 
+        content = newPage("startup", getString(R.string.startup))
         content.addView(
             settingsCategoryHeader(getString(R.string.startup)),
             LinearLayout.LayoutParams(
@@ -1356,6 +1428,7 @@ class CarPlayHostActivity : ComponentActivity() {
 
         // The cluster push, right after startup because it is the other thing that must survive a
         // reboot: it was an adb property before, and one ignition dropped it (docs/_digest/38).
+        content = newPage("cluster_push", getString(R.string.cluster_push))
         content.addView(
             settingsCategoryHeader(getString(R.string.cluster_push)),
             LinearLayout.LayoutParams(
@@ -1372,8 +1445,9 @@ class CarPlayHostActivity : ComponentActivity() {
         )
 
         if (advancedAudioChannelMappingSupported) {
+            content = newPage("audio", getString(R.string.audio))
             content.addView(
-                settingsCategoryHeader(getString(R.string.audio)),
+            settingsCategoryHeader(getString(R.string.audio)),
                 LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -1399,6 +1473,7 @@ class CarPlayHostActivity : ComponentActivity() {
             )
         }
 
+        content = newPage("appearance", getString(R.string.identity_appearance))
         content.addView(
             settingsCategoryHeader(getString(R.string.identity_appearance)),
             LinearLayout.LayoutParams(
@@ -1434,6 +1509,7 @@ class CarPlayHostActivity : ComponentActivity() {
                 ViewGroup.LayoutParams.WRAP_CONTENT,
             ).apply { topMargin = dp(26) },
         )
+        content = newPage("display", getString(R.string.display_video))
         content.addView(
             settingsCategoryHeader(getString(R.string.display_video)),
             LinearLayout.LayoutParams(
@@ -1568,6 +1644,7 @@ class CarPlayHostActivity : ComponentActivity() {
             ).apply { topMargin = dp(12) },
         )
 
+        content = newPage("diagnostics", getString(R.string.diagnostics))
         content.addView(
             settingsCategoryHeader(getString(R.string.diagnostics)),
             LinearLayout.LayoutParams(
@@ -1602,14 +1679,22 @@ class CarPlayHostActivity : ComponentActivity() {
             )
         }
 
+        // The preview belongs to the display page: it describes resolution and identity, not an action.
+        val displayColumn = (pages["display"] as ScrollView).getChildAt(0) as LinearLayout
         val preview = settingsDescription("")
-        content.addView(
+        displayColumn.addView(
             preview,
             LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = dp(30) },
+            ).apply { topMargin = dp(24) },
         )
+
+        val footer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(32), dp(4), dp(32), dp(16))
+        }
+        panel.addView(footer, LinearLayout.LayoutParams(-1, -2))
 
         val save = SettingsWidgets.createButton(
             this,
@@ -1617,15 +1702,12 @@ class CarPlayHostActivity : ComponentActivity() {
             style = SettingsWidgets.ButtonStyle.PRIMARY,
             theme = settingsTheme,
         ) { saveSettingsAndReconnect() }
-        content.addView(
-            save,
-            LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = dp(46) },
-        )
+        footer.addView(save, LinearLayout.LayoutParams(-1, -2))
 
-        // The one action that leaves CarPlay: the danger tier, so it is as unmissable as the white buttons
+        val primaryRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        footer.addView(primaryRow, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
+
+        // The one action that leaves CarPlay: the danger tier, so it is as unmissable as the white button
         // and still reads as the irreversible one.
         val exitApplicationButton = SettingsWidgets.createButton(
             this,
@@ -1633,20 +1715,19 @@ class CarPlayHostActivity : ComponentActivity() {
             style = SettingsWidgets.ButtonStyle.DANGER,
             theme = settingsTheme,
         ) { exitApplication() }
-        content.addView(
+        primaryRow.addView(
             exitApplicationButton,
-            LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = dp(12) },
+            LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(8) },
         )
-
-        content.addView(
+        primaryRow.addView(
             settingsAction(getString(R.string.language_app_language)) {
                 AppLocale.showPicker(this@CarPlayHostActivity)
             },
-            LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(12) },
+            LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(8) },
         )
+
+        val secondaryRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        footer.addView(secondaryRow, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
 
         var gestureFingerLabel = gestureFingerCount
         val gestureButton = settingsAction(
@@ -1657,75 +1738,22 @@ class CarPlayHostActivity : ComponentActivity() {
             gestureButton.text = getString(R.string.settings_gesture_fingers, gestureFingerLabel)
             gestureFingerCount = gestureFingerLabel
         }
-        content.addView(gestureButton, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(12) })
-
-        content.addView(
+        secondaryRow.addView(
+            gestureButton,
+            LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(8) },
+        )
+        secondaryRow.addView(
             settingsAction(
                 "${getString(R.string.app_name)} ${getString(R.string.settings)}",
             ) {
                 cancelSettingsEdits()
                 showDiPlayHome("settings")
             },
-            LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = dp(12) },
+            LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(8) },
         )
 
-        val scroll = ScrollView(this).apply {
-            isFillViewport = true
-            addView(
-                content,
-                ViewGroup.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
-                ),
-            )
-        }
-        panel.addView(
-            scroll,
-            FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT,
-            ),
-        )
-        // The close control is an icon button, so it keeps its own square geometry — but its fill and border
-        // still come from the same tokens as every other control rather than a one-off tint of `trackOff`.
-        panel.addView(
-            SettingsWidgets.createButton(
-                this,
-                "X",
-                theme = settingsTheme,
-                widthDp = 48,
-                minHeightDp = 48,
-                textSizeSp = 22f,
-            ) { cancelSettingsEdits() }.apply {
-                contentDescription = getString(R.string.discard_changes_and_exit_settings)
-                minWidth = dp(48)
-                minHeight = dp(48)
-                setPadding(0, 0, 0, 0)
-            },
-            FrameLayout.LayoutParams(dp(48), dp(48), Gravity.TOP or Gravity.START).apply {
-                leftMargin = dp(16)
-                topMargin = dp(16)
-            },
-        )
-        overlay.addView(
-            panel,
-            FrameLayout.LayoutParams(
-                minOf(resources.displayMetrics.widthPixels, MAX_SETTINGS_MENU_WIDTH_PX),
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                Gravity.CENTER,
-            ),
-        )
-        overlay.addOnLayoutChangeListener { view, _, _, _, _, _, _, _, _ ->
-            val desiredWidth = minOf(view.width, MAX_SETTINGS_MENU_WIDTH_PX)
-            val params = panel.layoutParams
-            if (params.width != desiredWidth) {
-                params.width = desiredWidth
-                panel.layoutParams = params
-            }
-        }
+        selectPage("connection")
+        overlay.addView(panel, FrameLayout.LayoutParams(-1, -1))
 
         resolutionValueView = resolutionValue
         resolutionPreviewView = preview
@@ -4963,7 +4991,6 @@ class CarPlayHostActivity : ComponentActivity() {
         const val PROTOCOL_TRACE_PREFIX = "TRACE "
         const val SETTINGS_SWIPE_DISTANCE_DP = 72
         const val SETTINGS_SWIPE_DIRECTION_RATIO = 1.15f
-        const val MAX_SETTINGS_MENU_WIDTH_PX = 1200
         // The three-finger overlay's colours now come from SettingsTheme.OVERLAY; the retired MENU_*
         // palette (cool blue-black with a green accent) is gone so nothing can drift back to it.
         val NO_VIDEO_BACKGROUND = Color.rgb(0x16, 0x16, 0x18)
