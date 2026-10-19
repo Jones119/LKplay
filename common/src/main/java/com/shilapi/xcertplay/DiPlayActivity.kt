@@ -37,7 +37,6 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.shilapi.xcertplay.adb.LocalAdb
-import com.shilapi.xcertplay.airplay.CarPlayClusterDisplay
 import com.shilapi.xcertplay.airplay.CarPlayDisplayScale
 import com.shilapi.xcertplay.host.R
 import com.shilapi.xcertplay.network.CarHotspotSettings
@@ -59,7 +58,6 @@ import com.shilapi.xcertplay.compat.hasPermissionCompat
 class DiPlayActivity : ComponentActivity() {
     private val handler = Handler(Looper.getMainLooper())
     private var page = "home"
-    private var clusterContentRequestVersion = 0L
     private var setupError: String? = null
     private var status: TextView? = null
     private var connectButton: Button? = null
@@ -195,16 +193,9 @@ class DiPlayActivity : ComponentActivity() {
         super.onSaveInstanceState(outState)
     }
     override fun onConfigurationChanged(newConfig: Configuration) { super.onConfigurationChanged(newConfig); render() }
-    private fun openOverlayPermission() {
-        val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))
-        if (runCatching { startActivity(intent) }.isFailure) {
-            android.widget.Toast.makeText(this, R.string.center_map_no_permission_screen, android.widget.Toast.LENGTH_LONG).show()
-        }
-    }
 
     override fun onStart() {
         super.onStart()
-        CenterMapOverlay.onDiPlayScreenShown()
         carPlayScreenBroughtForward = false
         syncNightModeWithScreen()
     }
@@ -217,15 +208,6 @@ class DiPlayActivity : ComponentActivity() {
         cancelUsbPermissionSetup()
         startupHotspotCancelled = true
         super.onStop()
-        // Bringing a running CarPlay screen forward stops this activity too, and scheduling the
-        // centre-screen card there would drop it on top of CarPlay — which looks exactly like a black
-        // screen while frames keep flowing (docs/_digest/36). The host activity's own visibility is
-        // the reliable answer; CarPlayBackgroundSession.hasSession() stays false here.
-        if (!isFinishing && !isChangingConfigurations &&
-            !carPlayScreenBroughtForward && !DiPlayScreenState.carPlayHostVisible
-        ) {
-            CenterMapOverlay.scheduleShow()
-        }
     }
 
     /** Set while this activity hands the foreground to the running CarPlay screen. */
@@ -842,7 +824,7 @@ class DiPlayActivity : ComponentActivity() {
             toggle(card, getString(R.string.main_buffered_audio), getString(R.string.main_buffered_audio_description),
                 AirPlayPersistence.loadMainBufferedAudio(this)) {
                 AirPlayPersistence.saveMainBufferedAudio(this, it)
-                reconnectForClusterMap()
+                reconnectForAppliedSetting()
             }
             choice(card, getString(R.string.frame_rate), listOf(getString(R.string.s_30_fps_lighter_load), getString(R.string.s_60_fps_smoother_motion)), if (AirPlayPersistence.loadFps(this) == 60) 1 else 0) { AirPlayPersistence.saveFps(this, if (it == 1) 60 else 30) }
             toggle(card, getString(R.string.right_hand_drive), getString(R.string.place_carplay_s_controls_closer_to_the_driver), AirPlayPersistence.loadRightHandDrive(this)) { AirPlayPersistence.saveRightHandDrive(this, it) }
@@ -856,7 +838,7 @@ class DiPlayActivity : ComponentActivity() {
                 toggle(card, getString(label), getString(R.string.hide_the_car_s_system_bars_while_carplay_is_open), checked, save = onChanged)
             }
         }
-        section(content, getString(R.string.car_button_in_carplay), R.drawable.ic_dp_car) { card -> carButtonCard = card; carButtonControls(card) }
+        section(content, getString(R.string.car_button_in_carplay), R.drawable.ic_dp_car) { card -> carButtonCard = card; carButtonControls(card); wheelKeyControls(card) }
         section(content, getString(R.string.audio_routing), R.drawable.ic_dp_audio) { card ->
             toggle(card, getString(R.string.contrib_audio_home_toggle_audio_focus), getString(R.string.contrib_audio_home_toggle_audio_focus_desc), AirPlayPersistence.loadAudioFocusEnabled(this)) { AirPlayPersistence.saveAudioFocusEnabled(this, it) }
             if (resources.getBoolean(R.bool.config_advanced_audio_channel_mapping)) {
@@ -886,78 +868,6 @@ class DiPlayActivity : ComponentActivity() {
                 getString(R.string.sends_precise_android_location_as_carplay_gps_data_when_th),
                 AirPlayPersistence.loadLocationReportingEnabled(this), save = ::onLocationReportingChanged)
             card.addView(label(getString(R.string.location_reporting_reconnects), 14, MUTED))
-        }
-        // The iPhone's instrument-cluster stream (stream 111), shown as the centre-screen card and, where a
-        // launcher mirrors it, on the launcher screens. This head unit exposes no cluster projection display,
-        // so DiPlay always asks for the standard virtual 1280x720 stream.
-        section(content, getString(R.string.carplay_map_on_instrument_cluster_experimental), R.drawable.ic_dp_dashboard) { card ->
-            val clusterMapEnabled = AirPlayPersistence.loadClusterMapEnabled(this)
-            toggle(card, getString(R.string.carplay_map_on_instrument_cluster_experimental),
-                getString(R.string.shows_the_iphone_s_cluster_map_virtual_stream_description),
-                clusterMapEnabled) {
-                AirPlayPersistence.saveClusterMapEnabled(this, it)
-                render()
-                reconnectForClusterMap()
-            }
-            if (clusterMapEnabled) {
-                toggle(card, getString(R.string.center_map_card),
-                    getString(R.string.center_map_card_virtual_description),
-                    AirPlayPersistence.loadCenterMapOverlay(this)) {
-                    AirPlayPersistence.saveCenterMapOverlay(this, it)
-                    if (it && !CenterMapOverlay.permitted(this)) openOverlayPermission()
-                    render()
-                }
-                if (AirPlayPersistence.loadCenterMapOverlay(this)) {
-                    toggle(card, getString(R.string.center_map_follows_dashboard), getString(R.string.center_map_follows_dashboard_description),
-                        AirPlayPersistence.loadCenterMapFollowsDashboard(this)) {
-                        AirPlayPersistence.saveCenterMapFollowsDashboard(this, it)
-                    }
-                    toggle(card, getString(R.string.center_map_auto_hide), getString(R.string.center_map_auto_hide_description),
-                        AirPlayPersistence.loadCenterMapAutoHide(this)) {
-                        AirPlayPersistence.saveCenterMapAutoHide(this, it)
-                    }
-                    val overlay = CenterMapOverlay.permitted(this)
-                    card.addView(label(if (overlay) getString(R.string.center_map_overlay_allowed)
-                        else getString(R.string.center_map_overlay_missing, packageName), 14, if (overlay) MUTED else WARNING))
-                    val usage = HomeScreenMonitor.hasAccess(this)
-                    card.addView(label(if (usage) getString(R.string.center_map_auto_hide_active)
-                        else getString(R.string.center_map_auto_hide_needed), 14, if (usage) MUTED else WARNING))
-                    if (!usage) {
-                        card.addView(button(getString(R.string.btn_auto_apply_permissions), false) { autoApplyPermissions() }, matchButton(8, 54))
-                    }
-                }
-                val contents = CarPlayClusterDisplay.Content.entries
-                val content = AirPlayPersistence.loadClusterContent(this)
-                choice(card, getString(R.string.dashboard_shows), listOf(
-                    getString(R.string.dashboard_content_map),
-                    getString(R.string.dashboard_content_turn_card),
-                    getString(R.string.dashboard_content_map_with_turn_card),
-                    getString(R.string.dashboard_content_map_with_custom_turn_card),
-                ), contents.indexOf(content).coerceAtLeast(0), reconnects = false) {
-                    val next = contents[it]
-                    val request = ++clusterContentRequestVersion
-                    AirPlayPersistence.saveClusterContent(this, next)
-                    render()
-                    if (content.url != next.url) {
-                        // The iPhone's own contents switch live; our own card over the map is set up at
-                        // connection, so it reconnects.
-                        val controller = CarPlayBackgroundSession.snapshot()?.controller
-                        if (CarPlayClusterDisplay.usesCustomTurnCard(next) || controller == null) {
-                            reconnectForClusterMap()
-                        } else controller.showDashboardContent(next.url) { applied ->
-                            runOnUiThread {
-                                if (!applied && request == clusterContentRequestVersion &&
-                                    !isFinishing && !isDestroyed &&
-                                    AirPlayPersistence.loadClusterContent(this) == next &&
-                                    CarPlayBackgroundSession.snapshot()?.controller === controller) {
-                                    reconnectForClusterMap()
-                                }
-                            }
-                        }
-                    }
-                }
-                wheelKeyControls(card)
-            }
         }
         section(content, getString(R.string.permissions_and_connection_help), R.drawable.ic_dp_permissions) { card ->
             card.addView(label(getString(R.string.nearby_devices_connects_your_iphone_microphone_enables_sir), 16, MUTED))
@@ -1653,11 +1563,6 @@ class DiPlayActivity : ComponentActivity() {
             if (!UsbAutoConfirmService.openSettings(this)) toast(getString(R.string.wheel_keys_no_settings))
         }, matchButton(0, 56))
 
-        val overlayOn = CenterMapOverlay.permitted(this)
-        body.addView(button(if (overlayOn) getString(R.string.center_map_overlay_allowed) else getString(R.string.btn_open_overlay_setting), false) {
-            openOverlayPermission()
-        }, matchButton(10, 56))
-
         UsbPermissionSetup.snapshot(this).forEach { (permission, granted) ->
             val title = getString(when (permission) {
                 UsbPermissionSetup.Permission.ACCESSIBILITY -> R.string.usb_auto_confirm_title
@@ -1688,21 +1593,15 @@ class DiPlayActivity : ComponentActivity() {
             .show()
     }
 
-    /** Steering-wheel keys for the dashboard map zoom and the CarPlay joystick: the switches, the key service and the keys. */
+    /** Steering-wheel keys for the CarPlay joystick: the switch, the key service and the key roles. */
     private fun wheelKeyControls(card: LinearLayout) {
-        toggle(card, getString(R.string.wheel_map_zoom), getString(R.string.wheel_map_zoom_description),
-            WheelZoomSettings.enabled(this)) {
-            WheelZoomSettings.setEnabled(this, it)
-            render()
-        }
         toggle(card, getString(R.string.wheel_joystick), getString(R.string.wheel_joystick_description),
             WheelZoomSettings.joystick(this)) {
             WheelZoomSettings.setJoystick(this, it)
             render()
         }
-        val zoom = WheelZoomSettings.enabled(this)
         val joystick = WheelZoomSettings.joystick(this)
-        if (!zoom && !joystick) return
+        if (!joystick) return
         val connected = WheelKeyService.connected()
         card.addView(label(getString(when {
             connected -> R.string.wheel_keys_service_on
@@ -1726,36 +1625,16 @@ class DiPlayActivity : ComponentActivity() {
                     .onFailure { toast(getString(R.string.wheel_keys_no_settings)) }
             }, matchButton(10, 56))
         }
-        if (zoom) {
-            val behaviours = WheelZoomSettings.Behaviour.entries
-            choice(card, getString(R.string.wheel_zoom_behaviour),
-                listOf(getString(R.string.wheel_zoom_behaviour_toggle), getString(R.string.wheel_zoom_behaviour_timed)),
-                behaviours.indexOf(WheelZoomSettings.behaviour(this)), reconnects = false) {
-                WheelZoomSettings.setBehaviour(this, behaviours[it])
-            }
-        }
-        if (joystick) {
-            toggle(card, getString(R.string.wheel_joystick_auto_off), getString(R.string.wheel_joystick_auto_off_description),
-                WheelZoomSettings.joystickAutoOff(this)) { WheelZoomSettings.setJoystickAutoOff(this, it) }
-        }
+        toggle(card, getString(R.string.wheel_joystick_auto_off), getString(R.string.wheel_joystick_auto_off_description),
+            WheelZoomSettings.joystickAutoOff(this)) { WheelZoomSettings.setJoystickAutoOff(this, it) }
         for (role in WheelZoomSettings.Role.entries) {
-            // A key can serve both: the mode key goes back in the joystick, the zoom keys move it.
-            val zoomName = when (role) {
-                WheelZoomSettings.Role.MODE -> R.string.wheel_key_role_mode
-                WheelZoomSettings.Role.ZOOM_IN -> R.string.wheel_key_role_zoom_in
-                WheelZoomSettings.Role.ZOOM_OUT -> R.string.wheel_key_role_zoom_out
-                else -> null
-            }.takeIf { zoom }
-            val joystickName = when (role) {
+            val name = getString(when (role) {
                 WheelZoomSettings.Role.MODE -> R.string.wheel_key_role_back
                 WheelZoomSettings.Role.ZOOM_IN, WheelZoomSettings.Role.PREVIOUS -> R.string.wheel_key_role_previous
                 WheelZoomSettings.Role.ZOOM_OUT, WheelZoomSettings.Role.NEXT -> R.string.wheel_key_role_next
                 WheelZoomSettings.Role.JOYSTICK -> R.string.wheel_key_role_joystick
                 WheelZoomSettings.Role.SELECT -> R.string.wheel_key_role_select
-            }.takeIf { joystick }
-            val names = listOfNotNull(zoomName, joystickName)
-            if (names.isEmpty()) continue
-            val name = names.joinToString(" · ") { getString(it) }
+            })
             lateinit var assign: android.widget.Button
             assign = button(getString(R.string.wheel_key_assign, name, WheelZoomSettings.key(this, role).toString()), false) {
                 val started = WheelKeyService.learn(role, cancelled = {
@@ -1773,7 +1652,7 @@ class DiPlayActivity : ComponentActivity() {
     private fun hasPreciseLocation() =
         hasPermissionCompat(Manifest.permission.ACCESS_FINE_LOCATION)
 
-    private fun reconnectForClusterMap() {
+    private fun reconnectForAppliedSetting() {
         if (CarPlayBackgroundSession.hasSession()) connect(AirPlayPersistence.loadWirelessEnabled(this))
     }
 
@@ -2044,7 +1923,7 @@ class DiPlayActivity : ComponentActivity() {
             if (CarPlayDock.movesLive(from, to) && areas != null && target != null) {
                 if (session.controller.showViewArea(target)) areas.use(target)
             } else {
-                reconnectForClusterMap()
+                reconnectForAppliedSetting()
             }
         }
         card.addView(label(getString(R.string.carplay_dock_hint), 14, MUTED).apply { setPadding(0, 0, 0, dp(18)) })
