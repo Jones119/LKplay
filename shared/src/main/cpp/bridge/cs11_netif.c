@@ -19,6 +19,9 @@
 #include "lwip/pbuf.h"
 #include "lwip/tcpip.h"
 #include "lwip/ethip6.h"
+#if LWIP_IPV6_MLD
+#include "lwip/mld6.h"
+#endif
 #include "netif/ethernet.h"
 
 #include <pthread.h>
@@ -26,6 +29,111 @@
 
 #define CS11_TX_SLOTS 32
 #define CS11_TX_SLOT_BYTES 1600
+
+/*
+ * Link-up announcement (docs/_digest/100).
+ *
+ * The iPhone starts its CarPlay discovery as soon as the NCM link reports up: EasyPlay's kernel NCM +
+ * VPN stack, on this same phone and cable, receives the phone's mDNS query 6 ms after attaching. Our
+ * userspace link used to sit silent for 6-12 s, and the phone sent nothing (not even a Router
+ * Solicitation) until its own retry. The one thing the kernel stack does at attach and we did not is
+ * speak IPv6 first: an MLD report for the mDNS group and an ICMPv6 Router Solicitation. Both are cheap
+ * and harmless if the phone ignores them, so the link now sends them right after netif_set_up.
+ */
+static u32_t cs11_cksum_add(const void *data, size_t length, u32_t sum) {
+    const u8_t *bytes = (const u8_t *)data;
+    while (length > 1) {
+        sum += ((u32_t)bytes[0] << 8) | bytes[1];
+        bytes += 2;
+        length -= 2;
+    }
+    if (length != 0) {
+        sum += (u32_t)bytes[0] << 8;
+    }
+    return sum;
+}
+
+/*
+ * Built as a complete Ethernet frame and handed straight to linkoutput.
+ *
+ * ip6_output_if() needs pbuf header room for the IPv6 and link headers and answered ERR_BUF/ERR_RTE in
+ * the host tests, so this path does the 40-byte IPv6 header itself: fewer moving parts, and the frame
+ * that reaches the phone is exactly the one measured here (62 bytes, the same shape the EasyPlay
+ * reference's stack emits, docs/_digest/100).
+ */
+static void cs11_send_router_solicitation(struct netif *netif) {
+    u8_t frame[14 + 40 + 8];
+    const ip6_addr_t *source = netif_ip6_addr(netif, 0);
+    struct pbuf *packet;
+    u32_t sum;
+    u16_t checksum;
+    err_t err;
+
+    if (source == NULL || ip6_addr_isinvalid(source)) {
+        LWIP_PLATFORM_DIAG(("cs11 netif: no link-local, router solicitation skipped"));
+        return;
+    }
+    memset(frame, 0, sizeof(frame));
+
+    /* Ethernet: all-routers multicast 33:33:00:00:00:02, IPv6 ethertype. */
+    frame[0] = 0x33;
+    frame[1] = 0x33;
+    frame[5] = 0x02;
+    memcpy(frame + 6, netif->hwaddr, 6);
+    frame[12] = 0x86;
+    frame[13] = 0xdd;
+
+    /* IPv6 header: version 6, 8-byte payload, ICMPv6, hop limit 255. */
+    frame[14] = 0x60;
+    frame[18] = 0x00;
+    frame[19] = 0x08;
+    frame[20] = 58;
+    frame[21] = 255;
+    memcpy(frame + 22, source->addr, 16);
+    frame[38] = 0xff; /* ff02::2 */
+    frame[39] = 0x02;
+    frame[53] = 0x02;
+
+    /* ICMPv6 Router Solicitation, checksum over the pseudo-header. */
+    frame[54] = 133;
+    sum = cs11_cksum_add(frame + 22, 32, 0); /* source and destination are contiguous */
+    sum += 8;                                /* upper-layer length */
+    sum += 58;                               /* next header: ICMPv6 */
+    sum = cs11_cksum_add(frame + 54, 8, sum);
+    while ((sum >> 16) != 0) {
+        sum = (sum & 0xffffU) + (sum >> 16);
+    }
+    checksum = (u16_t)(~sum & 0xffffU);
+    frame[56] = (u8_t)(checksum >> 8);
+    frame[57] = (u8_t)(checksum & 0xff);
+
+    packet = pbuf_alloc(PBUF_RAW, sizeof(frame), PBUF_RAM);
+    if (packet == NULL) {
+        LWIP_PLATFORM_DIAG(("cs11 netif: router solicitation pbuf failed"));
+        return;
+    }
+    memcpy(packet->payload, frame, sizeof(frame));
+    err = netif->linkoutput(netif, packet);
+    pbuf_free(packet);
+    LWIP_PLATFORM_DIAG(("cs11 netif: router solicitation sent err=%d", (int)err));
+}
+
+static void cs11_announce_link_up(struct netif *netif) {
+#if LWIP_IPV6_MLD
+    ip6_addr_t mdns;
+    IP6_ADDR(&mdns, 0xff020000U, 0, 0, 0x000000fbU);
+    err_t joined = mld6_joingroup_netif(netif, &mdns);
+    LWIP_PLATFORM_DIAG(("cs11 netif: mld6 join ff02::fb err=%d", (int)joined));
+#endif
+#if LWIP_ICMP6
+    cs11_send_router_solicitation(netif);
+#endif
+}
+
+/* Runs on the tcpip thread: mld6_joingroup_netif and ip6_output_if both walk lwIP state. */
+static void cs11_announce_link_up_cb(void *context) {
+    cs11_announce_link_up((struct netif *)context);
+}
 
 struct cs11_netif_state {
     struct netif netif;
@@ -121,6 +229,7 @@ int cs11_netif_start(const u8_t *host_mac, int mtu) {
         netif_ip6_addr_set_state(netif, 0, IP6_ADDR_PREFERRED);
         netif_set_up(netif);
         netif_set_link_up(netif);
+        tcpip_callback(cs11_announce_link_up_cb, netif);
         return 0;
     }
 
@@ -164,6 +273,7 @@ int cs11_netif_start(const u8_t *host_mac, int mtu) {
 
     netif_set_up(netif);
     netif_set_link_up(netif);
+    tcpip_callback(cs11_announce_link_up_cb, netif);
     netif_created = 1;
     return 0;
 }
