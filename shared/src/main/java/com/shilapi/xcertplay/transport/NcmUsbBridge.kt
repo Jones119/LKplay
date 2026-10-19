@@ -170,6 +170,9 @@ class NcmUsbBridge internal constructor(
     private fun drainStatus(endpoint: UsbEndpoint) {
         val buffer = ByteArray(endpoint.maxPacketSize.coerceAtLeast(64))
         var loggedFirst = false
+        var loggedFailingPoll = false
+        var polls = 0
+        val startedNs = System.nanoTime()
         while (statusRunning.get()) {
             // Short synchronous polls keep this thread out of JNI critical sections most of the time;
             // notifications are rare, small interrupt packets that are only logged.
@@ -178,7 +181,20 @@ class NcmUsbBridge internal constructor(
             } catch (_: RuntimeException) {
                 return
             }
+            polls++
             if (transferred <= 0) {
+                // Evidence for docs/_digest/99: bulkTransfer is USBDEVFS_BULK, and this endpoint is
+                // interrupt. If the phone's NETWORK_CONNECTION is never consumed, the first poll already
+                // says so (-1) instead of hiding behind "no notification arrived".
+                if (!loggedFailingPoll && polls >= 2) {
+                    loggedFailingPoll = true
+                    Log.i(
+                        IphoneCarPlayConfiguration.TAG,
+                        "ncm status poll result=$transferred polls=$polls " +
+                            "elapsedMs=${(System.nanoTime() - startedNs) / 1_000_000L} " +
+                            "endpoint=0x${endpoint.address.toString(16)} type=${endpoint.type}",
+                    )
+                }
                 try {
                     Thread.sleep(STATUS_POLL_INTERVAL_MILLIS)
                 } catch (_: InterruptedException) {
