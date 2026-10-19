@@ -265,6 +265,13 @@ CS11_JNI(jint) Java_com_shilapi_xcertplay_transport_UserSpaceNetworkNative_nativ
         JNIEnv *env, jobject self, jint fd, jbyteArray buffer, jint offset, jint length,
         jbyteArray fromAddress, jintArray fromPort) {
     (void)self;
+    /* lwIP writes into this array, so an offset/length that does not fit is an out-of-bounds WRITE -
+     * worse than the read that started this whole audit. The commit that added the other checks
+     * claimed recvfrom was covered; it was not (found by the 2026-10-19 re-audit). */
+    jint bounds = cs11_check_bounds(env, buffer, offset, length, "recvfrom");
+    if (bounds != 0) {
+        return bounds;
+    }
     struct sockaddr_in6 peer;
     socklen_t peerLength = sizeof(peer);
     memset(&peer, 0, sizeof(peer));

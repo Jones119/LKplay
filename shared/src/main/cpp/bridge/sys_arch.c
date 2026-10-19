@@ -151,10 +151,16 @@ typedef struct {
     pthread_mutex_t mutex;
     pthread_cond_t not_empty;
     pthread_cond_t not_full;
+    /** Signalled whenever a parked waiter leaves, so sys_mbox_free can wait for that before destroying. */
+    pthread_cond_t drained;
     void **slots;
     size_t capacity;
     size_t head;
     size_t count;
+    /** Set by sys_mbox_free: a waiter that wakes must leave instead of waiting again. */
+    int closing;
+    /** Threads currently parked in pthread_cond_wait on this mailbox. */
+    int waiters;
 } sys_mbox_impl;
 err_t sys_mbox_new(sys_mbox_t *mbox, int size) {
     if (size <= 0) {
@@ -174,7 +180,8 @@ err_t sys_mbox_new(sys_mbox_t *mbox, int size) {
     memset(m->slots, 0, sizeof(void *) * (size_t)size);
     if (pthread_mutex_init(&m->mutex, NULL) != 0 ||
         pthread_cond_init(&m->not_empty, NULL) != 0 ||
-        pthread_cond_init(&m->not_full, NULL) != 0) {
+        pthread_cond_init(&m->not_full, NULL) != 0 ||
+        pthread_cond_init(&m->drained, NULL) != 0) {
         mem_free(m->slots);
         mem_free(m);
         return ERR_VAL;
@@ -182,6 +189,8 @@ err_t sys_mbox_new(sys_mbox_t *mbox, int size) {
     m->capacity = (size_t)size;
     m->head = 0;
     m->count = 0;
+    m->closing = 0;
+    m->waiters = 0;
     *mbox = m;
     SYS_STATS_INC_USED(mbox);
     return ERR_OK;
@@ -194,17 +203,24 @@ void sys_mbox_free(sys_mbox_t *mbox) {
     }
     /* lwIP requires an empty mailbox here; a non-empty one is a leak in its own bookkeeping.
      *
-     * Wake anyone blocked on this mailbox first. A thread parked in sys_mbox_post() on `not_full` (or in
-     * sys_arch_mbox_fetch on `not_empty`) resumes inside a condition variable and mutex that this function is
-     * about to destroy, which is undefined behaviour - and the teardown path does free mailboxes while pump
-     * threads are still running. */
+     * A wake-up alone is not enough: a thread parked in pthread_cond_wait resumes only after it has
+     * re-acquired the mutex, and this function is about to destroy that mutex and the condition
+     * variables. So the mailbox is marked closing, every waiter is woken, and free waits until they
+     * have actually left (they see `closing` and stop waiting instead of parking again). Destroying
+     * while someone is still inside was undefined behaviour, and the teardown path does free mailboxes
+     * (per-netconn ones) while pump threads are still posting. */
     pthread_mutex_lock(&m->mutex);
+    m->closing = 1;
     pthread_cond_broadcast(&m->not_empty);
     pthread_cond_broadcast(&m->not_full);
+    while (m->waiters > 0) {
+        pthread_cond_wait(&m->drained, &m->mutex);
+    }
     pthread_mutex_unlock(&m->mutex);
     pthread_mutex_destroy(&m->mutex);
     pthread_cond_destroy(&m->not_empty);
     pthread_cond_destroy(&m->not_full);
+    pthread_cond_destroy(&m->drained);
     mem_free(m->slots);
     mem_free(m);
     *mbox = NULL;
@@ -214,8 +230,17 @@ void sys_mbox_free(sys_mbox_t *mbox) {
 void sys_mbox_post(sys_mbox_t *mbox, void *msg) {
     sys_mbox_impl *m = *mbox;
     pthread_mutex_lock(&m->mutex);
-    while (m->count == m->capacity) {
+    while (m->count == m->capacity && !m->closing) {
+        m->waiters++;
         pthread_cond_wait(&m->not_full, &m->mutex);
+        m->waiters--;
+        if (m->waiters == 0) {
+            pthread_cond_signal(&m->drained);
+        }
+    }
+    if (m->closing) {
+        pthread_mutex_unlock(&m->mutex);
+        return;
     }
     m->slots[(m->head + m->count) % m->capacity] = msg;
     m->count++;
@@ -226,7 +251,7 @@ void sys_mbox_post(sys_mbox_t *mbox, void *msg) {
 err_t sys_mbox_trypost(sys_mbox_t *mbox, void *msg) {
     sys_mbox_impl *m = *mbox;
     pthread_mutex_lock(&m->mutex);
-    if (m->count == m->capacity) {
+    if (m->closing || m->count == m->capacity) {
         pthread_mutex_unlock(&m->mutex);
         SYS_STATS_INC(mbox.err);
         return ERR_MEM;
@@ -246,9 +271,14 @@ u32_t sys_arch_mbox_fetch(sys_mbox_t *mbox, void **msg, u32_t timeout) {
     sys_mbox_impl *m = *mbox;
     u32_t waited = 0;
     pthread_mutex_lock(&m->mutex);
-    while (m->count == 0) {
+    while (m->count == 0 && !m->closing) {
         if (timeout == 0) {
+            m->waiters++;
             pthread_cond_wait(&m->not_empty, &m->mutex);
+            m->waiters--;
+            if (m->waiters == 0) {
+                pthread_cond_signal(&m->drained);
+            }
         } else {
             struct timespec deadline;
             clock_gettime(CLOCK_REALTIME, &deadline);
@@ -260,7 +290,13 @@ u32_t sys_arch_mbox_fetch(sys_mbox_t *mbox, void **msg, u32_t timeout) {
                 deadline.tv_sec += 1;
                 deadline.tv_nsec -= 1000000000L;
             }
-            if (pthread_cond_timedwait(&m->not_empty, &m->mutex, &deadline) == ETIMEDOUT) {
+            m->waiters++;
+            const int timed = pthread_cond_timedwait(&m->not_empty, &m->mutex, &deadline);
+            m->waiters--;
+            if (m->waiters == 0) {
+                pthread_cond_signal(&m->drained);
+            }
+            if (timed == ETIMEDOUT) {
                 pthread_mutex_unlock(&m->mutex);
                 if (msg != NULL) {
                     *msg = NULL;
@@ -269,6 +305,13 @@ u32_t sys_arch_mbox_fetch(sys_mbox_t *mbox, void **msg, u32_t timeout) {
             }
         }
         waited = timeout;
+    }
+    if (m->closing) {
+        pthread_mutex_unlock(&m->mutex);
+        if (msg != NULL) {
+            *msg = NULL;
+        }
+        return SYS_ARCH_TIMEOUT;
     }
     void *value = m->slots[m->head];
     m->head = (m->head + 1) % m->capacity;
@@ -284,7 +327,7 @@ u32_t sys_arch_mbox_fetch(sys_mbox_t *mbox, void **msg, u32_t timeout) {
 u32_t sys_arch_mbox_tryfetch(sys_mbox_t *mbox, void **msg) {
     sys_mbox_impl *m = *mbox;
     pthread_mutex_lock(&m->mutex);
-    if (m->count == 0) {
+    if (m->closing || m->count == 0) {
         pthread_mutex_unlock(&m->mutex);
         return SYS_MBOX_EMPTY;
     }
