@@ -79,6 +79,7 @@ import com.shilapi.xcertplay.location.AndroidCarPlayLocationProvider
 import com.shilapi.xcertplay.media.AndroidMediaSink
 import com.shilapi.xcertplay.media.CarPlayTouchMapper
 import com.shilapi.xcertplay.media.CarPlayVideoLayout
+import com.shilapi.xcertplay.media.LiveVideoMeter
 import com.shilapi.xcertplay.network.CarPlayVpnService
 import com.shilapi.xcertplay.orchestration.CarPlayController
 import com.shilapi.xcertplay.orchestration.CarPlayRuntimeConfig
@@ -425,6 +426,33 @@ class CarPlayHostActivity : ComponentActivity() {
     private var failurePendingAfterMenu: CarPlayStatus.Failed? = null
     private val shuttingDown = AtomicBoolean(false)
     private val mainHandler = Handler(Looper.getMainLooper())
+
+    /**
+     * On-screen frame-rate overlay, ported from EasyPlay 10-80 ("显示画面帧率（输出 / 接收）").
+     * It samples the sink's cumulative counters once a second and never affects the session: the view
+     * is not clickable, not focusable and hidden unless the setting is on and a session is running.
+     */
+    private var showVideoFps = false
+    private var fpsView: TextView? = null
+    private var fpsReporting = false
+    private val fpsMeter = LiveVideoMeter()
+    private val reportVideoFps = object : Runnable {
+        override fun run() {
+            fpsReporting = false
+            if (!shouldShowVideoFps()) {
+                refreshVideoFps()
+                return
+            }
+            val reading = fpsMeter.update(sink?.liveVideoCounters(), System.nanoTime())
+            val view = fpsView ?: return
+            if (reading != null) {
+                view.text = getString(R.string.show_video_fps_format, reading.shownFps, reading.receivedFps)
+                view.visibility = View.VISIBLE
+            }
+            fpsReporting = true
+            mainHandler.postDelayed(this, VIDEO_FPS_INTERVAL_MILLIS)
+        }
+    }
     private val teardownExecutor: ExecutorService = Executors.newSingleThreadExecutor()
     private val airPlayCommandExecutor: ExecutorService = Executors.newSingleThreadExecutor()
     private val logLines = ArrayDeque<LogEntry>()
@@ -595,6 +623,7 @@ class CarPlayHostActivity : ComponentActivity() {
         model = AirPlayPersistence.loadModel(this)
         oemLabel = AirPlayPersistence.loadOemLabel(this)
         fps = AirPlayPersistence.loadFps(this)
+        showVideoFps = AirPlayPersistence.loadShowVideoFps(this)
         widthPhysicalMm = AirPlayPersistence.loadWidthPhysicalMm(this)
         physicalSizeBasis = AirPlayPersistence.loadPhysicalSizeBasis(this)
         AirPlayPersistence.loadMaximumDetectedDisplay(this).let { (width, height) ->
@@ -748,6 +777,7 @@ class CarPlayHostActivity : ComponentActivity() {
         }
         logThemeState(ThemeModeDiagnostics.Source.START, resources.configuration)
         mainHandler.removeCallbacks(pollConfiguration)
+        mainHandler.removeCallbacks(reportVideoFps)
         mainHandler.post(pollConfiguration)
         CenterMapOverlay.onDiPlayScreenShown()
         homeMonitor?.stop()
@@ -912,6 +942,7 @@ class CarPlayHostActivity : ComponentActivity() {
         DiPlayScreenState.carPlayHostVisible = false
         logThemeState(ThemeModeDiagnostics.Source.STOP, resources.configuration)
         mainHandler.removeCallbacks(pollConfiguration)
+        mainHandler.removeCallbacks(reportVideoFps)
         super.onStop()
         if (!isFinishing && !isChangingConfigurations) CenterMapOverlay.scheduleShow()
     }
@@ -1004,6 +1035,7 @@ class CarPlayHostActivity : ComponentActivity() {
         mainHandler.removeCallbacks(applyDisplaySize)
         mainHandler.removeCallbacks(expireOldLogLines)
         mainHandler.removeCallbacks(pollConfiguration)
+        mainHandler.removeCallbacks(reportVideoFps)
         currentSurface?.let { surface ->
             sink?.clearSurface(SCREEN_TYPE_MAIN, surface)
             sink?.clearSurface(SCREEN_TYPE_ALT, surface)
@@ -1196,6 +1228,27 @@ class CarPlayHostActivity : ComponentActivity() {
         // light-themed app the wait turned into four seconds of grey that matched nothing else on screen.
         // The panel itself stays transparent over video, as it always was.
         root.addView(viewport, FrameLayout.LayoutParams(-1, -1))
+        // Frame-rate overlay (EasyPlay 10-80 parity). Mounted last so the picture/corner-mask/touch/
+        // preparation order above stays exactly as the layout tests assert; being non-clickable it never
+        // takes a CarPlay touch, and it is GONE unless a session is running with the setting on.
+        val fpsText = TextView(this).apply {
+            setTextSize(12f)
+            setTextColor(Color.WHITE)
+            setBackgroundColor(0x99000000.toInt())
+            setPadding(dp(8), dp(4), dp(8), dp(4))
+            visibility = View.GONE
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            isClickable = false
+            isFocusable = false
+        }
+        root.addView(
+            fpsText,
+            FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.END).apply {
+                topMargin = dp(12)
+                marginEnd = dp(12)
+            },
+        )
+        fpsView = fpsText
         var preparationHeight = -1
         fun updatePreparationLayout() {
             val height = viewport.height - viewport.paddingTop - viewport.paddingBottom
@@ -1513,6 +1566,24 @@ class CarPlayHostActivity : ComponentActivity() {
                     updateResolutionMenu()
                 },
             ),
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = dp(24) },
+        )
+
+        // EasyPlay 10-80's "显示画面帧率（输出 / 接收）": a diagnostic overlay on the CarPlay picture.
+        // It never changes the session, so it applies immediately instead of at the next connection.
+        content.addView(
+            settingsSwitchRow(
+                label = getString(R.string.show_video_fps),
+                checked = showVideoFps,
+                description = getString(R.string.show_video_fps_description),
+            ) { checked ->
+                showVideoFps = checked
+                AirPlayPersistence.saveShowVideoFps(this, checked)
+                refreshVideoFps()
+            },
             LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -2635,6 +2706,25 @@ class CarPlayHostActivity : ComponentActivity() {
         )
     }
 
+    /** Whether the overlay should be sampling: setting on, session running, settings menu closed. */
+    private fun shouldShowVideoFps(): Boolean =
+        showVideoFps && !menuOpen && activeAirPlaySession != null && fpsView != null
+
+    /** Starts or stops the one-second sampling to match [shouldShowVideoFps]. */
+    private fun refreshVideoFps() {
+        if (!shouldShowVideoFps()) {
+            mainHandler.removeCallbacks(reportVideoFps)
+            fpsReporting = false
+            fpsMeter.reset()
+            fpsView?.visibility = View.GONE
+            return
+        }
+        if (!fpsReporting) {
+            fpsReporting = true
+            mainHandler.post(reportVideoFps)
+        }
+    }
+
     private fun settingsSwitchRow(
         label: String,
         checked: Boolean,
@@ -3587,6 +3677,7 @@ class CarPlayHostActivity : ComponentActivity() {
                     }
                     activeAirPlaySession = session
                     CarPlayBackgroundSession.active = true
+                    refreshVideoFps()
                     reconnectAttempts = 0
                     logThemeState(ThemeModeDiagnostics.Source.SESSION_ACTIVE, resources.configuration)
                     syncAirPlayDarkMode(ThemeModeDiagnostics.Source.SESSION_ACTIVE)
@@ -3673,6 +3764,7 @@ class CarPlayHostActivity : ComponentActivity() {
                     if (controllerGeneration != restartGeneration || startupRetryStopped) return@runOnUiThread
                     startupRetryBudget.disconnected()
                     activeAirPlaySession = null
+                    refreshVideoFps()
                     CarPlayBackgroundSession.active = false
                     if (menuOpen) {
                         recoveryPendingAfterMenu = true
@@ -4249,6 +4341,7 @@ class CarPlayHostActivity : ComponentActivity() {
             }
         }
         menuOpen = true
+        refreshVideoFps()
         gestureOverlay?.visibility = View.GONE
         // Nothing of the picture is visible under the menu, so the mask is hidden with it; the
         // persisted flag is only re-applied when the menu closes.
@@ -4303,6 +4396,7 @@ class CarPlayHostActivity : ComponentActivity() {
     private fun finishSettingsMenu(prefix: String, reconnect: Boolean) {
         if (!menuOpen) return
         menuOpen = false
+        refreshVideoFps()
         settingsMenu?.visibility = View.GONE
         gestureOverlay?.visibility = View.VISIBLE
         // The corner mask is hidden while the menu covers the screen, whatever the switch says.
@@ -4948,6 +5042,9 @@ class CarPlayHostActivity : ComponentActivity() {
 
         /** Grace before the process exits with a finished screen; see `onDestroy`. */
         private const val PROCESS_EXIT_DELAY_MILLIS = 400L
+
+        /** Overlay sampling period, as EasyPlay uses (one second). */
+        private const val VIDEO_FPS_INTERVAL_MILLIS = 1_000L
         /** Rows the connecting checklist may occupy; see `renderConnectChecklist`. */
         private const val CHECKLIST_VISIBLE_NODES = 5
         const val SCREEN_TYPE_MAIN = 110

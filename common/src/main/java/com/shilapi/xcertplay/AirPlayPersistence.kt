@@ -61,6 +61,9 @@ object AirPlayPersistence {
     private const val KEY_CARPLAY_NIGHT_MODE = "carplay_night_mode"
     private const val KEY_AMBIENT_LUX_THRESHOLD = "ambient_lux_threshold"
     private const val KEY_FPS = "display_fps"
+
+    /** On-screen "输出 / 接收 FPS" overlay; off by default (EasyPlay 10-80's `showVideoFps`). */
+    private const val KEY_SHOW_VIDEO_FPS = "show_video_fps"
     private const val KEY_MEDIA_BUFFER_MS = "media_buffer_ms"
     private const val KEY_MAIN_BUFFERED_AUDIO = "main_buffered_audio"
     private const val KEY_CLUSTER_MAP = "cluster_map_enabled"
@@ -485,6 +488,16 @@ object AirPlayPersistence {
     fun saveFps(context: Context, fps: Int) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putInt(KEY_FPS, AirPlayDisplaySettings.sanitizeFps(fps))
+            .apply()
+    }
+
+    /** The on-screen frame-rate overlay; purely diagnostic, off by default. */
+    fun loadShowVideoFps(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_SHOW_VIDEO_FPS, false)
+
+    fun saveShowVideoFps(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putBoolean(KEY_SHOW_VIDEO_FPS, enabled)
             .apply()
     }
 

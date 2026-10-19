@@ -239,6 +239,12 @@ class AndroidMediaSink(
         videoDiagnosticHandlers[type] = handler
     }
 
+    /**
+     * Cumulative counters of the main screen's decoder, for the on-screen "显示画面帧率" overlay
+     * (EasyPlay 10-80 parity). Null until the main decoder exists.
+     */
+    fun liveVideoCounters(): LiveVideoCounters? = videoDecoders[110]?.liveVideoCounters()
+
     private fun requestVideoRecovery(type: Int) {
         if (!recoveryPending.compareAndSet(false, true)) return
         try {
@@ -544,6 +550,18 @@ private class VideoDecoder(
     private val outputBufferInfo = MediaCodec.BufferInfo()
     // The main screen keeps the historical log format; other screens are labelled.
     private val stats = VideoStats(statsLabel ?: if (streamType == 110) "" else " stream=$streamType")
+
+    /**
+     * Cumulative counters for the on-screen FPS overlay (EasyPlay 10-80's "显示画面帧率").
+     *
+     * [VideoStats] resets its counters every five seconds for the log line, so the overlay samples these
+     * totals instead and derives a rate over its own one-second window.
+     */
+    private val liveReceived = java.util.concurrent.atomic.AtomicLong()
+    private val liveRendered = java.util.concurrent.atomic.AtomicLong()
+
+    fun liveVideoCounters(): LiveVideoCounters = LiveVideoCounters(liveReceived.get(), liveRendered.get())
+
     private val thread = WorkerThreads.create({
         android.os.Process.setThreadPriority(com.shilapi.xcertplay.airplay.VideoThreadPriority.current())
         run()
@@ -555,6 +573,7 @@ private class VideoDecoder(
 
     fun submit(nalus: ByteArray) {
         stats.onReceived(nalus.size)
+        liveReceived.incrementAndGet()
         // Data is arriving from the phone; the retry guard cares whether any of it ever renders.
         receivedSinceConfigure++
         queue.offer(VideoJob.Frame(nalus))
@@ -563,6 +582,7 @@ private class VideoDecoder(
     /** Takes ownership of a pooled frame; it is released once the decoder has fed it to the codec. */
     fun submit(frame: OwnedVideoFrame) {
         stats.onReceived(frame.length)
+        liveReceived.incrementAndGet()
         receivedSinceConfigure++
         queue.offer(VideoJob.Frame(frame.bytes, length = frame.length, owned = frame))
     }
@@ -926,6 +946,7 @@ private class VideoDecoder(
                     codec.releaseOutputBuffer(index, render)
                     if (render) {
                         stats.onRendered()
+                liveRendered.incrementAndGet()
                         outputFramesSinceConfigure++
                     }
                     // Without a surface nothing can be presented yet; only a refused stale frame counts.

@@ -205,6 +205,9 @@
     <string name="exit_application">結束 App</string>
     <string name="follow_instrument_theme_and_map_card">跟隨儀表板主題和地圖卡片</string>
     <string name="frame_rate">影格率</string>
+    <string name="show_video_fps">顯示畫面影格率</string>
+    <string name="show_video_fps_description">在 CarPlay 畫面右上角顯示實際輸出與接收影格率。僅供診斷，不影響投影。</string>
+    <string name="show_video_fps_format">輸出 %1$d / 接收 %2$d FPS</string>
     <string name="full_screen">全螢幕顯示</string>
     <string name="fullscreen">全螢幕</string>
     <string name="getting_carplay_ready">正在準備 CarPlay…</string>

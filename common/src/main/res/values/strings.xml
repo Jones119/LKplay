@@ -214,6 +214,9 @@
     <string name="audio_decoder_unavailable">Not available on this head unit (%1$s)</string>
     <string name="follow_instrument_theme_and_map_card">Follow instrument theme and map card</string>
     <string name="frame_rate">Frame rate</string>
+    <string name="show_video_fps">Show frame rate</string>
+    <string name="show_video_fps_description">Draws the rendered and received frame rates in the corner of the CarPlay picture. Diagnostic only; it does not change the session.</string>
+    <string name="show_video_fps_format">Shown %1$d / received %2$d FPS</string>
     <string name="full_screen">Full screen</string>
     <string name="fullscreen">Fullscreen</string>
     <string name="getting_carplay_ready">Getting CarPlay ready…</string>
