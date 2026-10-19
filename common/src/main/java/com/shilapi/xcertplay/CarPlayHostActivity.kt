@@ -3736,7 +3736,7 @@ class CarPlayHostActivity : ComponentActivity() {
             CarPlayStatus.WaitingForReenumeration to R.string.status_waiting_reenumeration,
             CarPlayStatus.OpeningDataPaths to R.string.opening_usb_data_paths,
             CarPlayStatus.Pairing to R.string.pairing_with_iphone,
-            CarPlayStatus.AttachingNetwork to R.string.status_attaching_ncm,
+            CarPlayStatus.AttachingNetwork to R.string.status_attaching_airplay_lwip,
             CarPlayStatus.RunningControl to R.string.carplay_control_running,
         )
 

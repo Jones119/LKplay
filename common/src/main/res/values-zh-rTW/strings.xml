@@ -75,6 +75,7 @@
     <string name="status_hotspot_ready">熱點已就緒：%1$s、%2$s、%3$s，頻道 %4$s</string>
     <string name="status_waiting_reenumeration">正在等待 iPhone 重新列舉</string>
     <string name="status_attaching_ncm">正在連線 NCM/AirPlay 網路</string>
+    <string name="status_attaching_airplay_lwip">正在接入 AirPlay 網路（lwIP）</string>
     <string name="status_failed">失敗：%1$s</string>
     <string name="msg_car_hotspot_off">車機熱點「%1$s」尚未開啟。請在車機設定中開啟後再連線。</string>
     <string name="home_public_preview">公開預覽 ·  </string>
