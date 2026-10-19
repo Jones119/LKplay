@@ -269,6 +269,8 @@ class CarPlayHostActivity : ComponentActivity() {
      */
     private var connectNodeIndex = 0
     private var connectNodeFailed = false
+    /** First status of this attempt, so the log can say how long each checklist node took (doc 99). */
+    private var connectStartedAtMs = 0L
     /**
      * True once any controller status has been reported.
      *
@@ -3773,6 +3775,7 @@ class CarPlayHostActivity : ComponentActivity() {
      * answer to "where did it stop", which a rolling log cannot give once the retry overwrites it.
      */
     private fun trackConnectNode(status: CarPlayStatus) {
+        if (connectStartedAtMs == 0L) connectStartedAtMs = SystemClock.elapsedRealtime()
         connectNodeSeen = true
         if (status is CarPlayStatus.Failed) {
             connectNodeFailed = true
@@ -4761,6 +4764,7 @@ class CarPlayHostActivity : ComponentActivity() {
         // reaches the screen at all (the owner saw the status line stay on MFi until CarPlay appeared).
         appendLog(
             "CHECKLIST render node=$connectNodeIndex failed=$connectNodeFailed seen=$connectNodeSeen " +
+                "elapsedMs=${if (connectStartedAtMs == 0L) 0L else SystemClock.elapsedRealtime() - connectStartedAtMs} " +
                 "attached=${list.parent != null}",
         )
         list.removeAllViews()

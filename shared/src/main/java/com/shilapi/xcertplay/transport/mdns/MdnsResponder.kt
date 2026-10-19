@@ -25,6 +25,9 @@ internal interface MdnsQuerySocket {
 
     fun setTimeout(fd: Int, millis: Int): Int
 
+    /** Lets a new session rebind 5353 while the previous responder is still winding down. */
+    fun reuseAddress(fd: Int): Int = 0
+
     fun close(fd: Int)
 
     companion object {
@@ -33,6 +36,9 @@ internal interface MdnsQuerySocket {
 
         /** lwIP's value for SO_RCVTIMEO; the platform's 20 would be refused with ENOPROTOOPT. */
         const val SO_RCVTIMEO = 0x1006
+
+        /** lwIP's SO_REUSEADDR; the platform's 2 is refused by lwIP (see 1fba7a21). */
+        const val SO_REUSEADDR = 0x0004
 
         fun over(jni: UserSpaceNetworkJni): MdnsQuerySocket = object : MdnsQuerySocket {
             override fun open(): Int = jni.nativeSocket(MdnsDatagramSocket.SOCK_DGRAM)
@@ -51,6 +57,9 @@ internal interface MdnsQuerySocket {
 
             override fun setTimeout(fd: Int, millis: Int): Int =
                 jni.nativeSetSockOptInt(fd, SOL_SOCKET, SO_RCVTIMEO, millis)
+
+            override fun reuseAddress(fd: Int): Int =
+                jni.nativeSetSockOptInt(fd, SOL_SOCKET, SO_REUSEADDR, 1)
 
             override fun close(fd: Int) {
                 jni.nativeClose(fd)
@@ -83,6 +92,7 @@ internal class MdnsResponder(
             return false
         }
         try {
+            socket.reuseAddress(fd)
             val bound = socket.bind(fd, ANY_V6, DnsSdRecords.PORT)
             if (bound != 0) {
                 diagnostic("mdns: could not bind ${DnsSdRecords.PORT} (errno ${-bound})")

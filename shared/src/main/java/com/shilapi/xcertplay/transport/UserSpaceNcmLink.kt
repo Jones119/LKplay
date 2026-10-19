@@ -29,6 +29,7 @@ internal class UserSpaceNcmLink(
     val hostMac: ByteArray? get() = bridge.hostMac
 
     private val running = AtomicBoolean(false)
+    private val firstFrameLogged = AtomicBoolean(false)
     private val injectedFrames = AtomicLong(0)
     private val injectedBytes = AtomicLong(0)
     private val writtenFrames = AtomicLong(0)
@@ -70,6 +71,11 @@ internal class UserSpaceNcmLink(
                 return
             } ?: continue
             if (frame.isEmpty()) continue
+            if (firstFrameLogged.compareAndSet(false, true)) {
+                // Distinguishes "the phone never spoke" from "we dropped it" when the connect step is slow
+                // (docs/_digest/99): this line marks the phone's first frame on the NCM link.
+                onDiagnostic("userspace NCM first inbound frame bytes=${frame.size}")
+            }
             val result = jni.nativeInjectFrame(frame, frame.size)
             if (result == 0) {
                 injectedFrames.incrementAndGet()

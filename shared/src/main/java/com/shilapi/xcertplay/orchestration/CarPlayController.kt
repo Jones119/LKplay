@@ -1982,7 +1982,21 @@ class CarPlayController(
                     )
                     runCatching {
                         val message = com.shilapi.xcertplay.transport.mdns.DnsSdMessages.announcement(advertised)
-                        announcer.announce(message)
+                        // Two announcements 200 ms apart: the old 1 s gap only delayed the iAP2 control loop,
+                        // and the phone is not browsing this early anyway. Repeated announcements follow
+                        // asynchronously while the phone brings its CarPlay stack up (docs/_digest/99).
+                        announcer.announce(message, times = 2, gapMillis = 200L)
+                        Thread {
+                            runCatching {
+                                Thread.sleep(2_500L)
+                                announcer.announce(message, times = 1)
+                                Thread.sleep(2_500L)
+                                announcer.announce(message, times = 1)
+                            }.onFailure { error -> debugLog("mdns: repeat announcement stopped: ${error.message}") }
+                        }.apply {
+                            isDaemon = true
+                            name = "mdns-repeat"
+                        }.start()
                     }.onFailure { error -> debugLog("mdns: announcement failed: ${error.message}") }
 
                     // Answering the phone's queries is the other half of DNS-SD: the announcement alone was
@@ -1995,7 +2009,9 @@ class CarPlayController(
                         ::debugLog,
                     )
                     Thread {
-                        runCatching { responder.run(advertised) }
+                        // Stop when this controller closes: otherwise the responder keeps 5353 bound on a dead
+                        // link and the next attempt fails to bind (observed 2026-10-20, errno 98).
+                        runCatching { responder.run(advertised, stop = { closed }) }
                             .onFailure { error -> debugLog("mdns: query loop failed: ${error.message}") }
                     }.apply {
                         isDaemon = true
