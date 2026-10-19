@@ -173,12 +173,24 @@ class NcmUsbBridge internal constructor(
         var loggedFailingPoll = false
         var polls = 0
         val startedNs = System.nanoTime()
+        Log.i(
+            IphoneCarPlayConfiguration.TAG,
+            "ncm status probe started endpoint=0x${endpoint.address.toString(16)} " +
+                "type=${endpoint.type} maxPacket=${endpoint.maxPacketSize} buffer=${buffer.size}",
+        )
         while (statusRunning.get()) {
             // Short synchronous polls keep this thread out of JNI critical sections most of the time;
             // notifications are rare, small interrupt packets that are only logged.
             val transferred = try {
                 connection.bulkTransfer(endpoint, buffer, buffer.size, STATUS_POLL_TIMEOUT_MILLIS)
-            } catch (_: RuntimeException) {
+            } catch (error: RuntimeException) {
+                // Evidence for docs/_digest/99: an exception here means the bulk ioctl refuses this
+                // interrupt endpoint, so the phone's notifications can never be consumed.
+                Log.i(
+                    IphoneCarPlayConfiguration.TAG,
+                    "ncm status poll threw ${error.javaClass.simpleName}: ${error.message} " +
+                        "endpoint=0x${endpoint.address.toString(16)} type=${endpoint.type}",
+                )
                 return
             }
             polls++
