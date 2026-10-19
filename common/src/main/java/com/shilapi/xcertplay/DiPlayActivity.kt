@@ -130,7 +130,6 @@ class DiPlayActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         languagePreferenceAtCreate = AppLocale.preference(this)
-        WheelKeyService.restoreIfNeeded(this)
         WindowCompat.setDecorFitsSystemWindows(window, true)
         if (Build.VERSION.SDK_INT >= 21) { window.statusBarColor = BG; window.navigationBarColor = BG } // CS11: API21+；4.4 由主题值兜底
         WindowInsetsControllerCompat(window, window.decorView).apply {
@@ -285,7 +284,6 @@ class DiPlayActivity : ComponentActivity() {
             !CarPlayBackgroundSession.hasSession()
     }
     override fun onPause() {
-        WheelKeyService.cancelLearning()
         pausedForAdbSwitchChange = adbSwitchChangePending
         handler.removeCallbacks(tick)
         super.onPause()
@@ -293,7 +291,6 @@ class DiPlayActivity : ComponentActivity() {
 
     override fun onDestroy() {
         cancelUsbPermissionSetup()
-        WheelKeyService.cancelLearning()
         super.onDestroy()
     }
 
@@ -309,8 +306,6 @@ class DiPlayActivity : ComponentActivity() {
             resources.configuration.screenHeightDp < 450
 
     private fun render() {
-        // A pending assignment belongs to the widgets being replaced, never to another page.
-        WheelKeyService.cancelLearning()
         // A restore still waiting for layout keeps its target: the old page was never laid out.
         val previousScrollY = (pendingScrollY ?: rootScroll?.scrollY)?.takeIf { renderedPage == page }
         status = null; connectButton = null; disconnectButton = null; lastRunning = null; carButtonCard = null
@@ -726,7 +721,7 @@ class DiPlayActivity : ComponentActivity() {
             ) { enabled ->
                 if (enabled) promptEnableUsbAutoConfirm()
                 else {
-                    if (!UsbAutoConfirmService.openSettings(this)) toast(getString(R.string.wheel_keys_no_settings))
+                    if (!UsbAutoConfirmService.openSettings(this)) toast(getString(R.string.settings_screen_unavailable))
                     render()
                 }
             }
@@ -838,7 +833,7 @@ class DiPlayActivity : ComponentActivity() {
                 toggle(card, getString(label), getString(R.string.hide_the_car_s_system_bars_while_carplay_is_open), checked, save = onChanged)
             }
         }
-        section(content, getString(R.string.car_button_in_carplay), R.drawable.ic_dp_car) { card -> carButtonCard = card; carButtonControls(card); wheelKeyControls(card) }
+        section(content, getString(R.string.car_button_in_carplay), R.drawable.ic_dp_car) { card -> carButtonCard = card; carButtonControls(card) }
         section(content, getString(R.string.audio_routing), R.drawable.ic_dp_audio) { card ->
             toggle(card, getString(R.string.contrib_audio_home_toggle_audio_focus), getString(R.string.contrib_audio_home_toggle_audio_focus_desc), AirPlayPersistence.loadAudioFocusEnabled(this)) { AirPlayPersistence.saveAudioFocusEnabled(this, it) }
             if (resources.getBoolean(R.bool.config_advanced_audio_channel_mapping)) {
@@ -1490,7 +1485,7 @@ class DiPlayActivity : ComponentActivity() {
             }
             .setNeutralButton(getString(R.string.btn_open_accessibility_setting)) { _, _ ->
                 if (!UsbAutoConfirmService.openSettings(this)) {
-                    toast(getString(R.string.wheel_keys_no_settings))
+                    toast(getString(R.string.settings_screen_unavailable))
                 }
             }
             .setNegativeButton(getString(R.string.cancel)) { _, _ ->
@@ -1560,7 +1555,7 @@ class DiPlayActivity : ComponentActivity() {
 
         val autoConfirmOn = UsbPermissionSetup.Permission.ACCESSIBILITY.granted(this)
         body.addView(button(if (autoConfirmOn) getString(R.string.usb_auto_confirm_status_on) else getString(R.string.btn_open_accessibility_setting), false) {
-            if (!UsbAutoConfirmService.openSettings(this)) toast(getString(R.string.wheel_keys_no_settings))
+            if (!UsbAutoConfirmService.openSettings(this)) toast(getString(R.string.settings_screen_unavailable))
         }, matchButton(0, 56))
 
         UsbPermissionSetup.snapshot(this).forEach { (permission, granted) ->
@@ -1591,62 +1586,6 @@ class DiPlayActivity : ComponentActivity() {
             .setView(ScrollView(this).apply { addView(body) })
             .setPositiveButton(getString(R.string.close)) { _, _ -> render() }
             .show()
-    }
-
-    /** Steering-wheel keys for the CarPlay joystick: the switch, the key service and the key roles. */
-    private fun wheelKeyControls(card: LinearLayout) {
-        toggle(card, getString(R.string.wheel_joystick), getString(R.string.wheel_joystick_description),
-            WheelZoomSettings.joystick(this)) {
-            WheelZoomSettings.setJoystick(this, it)
-            render()
-        }
-        val joystick = WheelZoomSettings.joystick(this)
-        if (!joystick) return
-        val connected = WheelKeyService.connected()
-        card.addView(label(getString(when {
-            connected -> R.string.wheel_keys_service_on
-            WheelKeyService.enabledInSettings(this) -> R.string.wheel_keys_service_starting
-            else -> R.string.wheel_keys_service_off
-        }), 14, if (connected) MUTED else WARNING))
-        if (!connected) {
-            card.addView(button(getString(R.string.wheel_keys_enable_adb), false) {
-                com.shilapi.xcertplay.compat.WorkerThreads.start("diplay-wheel-keys-enable") {
-                    val access = WheelKeyService.enableOverAdb(this)
-                    runOnUiThread {
-                        if (access != com.shilapi.xcertplay.adb.LocalAdb.Access.READY) {
-                            toast(getString(R.string.wheel_keys_adb_failed, access.name))
-                        }
-                        render()
-                    }
-                }
-            }, matchButton(10, 56))
-            card.addView(button(getString(R.string.wheel_keys_open_settings), false) {
-                runCatching { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
-                    .onFailure { toast(getString(R.string.wheel_keys_no_settings)) }
-            }, matchButton(10, 56))
-        }
-        toggle(card, getString(R.string.wheel_joystick_auto_off), getString(R.string.wheel_joystick_auto_off_description),
-            WheelZoomSettings.joystickAutoOff(this)) { WheelZoomSettings.setJoystickAutoOff(this, it) }
-        for (role in WheelZoomSettings.Role.entries) {
-            val name = getString(when (role) {
-                WheelZoomSettings.Role.MODE -> R.string.wheel_key_role_back
-                WheelZoomSettings.Role.ZOOM_IN, WheelZoomSettings.Role.PREVIOUS -> R.string.wheel_key_role_previous
-                WheelZoomSettings.Role.ZOOM_OUT, WheelZoomSettings.Role.NEXT -> R.string.wheel_key_role_next
-                WheelZoomSettings.Role.JOYSTICK -> R.string.wheel_key_role_joystick
-                WheelZoomSettings.Role.SELECT -> R.string.wheel_key_role_select
-            })
-            lateinit var assign: android.widget.Button
-            assign = button(getString(R.string.wheel_key_assign, name, WheelZoomSettings.key(this, role).toString()), false) {
-                val started = WheelKeyService.learn(role, cancelled = {
-                    runOnUiThread { assign.text = getString(R.string.wheel_key_assign, name, WheelZoomSettings.key(this, role).toString()) }
-                }) { _, key ->
-                    runOnUiThread { assign.text = getString(R.string.wheel_key_assign, name, key.toString()) }
-                }
-                if (started) assign.text = getString(R.string.wheel_key_press, name)
-                else toast(getString(R.string.wheel_keys_service_off))
-            }
-            card.addView(assign, matchButton(10, 56))
-        }
     }
 
     private fun hasPreciseLocation() =
