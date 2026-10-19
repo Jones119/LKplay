@@ -220,6 +220,52 @@ class IphoneUsbHost(
     }
 
     /**
+     * Moves the iPhone off its CarPlay configuration - the wired teardown's "unplug".
+     *
+     * A session that ends while the phone stays in configuration 6 leaves it unable to start the
+     * media plane on the next connect: `request-transition` re-arms it, `reuse-descriptors` does not
+     * (tablet bench 2026-10-19, four consecutive stalls). Sending the vendor request alone does not
+     * move it either, so the configuration itself is switched, which makes the next connect see
+     * "not in the CarPlay configuration" and re-select it.
+     *
+     * Every interface this app holds must already be released when this runs. The target comes from
+     * our own descriptor parse, so API 19 (USBDEVFS_SETCONFIGURATION) and API 21+ both work.
+     *
+     * Returns false when the phone offers no other configuration or the kernel refused the switch.
+     */
+    fun resetCarPlayConfiguration(device: UsbDevice): Boolean {
+        val tag = IphoneCarPlayConfiguration.TAG
+        val connection = usbManager.openDevice(device) ?: run {
+            Log.i(tag, "configuration reset: could not open the iPhone")
+            return false
+        }
+        return try {
+            val parsed = connection.rawDescriptors?.let { LegacyNcmDescriptors.parse(it) }.orEmpty()
+            val carPlayId = IphoneCarPlayConfiguration.find(device)?.id ?: CARPLAY_CONFIGURATION_FALLBACK_ID
+            val targetId = parsed.map { it.id }.firstOrNull { it != carPlayId }
+            if (targetId == null) {
+                Log.i(tag, "configuration reset: no other configuration parsed=${parsed.map { it.id }}")
+                return false
+            }
+            val switched = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                Api21Configuration.resetTo(connection, device, targetId)
+            } else if (LegacyUsbNative.available) {
+                // API 19 has no UsbDeviceConnection.setConfiguration; EasyPlay's path is the ioctl.
+                LegacyUsbNative.setConfiguration(connection.fileDescriptor, targetId) == 0
+            } else {
+                false
+            }
+            Log.i(tag, "configuration reset carPlay=$carPlayId target=$targetId ok=$switched")
+            switched
+        } catch (error: Throwable) {
+            Log.w(tag, "configuration reset failed", error)
+            false
+        } finally {
+            runCatching { connection.close() }
+        }
+    }
+
+    /**
      * Opens LIVI's USBMUX bulk pipe on the re-enumerated iPhone.
      *
      * This repeats CarPlay configuration selection on the newly opened Android connection and
@@ -381,6 +427,12 @@ class IphoneUsbHost(
         private const val USB_VENDOR_DEVICE_IN = 0xc0
         private const val CARPLAY_CONFIGURATION_REQUEST = 0x52
         private const val CARPLAY_CONFIGURATION_INDEX = 0x0004
+
+        /**
+         * The CarPlay configuration id on every iPhone measured so far. Used only when the
+         * configuration list cannot be inspected (API 19) to pick something else to fall back to.
+         */
+        private const val CARPLAY_CONFIGURATION_FALLBACK_ID = 6
         private const val VENDOR_RESPONSE_LENGTH = 1
         private const val CONTROL_TRANSFER_TIMEOUT_MILLIS = 1_000
     }

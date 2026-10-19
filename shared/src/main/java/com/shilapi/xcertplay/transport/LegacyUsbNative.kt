@@ -24,6 +24,15 @@ internal object LegacyUsbNative {
     external fun setInterface(fileDescriptor: Int, interfaceNumber: Int, alternateSetting: Int): Int
 
     /**
+     * Selects a whole configuration (USBDEVFS_SETCONFIGURATION). API 21+ uses
+     * `UsbDeviceConnection.setConfiguration` instead; on API 19 this is the only way to move the
+     * iPhone off the CarPlay configuration during a teardown.
+     *
+     * 0 on success, a negative errno otherwise.
+     */
+    external fun setConfiguration(fileDescriptor: Int, configuration: Int): Int
+
+    /**
      * Reads a [setInterface] failure back into words. The native side encodes both attempts as
      * ioctl errno * 1000 + control-transfer errno, which is what separates "a driver holds this
      * interface" (EBUSY) from "the phone re-enumerated under us" (ENODEV/EPIPE) - the two candidates

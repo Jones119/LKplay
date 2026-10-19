@@ -726,6 +726,7 @@ class CarPlayController(
         // onSessionEnded 不一定会走到 —— 这里必须把借来的高频还回去，否则 CPU 会一直停在性能档。
         // 已还原过就是空操作（exitSession 有 applied 守卫）。
         applyGovernorForSession(false)
+        val detachDevice = wiredDevice
         synchronized(this) {
             if (closed) return
             closed = true
@@ -763,6 +764,16 @@ class CarPlayController(
                     } else {
                         closeBestEffort("CSM") { csm?.close() }
                         csm = null
+                        // Move the phone off the CarPlay configuration. That is what makes the next
+                        // connect re-select it instead of reusing it; reusing it is exactly the case
+                        // where the phone keeps the old session and never starts the media plane.
+                        // Runs here, after the link and the CSM released every interface we held:
+                        // a configuration switch is EBUSY while any of them is still claimed.
+                        if (detachDevice != null) {
+                            closeBestEffort("CarPlay configuration reset") {
+                                iphoneHost.resetCarPlayConfiguration(detachDevice)
+                            }
+                        }
                     }
                     closeBestEffort("USBMUX") { mux?.close() }
                     mux = null

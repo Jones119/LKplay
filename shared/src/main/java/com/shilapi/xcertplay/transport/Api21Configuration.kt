@@ -45,6 +45,20 @@ internal object Api21Configuration {
         return chosen
     }
 
+    /**
+     * Switches the device to configuration [id] - used by the wired teardown to move the iPhone off
+     * the CarPlay configuration so the next connect re-selects it. Returns false when that
+     * configuration is not exposed or the kernel refused the switch. API 19 uses
+     * [LegacyUsbNative.setConfiguration] instead.
+     */
+    @RequiresApi(21)
+    fun resetTo(connection: android.hardware.usb.UsbDeviceConnection, device: UsbDevice, id: Int): Boolean {
+        val target = (0 until device.configurationCount)
+            .map(device::getConfiguration)
+            .firstOrNull { it.id == id } ?: return false
+        return connection.setConfiguration(target)
+    }
+
     @RequiresApi(21)
     fun describe(configuration: UsbConfiguration): String =
         (0 until configuration.interfaceCount).joinToString(",") { index ->

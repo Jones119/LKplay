@@ -47,9 +47,24 @@ JNIEXPORT jint JNICALL Java_com_shilapi_xcertplay_transport_LegacyUsbNative_setI
     return (jint) -(select_errno * 1000 + (control_errno != 0 ? control_errno : 1));
 }
 
+// Moves the device to another configuration. Used by the wired teardown to put the iPhone back on a
+// non-CarPlay configuration, which is what makes the next connect re-select configuration 6 instead
+// of reusing it; the phone only re-arms CarPlay after that transition (docs/_digest, tablet bench
+// 2026-10-19). API 21+ has UsbDeviceConnection.setConfiguration(); API 19 has only this ioctl.
+JNIEXPORT jint JNICALL Java_com_shilapi_xcertplay_transport_LegacyUsbNative_setConfiguration(
+        JNIEnv *env, jobject self, jint file_descriptor, jint configuration) {
+    (void) env;
+    (void) self;
+    if (file_descriptor < 0 || configuration <= 0) return -EINVAL;
+    unsigned int value = (unsigned int) configuration;
+    if (ioctl(file_descriptor, USBDEVFS_SETCONFIGURATION, &value) == 0) return 0;
+    return -errno;
+}
+
 // Proves the toolchain and the library on the car before any of it carries traffic.
 JNIEXPORT jstring JNICALL Java_com_shilapi_xcertplay_transport_LegacyUsbNative_version(
         JNIEnv *env, jobject self) {
     (void) self;
-    return (*env)->NewStringUTF(env, "legacy_usb 1 (USBDEVFS_SETINTERFACE + USBDEVFS_CONTROL)");
+    return (*env)->NewStringUTF(
+            env, "legacy_usb 2 (USBDEVFS_SETINTERFACE + USBDEVFS_CONTROL + USBDEVFS_SETCONFIGURATION)");
 }
