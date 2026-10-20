@@ -34,6 +34,19 @@ typedef pthread_t sys_thread_t;
  * The sections are tiny and lwIP documents that they must be nestable, so this is a recursive mutex
  * rather than a spinlock.
  */
+/*
+ * Per-thread API semaphore for LWIP_NETCONN_SEM_PER_THREAD (docs/_digest/101).
+ *
+ * Without it every socket API call waits on the netconn's single op_completed semaphore. Two threads
+ * using one socket then consume each other's signal, a caller returns while its stack-allocated
+ * tcpip_msg is still queued, and the tcpip thread later calls whatever overwrote that stack frame.
+ * That is the crash the canary caught (posted_by=lwip_netconn_do_write, message content 0x02).
+ */
+sys_sem_t *sys_thread_sem_get(void);
+#define LWIP_NETCONN_THREAD_SEM_GET()   sys_thread_sem_get()
+#define LWIP_NETCONN_THREAD_SEM_ALLOC() ((void)sys_thread_sem_get())
+#define LWIP_NETCONN_THREAD_SEM_FREE()  ((void)0)
+
 typedef unsigned int sys_prot_t;
 sys_prot_t sys_arch_protect(void);
 void sys_arch_unprotect(sys_prot_t pval);

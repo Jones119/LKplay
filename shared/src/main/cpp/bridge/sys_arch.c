@@ -153,6 +153,59 @@ void sys_sem_signal(sys_sem_t *sem) {
     pthread_mutex_unlock(&s->mutex);
 }
 
+/* ── per-thread API semaphore (LWIP_NETCONN_SEM_PER_THREAD) ──────────────────────────────────── */
+
+/*
+ * One API-completion semaphore per thread instead of one per netconn. Two threads that use the same
+ * socket then wait on separate semaphores, so neither can consume the other's signal and return while
+ * its stack-allocated tcpip_msg is still queued - the corruption caught on 2026-10-20
+ * (docs/_digest/101).
+ *
+ * The slot lives in thread-local storage; its destructor frees the semaphore when the thread exits.
+ */
+static pthread_key_t g_thread_sem_key;
+static pthread_once_t g_thread_sem_once = PTHREAD_ONCE_INIT;
+
+static void destroy_thread_sem(void *value) {
+    sys_sem_t *slot = (sys_sem_t *)value;
+    if (slot != NULL) {
+        if (*slot != NULL) {
+            sys_sem_t sem = *slot;
+            sys_sem_free(&sem);
+        }
+        free(slot);
+    }
+}
+
+static void create_thread_sem_key(void) {
+    (void)pthread_key_create(&g_thread_sem_key, destroy_thread_sem);
+}
+
+sys_sem_t *sys_thread_sem_get(void) {
+    pthread_once(&g_thread_sem_once, create_thread_sem_key);
+    sys_sem_t *slot = (sys_sem_t *)pthread_getspecific(g_thread_sem_key);
+    if (slot != NULL) {
+        return slot;
+    }
+    slot = (sys_sem_t *)calloc(1, sizeof(sys_sem_t));
+    if (slot == NULL) {
+        return NULL;
+    }
+    sys_sem_t sem = NULL;
+    if (sys_sem_new(&sem, 0) != ERR_OK) {
+        free(slot);
+        return NULL;
+    }
+    *slot = sem;
+    if (pthread_setspecific(g_thread_sem_key, slot) != 0) {
+        sys_sem_t owned = sem;
+        sys_sem_free(&owned);
+        free(slot);
+        return NULL;
+    }
+    return slot;
+}
+
 u32_t sys_arch_sem_wait(sys_sem_t *sem, u32_t timeout) {
     sys_sem_impl *s = *sem;
     u32_t waited = 0;

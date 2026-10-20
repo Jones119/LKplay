@@ -50,6 +50,69 @@
 #include "lwip/etharp.h"
 #include "netif/ethernet.h"
 
+/* CS11: track who posted a stack-allocated tcpip message (docs/_digest/101). */
+#if !LWIP_TCPIP_CORE_LOCKING
+#include <pthread.h>
+#define TCPIP_MSG_TRACK_SLOTS 16
+static struct tcpip_msg_track {
+  struct tcpip_msg *msg;
+  const void *fn;
+  unsigned long thread;
+  u32_t posted_ms;
+  u8_t used;
+} s_track[TCPIP_MSG_TRACK_SLOTS];
+
+static void tcpip_track_post(struct tcpip_msg *msg, const void *fn) {
+  SYS_ARCH_DECL_PROTECT(lev);
+  int i;
+  SYS_ARCH_PROTECT(lev);
+  for (i = 0; i < TCPIP_MSG_TRACK_SLOTS; i++) {
+    if (!s_track[i].used) {
+      s_track[i].used = 1;
+      s_track[i].msg = msg;
+      s_track[i].fn = fn;
+      s_track[i].thread = (unsigned long)pthread_self();
+      s_track[i].posted_ms = sys_now();
+      break;
+    }
+  }
+  SYS_ARCH_UNPROTECT(lev);
+}
+
+static void tcpip_track_done(struct tcpip_msg *msg) {
+  SYS_ARCH_DECL_PROTECT(lev);
+  int i;
+  SYS_ARCH_PROTECT(lev);
+  for (i = 0; i < TCPIP_MSG_TRACK_SLOTS; i++) {
+    if (s_track[i].used && s_track[i].msg == msg) {
+      s_track[i].used = 0;
+      break;
+    }
+  }
+  SYS_ARCH_UNPROTECT(lev);
+}
+
+static void tcpip_track_report(struct tcpip_msg *msg) {
+  SYS_ARCH_DECL_PROTECT(lev);
+  int i;
+  u8_t found = 0;
+  SYS_ARCH_PROTECT(lev);
+  for (i = 0; i < TCPIP_MSG_TRACK_SLOTS; i++) {
+    if (s_track[i].used && s_track[i].msg == msg) {
+      LWIP_PLATFORM_DIAG(("tcpip: message was posted_by=%p thread=0x%lx ageMs=%u",
+                          s_track[i].fn, s_track[i].thread,
+                          (unsigned)(sys_now() - s_track[i].posted_ms)));
+      s_track[i].used = 0;
+      found = 1;
+      break;
+    }
+  }
+  SYS_ARCH_UNPROTECT(lev);
+  if (!found) {
+    LWIP_PLATFORM_DIAG(("tcpip: corrupted message was not in the tracking table"));
+  }
+}
+#endif /* !LWIP_TCPIP_CORE_LOCKING */
 #define TCPIP_MSG_VAR_REF(name)     API_VAR_REF(name)
 #define TCPIP_MSG_VAR_DECLARE(name) API_VAR_DECLARE(struct tcpip_msg, name)
 #define TCPIP_MSG_VAR_ALLOC(name)   API_VAR_ALLOC(struct tcpip_msg, MEMP_TCPIP_MSG_API, name, ERR_MEM)
@@ -171,6 +234,20 @@ tcpip_thread(void *arg)
 static void
 tcpip_thread_handle_msg(struct tcpip_msg *msg)
 {
+  /*
+   * CS11: the tablet died here on 2026-10-20 (SIGSEGV in lwip-tcpip, the called address was a heap
+   * pointer) because msg->msg.api_msg.function held garbage. Check the block's own marker before
+   * dispatching. A message that fails it is not freed: its type is suspect too, and freeing into the
+   * wrong pool would corrupt a second one. Leaking one entry (16 API + 64 INPKT) keeps the process
+   * alive and leaves the log line that says what kind of message was abandoned.
+   */
+  if (msg->canary != TCPIP_MSG_CANARY) {
+    tcpip_track_report(msg);
+    LWIP_PLATFORM_DIAG(("tcpip: corrupted message dropped type=%d canary=0x%08x api_fn=%p pbuf=%p",
+                        (int)msg->type, (unsigned)msg->canary,
+                        (void *)msg->msg.api_msg.function, (void *)msg->msg.inp.p));
+    return;
+  }
   switch (msg->type) {
 #if !LWIP_TCPIP_CORE_LOCKING
     case TCPIP_MSG_API:
@@ -253,6 +330,9 @@ tcpip_thread_handle_msg(struct tcpip_msg *msg)
       LWIP_ASSERT("tcpip_thread: invalid message", 0);
       break;
   }
+#if !LWIP_TCPIP_CORE_LOCKING
+  tcpip_track_done(msg);
+#endif
 }
 
 #ifdef TCPIP_THREAD_TEST
@@ -303,6 +383,7 @@ tcpip_inpkt(struct pbuf *p, struct netif *inp, netif_input_fn input_fn)
   }
 
   msg->type = TCPIP_MSG_INPKT;
+  msg->canary = TCPIP_MSG_CANARY;
   msg->msg.inp.p = p;
   msg->msg.inp.netif = inp;
   msg->msg.inp.input_fn = input_fn;
@@ -364,6 +445,7 @@ tcpip_callback(tcpip_callback_fn function, void *ctx)
   }
 
   msg->type = TCPIP_MSG_CALLBACK;
+  msg->canary = TCPIP_MSG_CANARY;
   msg->msg.cb.function = function;
   msg->msg.cb.ctx = ctx;
 
@@ -400,6 +482,7 @@ tcpip_try_callback(tcpip_callback_fn function, void *ctx)
   }
 
   msg->type = TCPIP_MSG_CALLBACK;
+  msg->canary = TCPIP_MSG_CANARY;
   msg->msg.cb.function = function;
   msg->msg.cb.ctx = ctx;
 
@@ -432,6 +515,7 @@ tcpip_timeout(u32_t msecs, sys_timeout_handler h, void *arg)
   }
 
   msg->type = TCPIP_MSG_TIMEOUT;
+  msg->canary = TCPIP_MSG_CANARY;
   msg->msg.tmo.msecs = msecs;
   msg->msg.tmo.h = h;
   msg->msg.tmo.arg = arg;
@@ -459,6 +543,7 @@ tcpip_untimeout(sys_timeout_handler h, void *arg)
   }
 
   msg->type = TCPIP_MSG_UNTIMEOUT;
+  msg->canary = TCPIP_MSG_CANARY;
   msg->msg.tmo.h = h;
   msg->msg.tmo.arg = arg;
   sys_mbox_post(&tcpip_mbox, msg);
@@ -496,6 +581,8 @@ tcpip_send_msg_wait_sem(tcpip_callback_fn fn, void *apimsg, sys_sem_t *sem)
 
   TCPIP_MSG_VAR_ALLOC(msg);
   TCPIP_MSG_VAR_REF(msg).type = TCPIP_MSG_API;
+  TCPIP_MSG_VAR_REF(msg).canary = TCPIP_MSG_CANARY;
+  tcpip_track_post(&TCPIP_MSG_VAR_REF(msg), (const void *)fn);
   TCPIP_MSG_VAR_REF(msg).msg.api_msg.function = fn;
   TCPIP_MSG_VAR_REF(msg).msg.api_msg.msg = apimsg;
   sys_mbox_post(&tcpip_mbox, &TCPIP_MSG_VAR_REF(msg));
@@ -538,6 +625,8 @@ tcpip_api_call(tcpip_api_call_fn fn, struct tcpip_api_call_data *call)
 
   TCPIP_MSG_VAR_ALLOC(msg);
   TCPIP_MSG_VAR_REF(msg).type = TCPIP_MSG_API_CALL;
+  TCPIP_MSG_VAR_REF(msg).canary = TCPIP_MSG_CANARY;
+  tcpip_track_post(&TCPIP_MSG_VAR_REF(msg), (const void *)fn);
   TCPIP_MSG_VAR_REF(msg).msg.api_call.arg = call;
   TCPIP_MSG_VAR_REF(msg).msg.api_call.function = fn;
 #if LWIP_NETCONN_SEM_PER_THREAD
@@ -581,6 +670,7 @@ tcpip_callbackmsg_new(tcpip_callback_fn function, void *ctx)
     return NULL;
   }
   msg->type = TCPIP_MSG_CALLBACK_STATIC;
+  msg->canary = TCPIP_MSG_CANARY;
   msg->msg.cb.function = function;
   msg->msg.cb.ctx = ctx;
   return (struct tcpip_callback_msg *)msg;
@@ -668,6 +758,8 @@ tcpip_callback_wait(tcpip_callback_fn function, void *ctx)
   }
 
   msg.type = TCPIP_MSG_CALLBACK_STATIC_WAIT;
+  msg.canary = TCPIP_MSG_CANARY;
+  tcpip_track_post(&msg, (const void *)function);
   msg.msg.cb_wait.function = function;
   msg.msg.cb_wait.ctx = ctx;
   msg.msg.cb_wait.sem = &sem;

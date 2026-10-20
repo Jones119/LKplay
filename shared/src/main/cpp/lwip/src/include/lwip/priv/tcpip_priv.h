@@ -127,8 +127,14 @@ enum tcpip_msg_type {
   TCPIP_MSG_CALLBACK_STATIC_WAIT
 };
 
+/* CS11: integrity marker for the message block itself (docs/_digest/101). The tablet crashed in
+ * tcpip_thread_handle_msg calling a heap pointer as the API handler, so the dispatch checks the
+ * block before using it and drops a corrupted message instead of taking the process down. */
+#define TCPIP_MSG_CANARY 0xC511CAFEu
+
 struct tcpip_msg {
   enum tcpip_msg_type type;
+  u32_t canary;
   union {
 #if !LWIP_TCPIP_CORE_LOCKING
     struct {

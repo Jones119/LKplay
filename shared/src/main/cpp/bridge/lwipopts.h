@@ -124,7 +124,7 @@
 #define DEFAULT_THREAD_PRIO             1
 #define LWIP_TCPIP_CORE_LOCKING         0
 #define LWIP_NETCONN_FULLDUPLEX         0
-#define LWIP_NETCONN_SEM_PER_THREAD     0
+#define LWIP_NETCONN_SEM_PER_THREAD     1  /* per-thread API sem: two threads on one socket must not steal signals (doc 101) */
 /*
  * Critical sections around memp/mem. Required because the RX pump calls tcpip_input() (which allocates a
  * tcpip message) while the tcpip thread frees messages from the same pool; without it the pool free list
