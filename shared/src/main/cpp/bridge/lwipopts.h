@@ -23,10 +23,10 @@
 #define LWIP_SOCKET_OFFSET              0
 
 /* ── Protocols ────────────────────────────────────────────────────────────────────────────────── */
-#define LWIP_IPV4                       0  /* the NCM link is IPv6-only (fe80::2 <-> the iPhone) */
+#define LWIP_IPV4                       0  /* the NCM link is IPv6-only (MAC-derived link-local <-> the iPhone) */
 #define LWIP_IPV6                       1
 #define LWIP_IPV6_ND                    1  /* neighbour discovery is how the iPhone is reached */
-#define LWIP_IPV6_AUTOCONFIG            0  /* we pin fe80::2, so no SLAAC */
+#define LWIP_IPV6_AUTOCONFIG            0  /* the link-local comes from the MAC (EUI-64), so no SLAAC */
 #define LWIP_IPV6_DHCP6                 0
 #define LWIP_IPV6_SEND_ROUTER_SOLICIT   0
 #define LWIP_ICMP6                      1  /* ND6 needs it */

@@ -5,16 +5,17 @@ import android.util.Log
 /** Which wired data path this head unit may use. */
 enum class NcmLegacyMode {
     /**
-     * Use the userspace NCM bridge; while it cannot carry a session yet, the legacy kernel netdev does
-     * (a **temporary** fallback - see the deprecation note on [NcmLegacyPolicy]).
+     * Use the userspace NCM bridge. It is the only wired transport this build has: when its native library
+     * is missing the session keeps the iAP2 control channel and says why, rather than quietly taking a path
+     * that needs root (docs/_digest/63).
      */
     AUTO,
 
-    /** Userspace bridge only - no kernel fallback. A diagnostic mode: it fails loudly instead. */
+    /**
+     * Userspace bridge only, and loud about it: when it cannot be driven the bring-up still probes the
+     * descriptors and the negotiation and names the missing piece instead of degrading silently.
+     */
     FORCE,
-
-    /** Legacy kernel netdev + root channel. Hidden debug fallback only; no product surface. */
-    KERNEL,
 }
 
 /** Whether the userspace NCM bridge can carry a session at all, and what it would be missing. */
@@ -39,12 +40,11 @@ internal object UserspaceNcmTransport {
     /**
      * This ROM has no TUN (docs/_digest/58 §1), so the userspace bridge can only carry AirPlay once it
      * owns a TCP/IP stack. Stage 1 vendored lwIP for that and stage 2 built it into the APK together with
-     * the Kotlin seam, so the stack now exists and only the library's presence decides
-     * `readiness` (docs/_digest/58 §7, §11).
+     * the Kotlin seam, so the stack now exists and only the library's presence decides `readiness`
+     * (docs/_digest/58 §7, §11).
      *
-     * Flipping this to true makes `AUTO` prefer the userspace transport on API 19 and lets FORCE name a
-     * missing library instead of a missing stack. The kernel netdev stays as the hidden
-     * `debug.diplay.ncm_legacy=kernel` debug fallback until the car retires it.
+     * The constant stays because the verdict it produces ([UserspaceNcmReadiness.MISSING_STACK]) is how a
+     * build that dropped lwIP would say so up front, instead of failing later inside a socket call.
      */
     const val stackImplemented = true
 
@@ -66,19 +66,19 @@ internal object UserspaceNcmTransport {
 /**
  * Which wired transport this head unit uses.
  *
- * **Product decision (2026-10-13)**: the kernel `cdc_ncm` netdev needs a root channel, and that channel
- * needs adb (the fire is `adb-ec ... ppp`, and without adbd on TCP it fails with "device not found" -
- * measured on the car, see docs/_digest/58 §9). A transport that needs adb and root is not shippable, so
- * the userspace NCM bridge is the product path and the kernel netdev is kept **only as a hidden debug
- * fallback** (`debug.diplay.ncm_legacy=kernel`) for car debugging and A/B while the userspace stack is
- * built. It is deleted with the first build that can carry traffic through the userspace bridge.
+ * **Product decision (2026-10-13, completed by `2ab6be92`)**: the kernel `cdc_ncm` netdev needed a root
+ * channel, and that channel needed adb (the fire was `adb-ec ... ppp`, and without adbd on TCP it failed
+ * with "device not found" - measured on the car, docs/_digest/63). A transport that needs adb and root is
+ * not shippable, so the userspace NCM bridge is the product path and the kernel netdev has been **deleted**
+ * together with its root fire and with the switch that used to select it. What is left is one transport and
+ * one diagnostic mode.
  *
  * There is deliberately no Settings switch: one shipping transport needs no choice.
  *
  * ```
- * adb shell setprop debug.diplay.ncm_legacy force   # userspace only (diagnostic)
- * adb shell setprop debug.diplay.ncm_legacy kernel  # retired, falls back to AUTO
- * adb shell setprop debug.diplay.ncm_legacy ''      # userspace preferred (default)
+ * adb shell setprop debug.diplay.ncm_legacy force   # userspace only + a probe when it is unavailable
+ * adb shell setprop debug.diplay.ncm_legacy kernel  # retired spelling, parses to AUTO (the path is gone)
+ * adb shell setprop debug.diplay.ncm_legacy ''      # userspace (default)
  * ```
  */
 internal object NcmLegacyPolicy {
@@ -88,7 +88,9 @@ internal object NcmLegacyPolicy {
     /** The pure part: one property value to one mode. JVM-testable without a device. */
     fun parse(raw: String?): NcmLegacyMode = when (raw?.trim()?.lowercase()) {
         "force", "userspace", "legacy" -> NcmLegacyMode.FORCE
-        "kernel", "off", "root", "netdev" -> NcmLegacyMode.AUTO  // retired: the kernel transport is deleted (docs/_digest/58 section 9)
+        // Retired spellings of the deleted kernel transport: still accepted so an old script does not read
+        // like a parse failure, but they select nothing beyond the default (docs/_digest/63 §4).
+        "kernel", "off", "root", "netdev" -> NcmLegacyMode.AUTO
         else -> NcmLegacyMode.AUTO
     }
 
@@ -97,12 +99,6 @@ internal object NcmLegacyPolicy {
             Log.i(TAG, "wired NCM transport override by $PROPERTY: $mode")
         }
     }
-
-    /** Whether the userspace bridge may be attempted at all. */
-    fun allowsUserspace(mode: NcmLegacyMode): Boolean = mode != NcmLegacyMode.KERNEL
-
-    /** Whether the kernel netdev may still be used when the userspace bridge cannot start. */
-    fun allowsKernelFallback(mode: NcmLegacyMode): Boolean = mode != NcmLegacyMode.FORCE
 
     /** `debug.diplay.ncm_legacy`; the ROM has no public API for it on API 19. */
     private fun systemProperty(): String? = runCatching {
@@ -114,10 +110,13 @@ internal object NcmLegacyPolicy {
 /**
  * Which transport the wired bring-up should drive.
  *
- * API 21+ already runs the userspace NCM bridge (raw USB + the platform's own network stack through
- * the VpnService TUN), so it is userspace there for the same reason it is preferred here. On API 19
- * the preference is honoured as soon as [UserspaceNcmTransport.readiness] says READY; until then the
- * kernel netdev carries the link, and the reason is logged rather than guessed.
+ * API 21+ already runs the userspace NCM bridge (raw USB + the platform's own network stack through the
+ * VpnService TUN), so it is userspace there for the same reason it is preferred here. On API 19 the
+ * preference is honoured as soon as [UserspaceNcmTransport.readiness] says READY.
+ *
+ * `userspace == false` means **no wired media transport**: the kernel netdev that used to carry this link
+ * was deleted (docs/_digest/63), so the caller keeps the iAP2 control channel and logs the reason. It never
+ * means "the kernel netdev will take over".
  */
 internal fun wiredTransportDecision(
     sdkInt: Int,
@@ -125,10 +124,6 @@ internal fun wiredTransportDecision(
     readiness: UserspaceNcmReadiness,
 ): WiredTransportDecision = when {
     sdkInt >= 21 -> WiredTransportDecision(true, "wired opening raw-USB NCM bridge")
-    !NcmLegacyPolicy.allowsUserspace(mode) -> WiredTransportDecision(
-        false,
-        "CS11: legacy kernel netdev selected by the debug switch (docs/_digest/58 §9 deprecation note)",
-    )
     readiness == UserspaceNcmReadiness.READY -> WiredTransportDecision(
         true,
         "wired opening the API-19 userspace NCM bridge",
@@ -140,6 +135,6 @@ internal fun wiredTransportDecision(
     else -> WiredTransportDecision(
         false,
         "CS11: userspace NCM bridge preferred but unavailable (${UserspaceNcmTransport.describe(readiness)}); " +
-            "using the kernel netdev instead",
+            "no wired media transport - control channel only",
     )
 }

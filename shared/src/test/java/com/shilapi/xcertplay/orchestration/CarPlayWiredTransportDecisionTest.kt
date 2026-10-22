@@ -12,14 +12,14 @@ import org.junit.Test
 /**
  * The wired transport decision behind `CarPlayController.openDataPaths`.
  *
- * The product rule is "keep both transports, prefer the userspace NCM bridge, let the kernel netdev
- * carry the link when the userspace one cannot" (docs/_digest/58 §3). These tests pin that rule at each
- * level and each setting, including the state the car is in today: the userspace bridge has no TCP/IP
- * stack yet, so the preference is logged and the kernel path takes over instead of failing the session.
+ * The product rule is "one transport" (docs/_digest/63): on API 19 the userspace NCM bridge carries the
+ * link whenever its stack and library are present, and when they are not, the session keeps the iAP2
+ * control channel and logs why. There is no kernel netdev left to fall back to, which these tests pin at
+ * each level and each setting.
  */
 class CarPlayWiredTransportDecisionTest {
     @Test
-    fun withNoStackThePreferenceIsLoggedAndTheKernelNetdevCarriesTheLink() {
+    fun withNoStackTheBridgeStandsDownAndOnlyTheControlChannelRemains() {
         val decision = wiredTransportDecision(19, NcmLegacyMode.AUTO, UserspaceNcmReadiness.MISSING_STACK)
         assertFalse("a half-built userspace bridge must not be driven", decision.userspace)
         assertTrue(
@@ -29,6 +29,10 @@ class CarPlayWiredTransportDecisionTest {
         assertTrue(
             "and it has to name the missing piece: ${decision.reason}",
             decision.reason.contains("no TCP/IP stack"),
+        )
+        assertTrue(
+            "the outcome has to be stated, because there is no kernel netdev any more: ${decision.reason}",
+            decision.reason.contains("control channel only"),
         )
     }
 
@@ -41,19 +45,7 @@ class CarPlayWiredTransportDecisionTest {
     }
 
     @Test
-    fun theKernelDebugSwitchNeverAttemptsTheUserspaceBridge() {
-        for (level in 1..20) {
-            val decision = wiredTransportDecision(level, NcmLegacyMode.KERNEL, UserspaceNcmReadiness.READY)
-            assertFalse("API $level", decision.userspace)
-            assertTrue(
-                "the legacy path has to name itself as legacy in the log: ${decision.reason}",
-                decision.reason.contains("legacy kernel netdev"),
-            )
-        }
-    }
-
-    @Test
-    fun theUserspaceOnlySettingReportsWhatIsMissingInsteadOfFallingBack() {
+    fun theDiagnosticModeReportsWhatIsMissingInsteadOfDegradingSilently() {
         val decision = wiredTransportDecision(19, NcmLegacyMode.FORCE, UserspaceNcmReadiness.MISSING_NATIVE)
         assertFalse(decision.userspace)
         assertTrue(
@@ -75,10 +67,26 @@ class CarPlayWiredTransportDecisionTest {
     }
 
     @Test
+    fun anUnavailableBridgeOnApi19NeverPromisesAKernelCarrier() {
+        // The log line is the only place an operator learns why wired media did not start, so it must not
+        // name a transport that no longer exists (docs/_digest/63).
+        for (mode in NcmLegacyMode.values()) {
+            for (readiness in UserspaceNcmReadiness.values()) {
+                val decision = wiredTransportDecision(19, mode, readiness)
+                if (decision.userspace) continue
+                assertFalse(
+                    "$mode/$readiness still promises a kernel netdev: ${decision.reason}",
+                    decision.reason.contains("kernel netdev"),
+                )
+            }
+        }
+    }
+
+    @Test
     fun theLibraryIsTheOnlyThingLeftBetweenTheDefaultAndTheUserspaceBridge() {
         // The stack is implemented now (docs/_digest/58 §11), so readiness turns on the library: with
         // lwip_bridge and legacy_usb in the APK the default transport is the userspace bridge, and a build
-        // without them still falls back to the kernel netdev.
+        // without them keeps the control channel only (the kernel netdev was deleted, docs/_digest/63).
         assertTrue(UserspaceNcmTransport.stackImplemented)
         assertEquals(UserspaceNcmReadiness.READY, UserspaceNcmTransport.readiness(nativeAvailable = true))
         assertEquals(

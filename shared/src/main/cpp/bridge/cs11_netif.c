@@ -7,9 +7,9 @@
  * nativePollTxFrame(); polling instead of a JNI upcall keeps the JNI out of lwIP's thread and lets the USB
  * writer own its own pacing, which is how the NTB framer already works.
  *
- * The link-local address is pinned to fe80::2 rather than derived from the interface MAC: the iPhone is
- * told this address through iAP2's CarPlayStartSession, so every existing bind and advertisement keeps
- * working untouched (docs/_digest/58 §5 item 9).
+ * The link-local address is derived from the interface MAC (EUI-64), and the same derivation is what iAP2's
+ * CarPlayStartSession advertises: the iPhone only dials the address it was told, and pinning fe80::2 produced
+ * zero inbound TCP (docs/_digest/65 §2 item 3). See the comment on the derivation below for the measurement.
  */
 #include "lwip/opt.h"
 #include "lwip/def.h"
