@@ -20,6 +20,37 @@ class Iap2WiredControlClient(
     private val session: Iap2Session,
     private val mfi: Iap2MfiAuthenticationClient,
 ) {
+    private val startSessionLock = Any()
+    private var startSessionEndpoint: Iap2WiredCarPlayEndpoint? = null
+    private var startSessionDeadline: Iap2ControlDeadline? = null
+
+    /** True once the extra request was sent; at most one per run (docs/_digest/102 P0-2). */
+    @Volatile var startSessionSentAgain: Boolean = false
+        private set
+
+    /**
+     * Sends `carplay-start-session` a second time, for an iPhone that still holds the CarPlay session of a
+     * DiPlay that ended without closing it and therefore keeps the link NAKed (upstream `e63b7b3d`).
+     *
+     * Returns false when no request was sent yet, the channel is closed, the deadline has passed, or the extra
+     * request was already sent. Safe to call from another thread: the CSM channel serializes sends.
+     */
+    fun sendStartSessionAgain(): Boolean {
+        synchronized(startSessionLock) {
+            if (startSessionSentAgain) return false
+            val endpoint = startSessionEndpoint ?: return false
+            val deadline = startSessionDeadline ?: return false
+            if (session.isClosed) return false
+            return try {
+                send(carPlayStartSession(endpoint), deadline)
+                startSessionSentAgain = true
+                true
+            } catch (_: RuntimeException) {
+                false
+            }
+        }
+    }
+
     fun run(
         identification: Iap2IdentificationConfig,
         endpoint: Iap2WiredCarPlayEndpoint,
@@ -29,6 +60,7 @@ class Iap2WiredControlClient(
         vehicleStatusProvider: VehicleStatusProvider? = null,
         onIncoming: (Iap2Frame) -> Unit = {},
         onProgress: (String) -> Unit = {},
+        onStartSessionSent: (sentAtNanos: Long) -> Unit = {},
     ): Iap2WiredControlResult {
         require(availableCurrentMilliAmps in 0..0xffff) {
             "availableCurrentMilliAmps must be in 0..65535"
@@ -38,6 +70,11 @@ class Iap2WiredControlClient(
         }
 
         val deadlineNanos = Iap2ControlDeadline(timeoutMillis)
+        synchronized(startSessionLock) {
+            startSessionSentAgain = false
+            startSessionEndpoint = null
+            startSessionDeadline = null
+        }
         val identified = identification.withVehicleStatusFrom(vehicleStatusProvider)
         if (identified.vehicleStatusEnabled != identification.vehicleStatusEnabled) {
             onProgress("iap2 no battery reading: not declaring an electric vehicle")
@@ -96,9 +133,15 @@ class Iap2WiredControlClient(
                         // LIVI sends its wired answer on every availability notification; do not gate it on
                         // the phone's advertised availability boolean.
                         send(carPlayStartSession(endpoint), deadlineNanos)
+                        val sentAtNanos = System.nanoTime()
+                        synchronized(startSessionLock) {
+                            startSessionEndpoint = endpoint
+                            startSessionDeadline = deadlineNanos
+                        }
                         stage = Iap2WiredControlStage.CARPLAY_START_SENT
                         carPlayStartSessions++
                         onProgress("iap2 tx=0x4301 carplay-start-session")
+                        onStartSessionSent(sentAtNanos)
                     }
 
                     Iap2LocationMessages.START_LOCATION_INFORMATION, Iap2LocationMessages.STOP_LOCATION_INFORMATION -> {
