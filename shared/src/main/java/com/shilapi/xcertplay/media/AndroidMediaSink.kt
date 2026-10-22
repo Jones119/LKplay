@@ -221,7 +221,6 @@ class AndroidMediaSink(
     private val microphoneUplinks = ConcurrentHashMap<AudioStreamId, MicrophoneUplink>()
     private val audioModeLock = Any()
     private var communicationModeStream: AudioStreamId? = null
-    private var savedAudioMode = AudioManager.MODE_NORMAL
     private val pendingVideoCodec = ConcurrentHashMap<Int, VideoCodec>()
     private val videoRecoveryHandlers = ConcurrentHashMap<Int, () -> Unit>()
     private val videoDiagnosticHandlers = ConcurrentHashMap<Int, (String) -> Unit>()
@@ -414,15 +413,15 @@ class AndroidMediaSink(
         synchronized(audioModeLock) {
             if (communicationModeStream != null) return
             // Select the HAL communication path before AudioRecord is created.
-            savedAudioMode = manager.mode
+            val modeBeforeCall = manager.mode
             manager.mode = AudioManager.MODE_IN_COMMUNICATION
             communicationModeStream = id
-            Log.i("xcertplay-usb", "audio mode $savedAudioMode -> ${manager.mode} for telephony stream=$id")
+            Log.i("xcertplay-usb", "audio mode $modeBeforeCall -> ${manager.mode} for telephony stream=$id")
             // The report, not just logcat: a head unit left in the voice path plays no media, and
             // that cannot be diagnosed from a car without adb. A failing report must not disturb the
             // mode, so it is the last thing done here and it cannot throw out of this block.
             runCatching {
-                onAudioDiagnostic("Audio: mode entered communication from=$savedAudioMode" +
+                onAudioDiagnostic("Audio: mode entered communication from=$modeBeforeCall" +
                     " now=${manager.mode} stream=$id")
             }
         }
@@ -436,16 +435,20 @@ class AndroidMediaSink(
             communicationModeStream = null
             // The line is built inside the try but sent outside it: reporting from in there would
             // let a failing diagnostic callback be caught as a failed mode restore.
+            // AudioService keeps one mode request per process and uses the newest. Setting back the mode found at
+            // the start of the call would keep DiPlay asking for it after the process that set it, such as the
+            // Telecom call for the car's phone audio, lets go, and the head unit stays in the voice path (#987).
+            // MODE_NORMAL withdraws DiPlay's request: the mode returns to another process's, or to normal.
             val line = try {
-                manager.mode = savedAudioMode
+                manager.mode = AudioManager.MODE_NORMAL
                 Log.i("xcertplay-usb", "audio mode restored to ${manager.mode}")
-                "Audio: mode restored requested=$savedAudioMode now=${manager.mode} stream=$active"
+                "Audio: mode restored requested=${AudioManager.MODE_NORMAL} now=${manager.mode} stream=$active"
             } catch (error: RuntimeException) {
-                Log.w("xcertplay-usb", "could not restore audio mode $savedAudioMode", error)
+                Log.w("xcertplay-usb", "could not restore audio mode", error)
                 // A vendor AudioManager whose setMode was refused can refuse the getter too, and an
                 // escaping throw here would abort the microphone teardown that called us.
                 val currentMode = runCatching { manager.mode.toString() }.getOrDefault("unknown")
-                "Audio: mode restore failed requested=$savedAudioMode now=$currentMode" +
+                "Audio: mode restore failed requested=${AudioManager.MODE_NORMAL} now=$currentMode" +
                     " error=${error.javaClass.simpleName}"
             }
             runCatching { onAudioDiagnostic(line) }
