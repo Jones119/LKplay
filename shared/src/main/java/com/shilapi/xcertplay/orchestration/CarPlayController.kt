@@ -256,8 +256,6 @@ class CarPlayController(
     @Volatile private var mux: Iap2UsbMuxHost? = null
     @Volatile private var csm: Iap2Session? = null
     @Volatile private var activeSession: AirPlaySession? = null
-    /** When a session last became active; the wired retry uses it to tell "still waiting" from "connected". */
-    @Volatile private var lastSessionActiveAtNanos = 0L
     @Volatile private var requestedDashboardUrl: String? = airPlayConfig.cluster?.initialUrl
     private val clusterUiLock = Any()
     private var clusterUiStream: Pair<AirPlaySession, Int>? = null
@@ -360,7 +358,6 @@ class CarPlayController(
 
     private val sessionListener = object : AirPlaySessionListener {
         override fun onSessionActive(session: AirPlaySession) {
-            lastSessionActiveAtNanos = System.nanoTime()
             val replacement = activeSession !== session
             if (replacement) {
                 com.shilapi.xcertplay.glance.CarPlayGlance.setConnected(true)
@@ -1832,6 +1829,9 @@ class CarPlayController(
     private fun openDataPaths(device: UsbDevice) {
         phase = Phase.DATAPATHS
         wiredDevice = device
+        // Remember the node: if this process dies before releasing the mode, the next start has to move the
+        // phone out of it or the iPhone opens no AirPlay connection for 30-150 s (docs/_digest/102 P0-3).
+        WiredSessionMemory.started(device.deviceName)
         debugLog("wired opening iPhone USB data paths")
         onStatus(CarPlayStatus.SelectingConfiguration)
         onStatus(CarPlayStatus.OpeningDataPaths)
@@ -2267,49 +2267,16 @@ class CarPlayController(
                     "location=${config.identification.locationInformationEnabled} " +
                     "vehicleStatus=${config.identification.vehicleStatusEnabled}",
             )
-            val controlClient = Iap2WiredControlClient(csm, Iap2MfiAuthenticationClient(mfi))
-            val wiredAttemptStartedAtNanos = System.nanoTime()
-            // The iPhone tries the AirPlay listener once, right after the request, and does not try again on its
-            // own. An iPhone that still holds the previous DiPlay's CarPlay session keeps the link NAKed, so
-            // without a second request the attempt can only time out and the next one needs a USB replug
-            // (docs/_digest/102 P0-2, upstream e63b7b3d). One repeat, only while nothing has connected.
-            var quietCheck: java.util.concurrent.Future<*>? = null
-            val result = try {
-                controlClient.run(
-                    identification = config.identification,
-                    endpoint = endpoint,
-                    availableCurrentMilliAmps = config.availableCurrentMilliAmps,
-                    timeoutMillis = controlLoopTimeoutMillis(),
-                    locationProvider = locationProvider,
-                    vehicleStatusProvider = vehicleStatusProvider,
-                    onIncoming = ::onRouteFrame,
-                    onProgress = { message -> debugLog("wired $message") },
-                    onStartSessionSent = { sentAtNanos ->
-                        wiredDevice?.let { WiredSessionMemory.started(it.deviceName) }
-                        if (quietCheck == null) {
-                            quietCheck = startupTimer.schedule({
-                                if (!closed && WiredStartAgain.decide(
-                                        nowNanos = System.nanoTime(),
-                                        startSentAtNanos = sentAtNanos,
-                                        sessionActiveSinceStart =
-                                            lastSessionActiveAtNanos >= wiredAttemptStartedAtNanos,
-                                        alreadySentAgain = controlClient.startSessionSentAgain,
-                                    )
-                                ) {
-                                    if (controlClient.sendStartSessionAgain()) {
-                                        debugLog(
-                                            "wired iap2 tx=0x4301 carplay-start-session again after " +
-                                                "${WiredStartAgain.QUIET_MILLIS} ms quiet",
-                                        )
-                                    }
-                                }
-                            }, WiredStartAgain.QUIET_MILLIS, TimeUnit.MILLISECONDS)
-                        }
-                    },
-                )
-            } finally {
-                quietCheck?.cancel(false)
-            }
+            val result = Iap2WiredControlClient(csm, Iap2MfiAuthenticationClient(mfi)).run(
+                identification = config.identification,
+                endpoint = endpoint,
+                availableCurrentMilliAmps = config.availableCurrentMilliAmps,
+                timeoutMillis = controlLoopTimeoutMillis(),
+                locationProvider = locationProvider,
+                vehicleStatusProvider = vehicleStatusProvider,
+                onIncoming = ::onRouteFrame,
+                onProgress = { message -> debugLog("wired $message") },
+            )
             onStatus(
                 when (result.terminal) {
                     Iap2WiredControlTerminal.TIMED_OUT -> CarPlayStatus.ControlEnded

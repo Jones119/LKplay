@@ -4,17 +4,17 @@ import android.content.Context
 import android.content.SharedPreferences
 
 /**
- * The USB enumeration (device node) of the iPhone on which DiPlay last started a wired CarPlay session.
+ * The USB enumeration (device node) of the iPhone DiPlay last opened wired data paths on.
  *
- * After DiPlay ends that session itself, as Save and reconnect does, the iPhone stays in CarPlay mode on the same
- * node. A new session there passes iAP2 and StartSession, but the iPhone opens no AirPlay connection until it
- * resets USB 30-150 s later; a fresh CarPlay mode request instead connected within seconds (upstream e63b7b3d /
- * 5e8a6f9a, #335, ported per docs/_digest/102 P0-3). The node changes whenever the iPhone re-enumerates, so a
- * match means it is still in that session's mode.
+ * If this process dies before it releases the mode (stopped, replaced or crashed while connected), the iPhone
+ * stays in CarPlay mode on the same node and opens no AirPlay connection until it resets USB 30-150 s later;
+ * a fresh CarPlay mode request instead connected within seconds (upstream 5e8a6f9a, #335, docs/_digest/102
+ * P0-3). Switching the phone out of the mode and letting the normal request bring it back is what replaces the
+ * physical replug. The node changes whenever the iPhone re-enumerates, so a match means it is still in that
+ * session's mode.
  *
- * Unlike upstream's in-process object this is persisted: a wire the car cut, a crash, or a reinstall kills the
- * process without the clean teardown that resets the phone's configuration, and that is exactly the case that
- * used to need a physical replug.
+ * Unlike upstream's in-process object this is persisted: a crash or a reinstall kills the process without the
+ * clean teardown that resets the phone's configuration, and that is exactly the case that needed the replug.
  */
 internal object WiredSessionMemory {
     private const val PREFS = "diplay_wired"
