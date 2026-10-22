@@ -537,7 +537,7 @@ class Iap2UsbSession internal constructor(
                 }
                 if (!readQueued) {
                     readBuffer.clear()
-                    val queueResult = readQueuePolicy.queue(readBuffer, ::checkOpenLocked) { queuedBuffer ->
+                    val submit: (java.nio.ByteBuffer) -> Boolean = { queuedBuffer ->
                         // CS11: UsbRequest.queue(ByteBuffer) 是 API26+；4.4 走 queue(buffer, length)
                         if (Build.VERSION.SDK_INT >= 26) {
                             current.queue(queuedBuffer)
@@ -545,6 +545,17 @@ class Iap2UsbSession internal constructor(
                             @Suppress("DEPRECATION")
                             current.queue(queuedBuffer, queuedBuffer.remaining())
                         }
+                    }
+                    var queueResult = readQueuePolicy.queue(readBuffer, ::checkOpenLocked, submit)
+                    if (!queueResult.queued) {
+                        // A queue refused right as a session starts is usually the previous URB still being
+                        // released (the phone re-enumerated after a force-stop or a mode reset), not a dead
+                        // pipe: the same request queues a moment later. Retry once before failing the attempt,
+                        // which used to cost a whole reconnect (bench 2026-10-22).
+                        Thread.sleep(QUEUE_RETRY_MILLIS)
+                        checkOpenLocked()
+                        readBuffer.clear()
+                        queueResult = readQueuePolicy.queue(readBuffer, ::checkOpenLocked, submit)
                     }
                     if (!queueResult.queued) {
                         throw IphoneUsbException.DeviceUnavailable(
@@ -644,6 +655,9 @@ class Iap2UsbSession internal constructor(
 
     private companion object {
         const val USBMUX_READ_CHUNK_BYTES = 65_536
+
+        /** One short pause before re-queueing a read the kernel refused while it released the previous URB. */
+        const val QUEUE_RETRY_MILLIS = 50L
     }
 }
 

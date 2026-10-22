@@ -2911,17 +2911,17 @@ class CarPlayController(
         private const val CONTROL_LOOP_TIMEOUT_MILLIS = 5 * 60_000L
         private const val LOCATION_CONTROL_LOOP_TIMEOUT_MILLIS = 24 * 60 * 60 * 1_000L
         /** Same reasoning as the availability poll: the grant arrives within milliseconds. */
-    private const val PERMISSION_POLL_INTERVAL_MILLIS = 100L
+        private const val PERMISSION_POLL_INTERVAL_MILLIS = 100L
         private const val PERMISSION_POLL_TIMEOUT_MILLIS = 120_000L
         /**
-     * How often `UsbManager.deviceList` is re-read while waiting for the iPhone.
-     *
-     * Was 2 s. The iPhone's re-enumeration takes about one second, and a missed USB_DEVICE_ATTACHED
-     * broadcast meant waiting up to two more seconds before noticing it had arrived. Reading the device
-     * list is a cheap binder call, and this only runs while the controller is waiting, so 150 ms keeps the
-     * wait close to the hardware's own time.
-     */
-    private const val DEVICE_AVAILABILITY_POLL_INTERVAL_MILLIS = 150L
+         * How often `UsbManager.deviceList` is re-read while waiting for the iPhone.
+         *
+         * Was 2 s. The iPhone's re-enumeration takes about one second, and a missed USB_DEVICE_ATTACHED
+         * broadcast meant waiting up to two more seconds before noticing it had arrived. Reading the device
+         * list is a cheap binder call, and this only runs while the controller is waiting, so 150 ms keeps the
+         * wait close to the hardware's own time.
+         */
+        private const val DEVICE_AVAILABILITY_POLL_INTERVAL_MILLIS = 150L
         private const val WIRELESS_HANDOFF_TIMEOUT_MILLIS = 45_000L
         private const val RFCOMM_CONNECT_TIMEOUT_MILLIS = 15_000L
         private const val BLUETOOTH_ENABLE_TIMEOUT_MILLIS = 6_000L

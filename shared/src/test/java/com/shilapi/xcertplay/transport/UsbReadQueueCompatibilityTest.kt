@@ -108,16 +108,17 @@ class UsbReadQueueCompatibilityTest {
 
     @Test fun everyLadderRejectionFailsWithEndpointApiAndAttemptedSizes() {
         val pipe = pipe()
-        UsbQueueReplay.outcomes.addAll(listOf(false, false, false, false, false))
+        UsbQueueReplay.outcomes.addAll(List(10) { false })
         try { checkQueueFailure { pipe.read(100) } } finally { pipe.close() }
-        assertEquals(listOf(65_536, 16_384, 8_192, 4_096, 2_048), UsbQueueReplay.sizes)
+        // The ladder runs twice: one retry after a short pause before the read fails the session.
+        assertEquals(listOf(65_536, 16_384, 8_192, 4_096, 2_048, 65_536, 16_384, 8_192, 4_096, 2_048), UsbQueueReplay.sizes)
         UsbQueueReplay.reset()
         val ncm = ncm()
-        UsbQueueReplay.outcomes.addAll(listOf(false, false, false, false, false))
+        UsbQueueReplay.outcomes.addAll(List(10) { false })
         try { checkQueueFailure { readChunk(ncm) } } finally { ncm.close() }
+        // The NCM bridge has its own read path, which does not retry.
         assertEquals(listOf(32_768, 16_384, 8_192, 4_096, 2_048), UsbQueueReplay.sizes)
     }
-
     @Test fun queueExceptionDoesNotTriggerCompatibilityRetryInEitherPipe() {
         val pipe = pipe()
         UsbQueueReplay.queueException = IllegalStateException("unknown queue state")

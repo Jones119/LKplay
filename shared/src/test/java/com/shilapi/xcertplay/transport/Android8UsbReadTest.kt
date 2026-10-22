@@ -5,6 +5,7 @@ import android.hardware.usb.UsbDeviceConnection
 import android.hardware.usb.UsbEndpoint
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -76,15 +77,26 @@ class Android8UsbReadTest {
     }
 
     @Test fun rejectionOfEveryCappedLadderSizeFailsBothPipes() {
-        UsbQueueReplay.outcomes.addAll(listOf(false, false, false, false))
+        UsbQueueReplay.outcomes.addAll(List(8) { false })
         val pipe = Iap2UsbSession(connection(), endpoint(0x04), endpoint(0x85))
         try { checkCappedFailure { pipe.read(1_000) } } finally { pipe.close() }
-        assertEquals(listOf(16_384, 8_192, 4_096, 2_048), UsbQueueReplay.sizes)
+        // The whole ladder runs twice: one short pause and retry before a refused read fails the session.
+        assertEquals(listOf(16_384, 8_192, 4_096, 2_048, 16_384, 8_192, 4_096, 2_048), UsbQueueReplay.sizes)
         UsbQueueReplay.reset()
-        UsbQueueReplay.outcomes.addAll(listOf(false, false, false, false))
+        UsbQueueReplay.outcomes.addAll(List(8) { false })
         val ncm = ncm()
         try { checkCappedFailure { ncm.recv(1_000) } } finally { ncm.close() }
+        // The NCM bridge has its own read path, which does not retry.
         assertEquals(listOf(16_384, 8_192, 4_096, 2_048), UsbQueueReplay.sizes)
+    }
+    @Test fun aTransientQueueRejectionIsRetriedOnce() {
+        // The previous URB being released is why the first ladder is refused right after a re-enumeration.
+        UsbQueueReplay.outcomes.addAll(listOf(false, false, false, false, true))
+        UsbQueueReplay.timeout = true
+        val pipe = Iap2UsbSession(connection(), endpoint(0x04), endpoint(0x85))
+        try { assertNull(pipe.read(100)) } finally { pipe.close() }
+        assertEquals(16_384, UsbQueueReplay.sizes.last())
+        assertEquals(5, UsbQueueReplay.sizes.size)
     }
 
     @Test fun ambiguousQueueExceptionIsNotRetriedOnEitherPipe() {
