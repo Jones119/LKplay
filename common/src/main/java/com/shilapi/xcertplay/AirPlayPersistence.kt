@@ -64,6 +64,9 @@ object AirPlayPersistence {
 
     /** On-screen "输出 / 接收 FPS" overlay; off by default (EasyPlay 10-80's `showVideoFps`). */
     private const val KEY_SHOW_VIDEO_FPS = "show_video_fps"
+
+    /** Experimental SurfaceView video sink; see VideoSurfaceMode. Default stays TextureView. */
+    private const val KEY_SURFACE_VIEW_EXPERIMENTAL = "surface_view_experimental"
     private const val KEY_MEDIA_BUFFER_MS = "media_buffer_ms"
     private const val KEY_MAIN_BUFFERED_AUDIO = "main_buffered_audio"
     private const val KEY_CLUSTER_MAP = "cluster_map_enabled"
@@ -498,6 +501,17 @@ object AirPlayPersistence {
     fun saveShowVideoFps(context: Context, enabled: Boolean) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putBoolean(KEY_SHOW_VIDEO_FPS, enabled)
+            .apply()
+    }
+
+    /** Experimental SurfaceView video sink; see [VideoSurfaceMode]. Default stays TextureView. */
+    fun loadSurfaceViewExperimental(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getBoolean(KEY_SURFACE_VIEW_EXPERIMENTAL, false)
+
+    fun saveSurfaceViewExperimental(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putBoolean(KEY_SURFACE_VIEW_EXPERIMENTAL, enabled)
             .apply()
     }
 
@@ -994,3 +1008,4 @@ object AirPlayPersistence {
     private fun safeAreaKey(widthPixels: Int, heightPixels: Int): String =
         "$SAFE_AREA_KEY_PREFIX${widthPixels}x$heightPixels"
 }
+

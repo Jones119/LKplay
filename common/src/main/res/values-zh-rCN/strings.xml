@@ -627,4 +627,8 @@
     <string name="screen_corner_mask_description">车机可视屏幕的开口是圆角的，满屏的 CarPlay 画面在四角会被车身边框裁掉。开启后在屏幕四角按相同弧度涂黑，让 CarPlay 画面正好贴合影屏开口。默认关闭；只有车机确实裁掉画面四角时才需要打开。</string>
     <string name="settings_category_other">其他</string>
   <string name="exit_application_description">完全关闭 DiPlay：CarPlay 连接、车载热点和所有后台线程一起结束。</string>
+
+    <string name="experimental_surface_view">使用 SurfaceView（实验）</string>
+    <string name="experimental_surface_view_description">改用 SurfaceView 承载 CarPlay 画面，CPU 占用明显更低；但可能丢帧，且「画面调节」和圆角遮罩不可用。下次启动 CarPlay 生效。</string>
 </resources>
+

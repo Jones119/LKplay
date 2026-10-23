@@ -569,6 +569,43 @@ private class VideoDecoder(
 
     fun liveVideoCounters(): LiveVideoCounters = LiveVideoCounters(liveReceived.get(), liveRendered.get())
 
+    // --- debug.diplay.video_timing: where the decode loop actually blocks ------------------------
+    // `dropped` only says frames aged out; it cannot say whether the thread was waiting for an input
+    // buffer, blocked posting to the Surface (SurfaceView backpressure) or slow inside the codec.
+    private val timingEnabled = runCatching {
+        Class.forName("android.os.SystemProperties")
+            .getMethod("get", String::class.java)
+            .invoke(null, "debug.diplay.video_timing") as? String
+    }.getOrNull()?.trim() == "1"
+    private var timingWindowNs = 0L
+    private var inWaitNs = 0L
+    private var inWaitMaxNs = 0L
+    private var inWaitCount = 0
+    private var releaseNs = 0L
+    private var releaseMaxNs = 0L
+    private var releaseCount = 0
+    private var releaseSlowCount = 0
+
+    private fun logTimingIfDue() {
+        if (!timingEnabled) return
+        val now = System.nanoTime()
+        if (timingWindowNs == 0L) {
+            timingWindowNs = now
+            return
+        }
+        if (now - timingWindowNs < 5_000_000_000L) return
+        val waitAvg = if (inWaitCount > 0) inWaitNs / inWaitCount / 1_000_000 else 0
+        val relAvg = if (releaseCount > 0) releaseNs / releaseCount / 1_000_000 else 0
+        report(
+            "video timing in avg=${waitAvg}ms max=${inWaitMaxNs / 1_000_000}ms n=$inWaitCount " +
+                "release avg=${relAvg}ms max=${releaseMaxNs / 1_000_000}ms n=$releaseCount " +
+                "slow>5ms=$releaseSlowCount",
+        )
+        timingWindowNs = now
+        inWaitNs = 0; inWaitMaxNs = 0; inWaitCount = 0
+        releaseNs = 0; releaseMaxNs = 0; releaseCount = 0; releaseSlowCount = 0
+    }
+
     private val thread = WorkerThreads.create({
         android.os.Process.setThreadPriority(com.shilapi.xcertplay.airplay.VideoThreadPriority.current())
         run()
@@ -704,8 +741,18 @@ private class VideoDecoder(
         }
         // Some vendor decoders (e.g. MediaTek c2.mtk.avc.decoder) reject the tuned
         // parameters with BAD_VALUE. Fall back to a minimal format, then to software.
+        //
+        // `debug.diplay.video_untuned=1` is the A/B arm for "which format key costs the decoder its
+        // throughput": the first attempt keeps the same vendor decoder but drops MAX_INPUT_SIZE,
+        // PRIORITY, operating-rate and frame-rate, so `video timing in avg=` can be compared directly.
+        val untuned = runCatching {
+            Class.forName("android.os.SystemProperties")
+                .getMethod("get", String::class.java)
+                .invoke(null, "debug.diplay.video_untuned") as? String
+        }.getOrNull()?.trim() == "1"
+        if (untuned) Log.i(TAG, "video decoder tuned keys disabled by debug.diplay.video_untuned")
         val attempts = listOf(
-            DecoderAttempt(codecName = null, tuned = true),
+            DecoderAttempt(codecName = null, tuned = !untuned),
             DecoderAttempt(codecName = null, tuned = false),
         ) + softwareDecoderName(mime)?.let { listOf(DecoderAttempt(it, tuned = false)) }.orEmpty() +
             // Last resort: every other registered name for this MIME. This ROM's vendor H.264
@@ -888,10 +935,17 @@ private class VideoDecoder(
                     "video decoder first input avcc=${job.length} annexB=$annexBLength",
                 )
             }
+            val waitStartNs = System.nanoTime()
             val index = VideoInputPump.acquire(
                 running = { running }, drain = { drainOutput(codec) },
                 dequeue = { codec.dequeueInputBuffer(INPUT_TIMEOUT_US) },
             )
+            if (timingEnabled) {
+                val dt = System.nanoTime() - waitStartNs
+                inWaitNs += dt
+                inWaitCount++
+                if (dt > inWaitMaxNs) inWaitMaxNs = dt
+            }
             if (index < 0) { recover("video decoder input stalled"); return }
             val input = checkNotNull(codec.inputBufferCompat(index)) { "Decoder input buffer unavailable" }
             input.clear()
@@ -910,6 +964,7 @@ private class VideoDecoder(
                 return
             }
             drainOutput(codec)
+            logTimingIfDue()
         } finally {
             // The pooled buffer is reusable as soon as the frame is in the codec's input queue.
             job.release()
@@ -950,7 +1005,15 @@ private class VideoDecoder(
                     val ageUs = if (info.presentationTimeUs <= 0L) 0L
                     else (System.nanoTime() / 1000) - info.presentationTimeUs
                     val render = outputSurface != null && ageUs <= RENDER_MAX_AGE_US
+                    val releaseStartNs = System.nanoTime()
                     codec.releaseOutputBuffer(index, render)
+                    if (timingEnabled) {
+                        val dt = System.nanoTime() - releaseStartNs
+                        releaseNs += dt
+                        releaseCount++
+                        if (dt > releaseMaxNs) releaseMaxNs = dt
+                        if (dt > 5_000_000L) releaseSlowCount++
+                    }
                     if (render) {
                         stats.onRendered()
                 liveRendered.incrementAndGet()

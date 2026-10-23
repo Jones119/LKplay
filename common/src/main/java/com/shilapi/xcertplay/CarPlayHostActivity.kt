@@ -33,6 +33,8 @@ import android.util.Log
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.Surface
+import android.view.SurfaceHolder
+import android.view.SurfaceView
 import android.view.TextureView
 import android.view.KeyEvent
 import android.view.View
@@ -243,6 +245,16 @@ class CarPlayHostActivity : ComponentActivity() {
         }
 
     private var videoView: TextureView? = null
+
+    /**
+     * Experimental video sink for the `debug.diplay.video_surface` A/B: a SurfaceView renders the
+     * decoder's output through SurfaceFlinger instead of drawing a full-screen textured quad on the
+     * UI thread (which is the single biggest per-thread cost on API 19, where HWUI draws there).
+     *
+     * Null unless the property opted in; TextureView stays the shipped default.
+     */
+    private var videoSurfaceView: SurfaceView? = null
+
     private var pictureBinding: CarPlayPicture.Binding? = null
     private var picturePanel: View? = null
     private var picturePanelGeneration = 0
@@ -423,6 +435,12 @@ class CarPlayHostActivity : ComponentActivity() {
      * is not clickable, not focusable and hidden unless the setting is on and a session is running.
      */
     private var showVideoFps = false
+
+    /**
+     * Experimental SurfaceView sink, read once per host creation (the video view is built in
+     * [buildContentView]). Changing it therefore applies the next time CarPlay starts.
+     */
+    private var surfaceViewExperimental = false
     private var fpsView: TextView? = null
     private var fpsReporting = false
     private val fpsMeter = LiveVideoMeter()
@@ -506,6 +524,55 @@ class CarPlayHostActivity : ComponentActivity() {
         }
 
         override fun onSurfaceTextureUpdated(texture: SurfaceTexture) = Unit
+    }
+
+    /**
+     * SurfaceView is an experimental settings switch ([VideoSurfaceMode]); the `debug.diplay.video_surface`
+     * property still wins for lab sessions, and TextureView stays the default.
+     */
+    private fun useSurfaceViewForVideo(): Boolean = VideoSurfaceMode.useSurfaceView(this)
+
+    private val videoSurfaceCallback = object : SurfaceHolder.Callback {
+        override fun surfaceCreated(holder: SurfaceHolder) {
+            val surface = holder.surface ?: return
+            currentSurface = surface
+            appendLog(
+                "SurfaceView surface created id=${System.identityHashCode(surface)} valid=${surface.isValid}",
+            )
+            attachSurface(surface)
+            // `surfaceFrame` can still report the full display at creation time; the view itself is
+            // laid out inside the activity window (1280x650 above the car's bottom bar), so negotiate
+            // from that once layout has run. Using the display size here made the iPhone encode
+            // 1280x720 and the sink squash it into 650.
+            videoSurfaceView?.post {
+                val view = videoSurfaceView
+                if (view != null && view.width > 0 && view.height > 0) {
+                    scheduleDisplaySize(view.width, view.height)
+                }
+            }
+        }
+
+        override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
+            val view = videoSurfaceView
+            if (view != null && view.width > 0 && view.height > 0) {
+                scheduleDisplaySize(view.width, view.height)
+            } else {
+                scheduleDisplaySize(width, height)
+            }
+        }
+
+        override fun surfaceDestroyed(holder: SurfaceHolder) {
+            // The SurfaceView owns this Surface; only detach it from the decoders.
+            val surface = currentSurface
+            if (surface != null) {
+                sink?.clearSurface(SCREEN_TYPE_MAIN, surface)
+                sink?.clearSurface(SCREEN_TYPE_ALT, surface)
+            }
+            currentSurface = null
+            currentSurfaceTexture = null
+            surfaceLostSinceCreate = true
+            appendLog("SurfaceView surface destroyed")
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -613,6 +680,7 @@ class CarPlayHostActivity : ComponentActivity() {
         oemLabel = AirPlayPersistence.loadOemLabel(this)
         fps = AirPlayPersistence.loadFps(this)
         showVideoFps = AirPlayPersistence.loadShowVideoFps(this)
+        surfaceViewExperimental = AirPlayPersistence.loadSurfaceViewExperimental(this)
         widthPhysicalMm = AirPlayPersistence.loadWidthPhysicalMm(this)
         physicalSizeBasis = AirPlayPersistence.loadPhysicalSizeBasis(this)
         AirPlayPersistence.loadMaximumDetectedDisplay(this).let { (width, height) ->
@@ -981,7 +1049,8 @@ class CarPlayHostActivity : ComponentActivity() {
 
     private fun buildContentView(): View {
         val root = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
-        val video = TextureView(this).apply {
+        val surfaceMode = useSurfaceViewForVideo()
+        val video = if (surfaceMode) null else TextureView(this).apply {
             // 视频面本身不透明：置 true 让合成器走不透明路径，省掉每帧一次 alpha 混合读
             //（doc 41 §6 的"零风险小赢"，doc 69 P1-10 / doc 70 §2.2 B4 都列为待做）。
             // 与「画面调节」不冲突：那项经 CarPlayPicture 走 setLayerPaint(ColorMatrixColorFilter)，
@@ -989,12 +1058,22 @@ class CarPlayHostActivity : ComponentActivity() {
             isOpaque = true
             surfaceTextureListener = textureListener
         }
-        pictureBinding = CarPlayPicture.Binding(video)
+        if (video != null) {
+            pictureBinding = CarPlayPicture.Binding(video)
+        } else {
+            // A/B arm: SurfaceFlinger composites the decoder buffers, so the UI thread stops drawing a
+            // full-screen textured quad every frame.
+            videoSurfaceView = SurfaceView(this).apply { holder.addCallback(videoSurfaceCallback) }
+        }
         val gestureLayer = View(this).apply {
             isClickable = true
             setOnTouchListener { view, event -> onHostTouch(view, event) }
         }
-        root.addView(video, FrameLayout.LayoutParams(-1, -1))
+        if (video != null) {
+            root.addView(video, FrameLayout.LayoutParams(-1, -1))
+        } else {
+            videoSurfaceView?.let { root.addView(it, FrameLayout.LayoutParams(-1, -1)) }
+        }
         // The corner mask sits over the picture but under the touch layer: it is drawn, never
         // dispatched to, so the three-finger gesture and every CarPlay touch reach the layer above
         // it exactly as before. Its four children are non-clickable and non-focusable for the same
@@ -1580,6 +1659,27 @@ class CarPlayHostActivity : ComponentActivity() {
                 showVideoFps = checked
                 AirPlayPersistence.saveShowVideoFps(this, checked)
                 refreshVideoFps()
+            },
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = dp(24) },
+        )
+
+        // Experimental SurfaceView sink (VideoSurfaceMode). It applies to the next CarPlay host
+        // creation because the video view is built once per activity, which the description says.
+        content.addView(
+            settingsSwitchRow(
+                label = getString(R.string.experimental_surface_view),
+                checked = surfaceViewExperimental,
+                description = getString(R.string.experimental_surface_view_description),
+            ) { checked ->
+                surfaceViewExperimental = checked
+                AirPlayPersistence.saveSurfaceViewExperimental(this, checked)
+                appendLog(
+                    "Video sink ${if (checked) "SurfaceView (experimental)" else "TextureView"}; " +
+                        "applies on the next CarPlay start",
+                )
             },
             LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -3419,7 +3519,11 @@ class CarPlayHostActivity : ComponentActivity() {
     }
 
     private fun currentActivitySize(): DisplaySize? {
-        val view = videoView
+        // Both video sinks size themselves to the activity window, which is what the car leaves above
+        // its bottom bar (1280x650 here). The SurfaceView arm must report that, not the full 720-line
+        // display: negotiating 720 makes the iPhone encode a frame whose bottom 70 lines are hidden
+        // behind the bar, and the decoder then processes 1280x736 for nothing.
+        val view: View? = videoView ?: videoSurfaceView
         if (view != null && view.width > 0 && view.height > 0) {
             return DisplaySize(view.width, view.height)
         }

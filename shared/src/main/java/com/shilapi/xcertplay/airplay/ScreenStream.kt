@@ -119,11 +119,27 @@ class ScreenStream(
                 if (!readFully(input, header, 0, HEADER_LEN)) break
                 val bodySize = readU32Le(header, 0)
                 if (bodySize > MAX_BODY) break
-                if (body.size < bodySize) body = ByteArray(bodySize)
-                if (!readFully(input, body, 0, bodySize)) break
-                stats.received(HEADER_LEN + bodySize)
-                onMessage(header, body, bodySize, frames)
-                stats.processed()
+                val opcode = header[OPCODE_OFFSET].toInt() and 0xff
+                if (opcode == OP_VIDEO_FRAME && bodySize >= ScreenCodec.TAG_SIZE) {
+                    // CS11: read the sealed frame straight into the pooled buffer and open it in place.
+                    // The old path read into the reused `body` array and then decrypted into a second
+                    // buffer, i.e. two 1.3 MB copies per frame at 720p; this keeps one.
+                    val frame = frames.acquire(bodySize)
+                    if (!readFully(input, frame.bytes, 0, bodySize)) {
+                        frame.close()
+                        break
+                    }
+                    frame.length = bodySize - ScreenCodec.TAG_SIZE
+                    stats.received(HEADER_LEN + bodySize)
+                    onSealedFrame(header, frame)
+                    stats.processed()
+                } else {
+                    if (body.size < bodySize) body = ByteArray(bodySize)
+                    if (!readFully(input, body, 0, bodySize)) break
+                    stats.received(HEADER_LEN + bodySize)
+                    onMessage(header, body, bodySize, frames)
+                    stats.processed()
+                }
             }
         } catch (error: Exception) {
             failure = error
@@ -133,6 +149,65 @@ class ScreenStream(
             if (socket === sock) socket = null
             safeClose(sock)
             if (!closed.get()) listener.onClosed(failure)
+        }
+    }
+
+    /**
+     * Opens a sealed frame that was read straight into [frame]'s buffer, in place.
+     *
+     * The ciphertext occupies `[0, frame.length + TAG_SIZE)` and the plaintext is written back over
+     * it: the audio path already decrypts in place in its reused wire buffer, so the same overlap is
+     * supported by both the native and the BouncyCastle backend.
+     */
+    private fun onSealedFrame(header: ByteArray, frame: OwnedVideoFrame) {
+        val sealedLength = frame.length + ScreenCodec.TAG_SIZE
+        val plaintextLength = try {
+            AirPlayCrypto.chachaOpenInto(
+                key = key,
+                nonce = AirPlayCrypto.nonce64(frameCounter.get()),
+                ciphertextAndTag = frame.bytes,
+                ciphertextOffset = 0,
+                ciphertextLength = sealedLength,
+                aad = header,
+                aadOffset = 0,
+                aadLength = HEADER_LEN,
+                output = frame.bytes,
+                outputOffset = 0,
+            )
+        } catch (error: Throwable) {
+            frame.close()
+            throw error
+        }
+        // Every nonce belongs to the sender's sequence, so the counter advances even when the check
+        // below rejects the frame.
+        frameCounter.incrementAndGet()
+        if (plaintextLength != frame.length) {
+            // A short write would leave the tail of this recycled buffer holding bytes from the frame
+            // that used it last, and the decoder would read them as this frame. Drop the frame and
+            // report once so a flood of frames cannot flood the log.
+            frame.close()
+            if (plaintextMismatchLogged.compareAndSet(false, true)) {
+                onDiagnostic(
+                    "video frame plaintext mismatch expected=${frame.length} " +
+                        "actual=$plaintextLength sealed=$sealedLength",
+                )
+            }
+            return
+        }
+        if (firstFrameLogged.compareAndSet(false, true)) {
+            Log.i(
+                TAG,
+                "video first decrypted frame sealed=$sealedLength plain=${frame.length} " +
+                    "head=${frame.bytes.hexPrefix(minOf(16, frame.length))}",
+            )
+        }
+        ScreenCodec.lengthPrefixedToAnnexB(frame.bytes, frame.length)
+        try {
+            listener.onOwnedFrame(frame)
+        } catch (error: Throwable) {
+            // The listener never took ownership, so return the buffer before propagating.
+            frame.close()
+            throw error
         }
     }
 

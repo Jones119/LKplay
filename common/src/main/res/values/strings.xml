@@ -628,4 +628,8 @@
     <string name="screen_corner_mask_description">The visible screen opening has rounded corners, so a full-screen CarPlay picture is clipped by the car\'s bezel there. This paints the screen\'s four corners black in the same curve, so CarPlay fits the opening exactly. Off by default; turn it on only if the car clips the picture.</string>
     <string name="settings_category_other">Other</string>
   <string name="exit_application_description">Stops DiPlay completely: the CarPlay session, the car hotspot and every background thread end with it.</string>
+
+    <string name="experimental_surface_view">Use SurfaceView (experimental)</string>
+    <string name="experimental_surface_view_description">Renders the CarPlay picture through a SurfaceView instead of a TextureView: much lower CPU, but it can drop frames and it loses picture adjustments and the corner mask. Applies the next time CarPlay starts.</string>
 </resources>
+

@@ -1722,7 +1722,14 @@ class CarPlayController(
                             // opens no AirPlay connection until it resets USB 30-150 s later, so switch it out
                             // once and let the normal request bring it back fresh; a replug does the same by hand
                             // (docs/_digest/102 P0-3, upstream 5e8a6f9a).
-                            if (!wiredModeResetAttempted && WiredSessionMemory.startedOn(result.device.deviceName)) {
+                            // API 19 skips it: on the car the switch now succeeds (2026-10-23, with the
+                            // vendor usbmuxd stopped) but the phone re-enumerates under the just-opened
+                            // interfaces and the NCM bridge then fails with "incomplete NTB parameters",
+                            // leaving the control channel only - worse than the stale session it tried to fix.
+                            if (Build.VERSION.SDK_INT >= 21 &&
+                                !wiredModeResetAttempted &&
+                                WiredSessionMemory.startedOn(result.device.deviceName)
+                            ) {
                                 wiredModeResetAttempted = true
                                 val switched = iphoneHost.resetCarPlayConfiguration(result.device)
                                 WiredSessionMemory.clear()

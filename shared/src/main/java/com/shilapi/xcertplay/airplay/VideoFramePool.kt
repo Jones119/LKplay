@@ -13,10 +13,19 @@ import java.util.concurrent.atomic.AtomicBoolean
  */
 class OwnedVideoFrame internal constructor(
     val bytes: ByteArray,
-    /** Bytes that belong to this frame; [bytes] may be a larger pooled buffer. */
-    val length: Int,
+    length: Int,
     private val onRelease: (ByteArray) -> Unit,
 ) : Closeable {
+    /**
+     * Bytes that belong to this frame; [bytes] may be a larger pooled buffer.
+     *
+     * Settable only inside this module: the screen stream reads the sealed body straight into
+     * [bytes] and then decrypts in place, so the length is known only after the read (sealed) and
+     * corrected once more after the decrypt (plaintext).
+     */
+    var length: Int = length
+        internal set
+
     private val released = AtomicBoolean(false)
 
     /** A right-sized copy, for consumers that cannot take ownership of the pooled buffer. */

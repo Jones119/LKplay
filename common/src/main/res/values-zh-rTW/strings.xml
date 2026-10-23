@@ -620,4 +620,8 @@
     <string name="screen_corner_mask">螢幕四角圓角遮罩</string>
     <string name="screen_corner_mask_description">車機可視螢幕的開口是圓角的，滿版的 CarPlay 畫面在四角會被車身邊框裁掉。開啟後在螢幕四角依相同弧度塗黑，讓 CarPlay 畫面正好貼合螢幕開口。預設關閉；只有車機確實裁掉畫面四角時才需要開啟。</string>
   <string name="exit_application_description">完全關閉 DiPlay：CarPlay 連線、車機熱點與所有背景執行緒一起結束。</string>
+
+    <string name="experimental_surface_view">使用 SurfaceView（實驗）</string>
+    <string name="experimental_surface_view_description">改用 SurfaceView 承載 CarPlay 畫面，CPU 佔用明顯更低；但可能掉幀，且「畫面調節」與圓角遮罩不可用。下次啟動 CarPlay 生效。</string>
 </resources>
+
