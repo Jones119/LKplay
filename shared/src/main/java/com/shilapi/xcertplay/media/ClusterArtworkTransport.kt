@@ -506,7 +506,9 @@ internal fun carMediaArtworkFileName(title: String?, album: String?, artist: Str
         value?.replace(CAR_MEDIA_FORBIDDEN_NAME_CHARS, "_")?.trim()?.takeIf { it.isNotEmpty() }
 
     val cleanTitle = clean(title) ?: return null
-    val parts = listOfNotNull(cleanTitle, clean(album), clean(artist))
+    // DimInteractionHelper builds album-title-artist and only hands DIM a cover when that exact
+    // file exists (car 2026-10-23), so mirror its order instead of the old title-first name.
+    val parts = listOfNotNull(clean(album) ?: "null", cleanTitle, clean(artist))
     return parts.joinToString("-").take(120) + ".jpg"
 }
 

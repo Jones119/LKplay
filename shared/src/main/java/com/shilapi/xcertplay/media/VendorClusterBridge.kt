@@ -143,6 +143,30 @@ object VendorClusterBridge {
     @Volatile
     private var artworkUri: android.net.Uri? = null
 
+
+    /** Makes every handover a new file path; the cluster caches a picture by path. */
+    @Volatile private var artworkSerial = 0
+
+    /** Last position and when it was seen, to tell playback from a stalled status field. */
+    @Volatile private var lastElapsedMillis: Long? = null
+
+    /** True while the iPhone position keeps moving; a stalled status field still means playing. */
+
+    /** True between the cover-first frame and the delayed title switch. */
+    @Volatile private var positionAdvancing = false
+    @Volatile private var lastElapsedAt = 0L
+
+    /** The bitmap last written to the shared tree; a same-name repeat must not rewrite it. */
+    @Volatile private var lastStoredBitmap: android.graphics.Bitmap? = null
+    /** The track [artworkUri] was named for; a title-only change must not reuse its cover. */
+    @Volatile private var artworkMedia: CarPlayNowPlaying? = null
+
+    /** The track whose metadata DIM has actually received (artwork included). */
+    @Volatile private var dispatchedTitle: String? = null
+
+    /** updateCurrentSourceType is a source event; repeating it per frame also aborts DIM sends. */
+    @Volatile private var sourceTypeSent = false
+
     @Volatile
     private var lastMedia: CarPlayNowPlaying? = null
 
@@ -195,11 +219,20 @@ object VendorClusterBridge {
      * payload every few seconds so a service that restarted -- or a cluster screen that was switched
      * away and back -- fills in again without waiting for the next track. The payload's identity is
      * exactly what the vendor can see, so an update that only moved `artworkTransferId` or `sourceApp`
-     * costs nothing.
      */
     fun pushMedia(now: CarPlayNowPlaying) {
         lastMedia = now
-        if (!enabled) return
+        val at = elapsedNow()
+        val previous = lastElapsedMillis
+        val previousAt = lastElapsedAt
+        positionAdvancing = now.elapsedMillis != null &&
+            previous != null &&
+            now.elapsedMillis > previous &&
+            at - previousAt < 2000L
+        if (now.elapsedMillis != null) {
+            lastElapsedMillis = now.elapsedMillis
+            lastElapsedAt = at
+        }
         startRepushLoop()
         synchronized(pushLock) { dispatchMedia(now, force = false) }
     }
@@ -216,16 +249,42 @@ object VendorClusterBridge {
      */
     private fun dispatchMedia(now: CarPlayNowPlaying, force: Boolean) {
         val context = appContext ?: return
-        val update = clusterMediaUpdate(now, artworkUri)
-        if (!force && !mediaPushGate.shouldPush(update)) return
+        // A cover is only offered for the track it was named for: between a track change and the new
+        // artwork decode `artworkUri` still points at the previous track (car 2026-10-23).
+        val cover = artworkUri.takeIf { sameTrack(artworkMedia, now) }
+        // A new track waits for its artwork: an intermediate update with no cover makes DIM send a
+        // "no cover" frame and abort the background frame that follows, which is what made the cover
+        // appear only sometimes (car 2026-10-23). The text follows once the picture is there.
+        if (cover == null && now.playing && now.title != dispatchedTitle) {
+            Log.i(TAG, "cluster media waits for artwork title=${now.title}")
+            return
+        }
+        val update = clusterMediaUpdate(now, cover)
+        // The vendor re-sends its media frame for every changed payload, position included; at ~2 Hz
+        // that kept the background (cover) screen from ever being sent, while the car own player
+        // pushes metadata changes only and its cover frame does go out (`Receiver back_ack`,
+        // `FrameSenderBackground`). Gate on metadata and send the position separately (E1 2026-10-23).
+        val metadata = update.copy(elapsedMillis = null)
+        if (!force && !mediaPushGate.shouldPush(metadata)) {
+            val target = mediaInteraction(context) ?: return
+            now.elapsedMillis?.let { call(target, "updateCurrentProgress", it) }
+            return
+        }
         val target = mediaInteraction(context) ?: return
-        val status = if (now.playing) PLAYBACK_STATUS_PLAYING else PLAYBACK_STATUS_PAUSED
-        val info = playbackInfo(context, now, status) ?: return
+        // The iPhone sometimes leaves the playback-status field at paused while audio and position
+        // keep going; DIM refuses a cover frame for basePlayState=0 (car 2026-10-23).
+        val playing = now.playing || positionAdvancing
+        val status = if (playing) PLAYBACK_STATUS_PLAYING else PLAYBACK_STATUS_PAUSED
+        val info = playbackInfo(context, now, status, cover) ?: return
         var sent = call(target, "updatePlaybackInfo", info)
-        sent = call(target, "updateCurrentSourceType", SOURCE_TYPE_ONLINE) && sent
+        if (!sourceTypeSent) {
+            sent = call(target, "updateCurrentSourceType", SOURCE_TYPE_ONLINE) && sent
+            if (sent) sourceTypeSent = true
+        }
         now.elapsedMillis?.let { sent = call(target, "updateCurrentProgress", it) && sent }
         if (sent) {
-            mediaPushGate.notePushed(update)
+            mediaPushGate.notePushed(metadata)
+            dispatchedTitle = now.title
             pushSchedule.notePushed(elapsedNow())
         } else {
             mediaPushGate.forget()
@@ -298,6 +357,9 @@ object VendorClusterBridge {
      * A null cover is a real answer, not a failure: it clears the slot, so the head unit paints its
      * own default instead of our placeholder being submitted as if it were the album's art (G6).
      */
+    /** Whether the published cover belongs to [now] and can be reused as-is. */
+    fun artworkMatches(now: CarPlayNowPlaying): Boolean = artworkUri != null && sameTrack(artworkMedia, now)
+
     fun setArtwork(bitmap: android.graphics.Bitmap?) {
         val context = appContext ?: return
         // Read once per handover, so a `setprop` between the decision and the log cannot make the two
@@ -310,16 +372,26 @@ object VendorClusterBridge {
             // This is the one place other than [release] where the delivered bytes may go: a null cover
             // means the vendor is being told there is no artwork, so no URL of ours is in use.
             artworkUri = null
+            artworkMedia = null
             artworkStore?.clear()
         } else {
             // The cover is named after the track, the way the car media centre names its own, so the
             // handover speaks the convention the cluster's working case uses (see
             // [carMediaArtworkFileName]); a track whose metadata never arrived keeps the unique name.
-            val computed = artworkStore(context).publish(
-                bitmap,
-                carMediaArtworkFileName(lastMedia?.title, lastMedia?.album, lastMedia?.artist),
-            )
+            val baseName = carMediaArtworkFileName(lastMedia?.title, lastMedia?.album, lastMedia?.artist)
+            val existingName = artworkUri?.lastPathSegment
+            if (baseName != null && baseName == existingName &&
+                bitmap === lastStoredBitmap &&
+                java.io.File(CLUSTER_ARTWORK_CAR_MEDIA_IMAGES, baseName).isFile
+            ) {
+                artworkMedia = lastMedia
+                if (enabled) lastMedia?.let { pushMedia(it) }
+                return
+            }
+            lastStoredBitmap = bitmap
+            val computed = artworkStore(context).publish(bitmap, baseName)
             artworkUri = handoverUri(property, computed)
+            artworkMedia = lastMedia
         }
         val accepted = parseArtworkUriOverride(property)
         val source = if (accepted != null) CLUSTER_ARTWORK_SOURCE_OVERRIDE else CLUSTER_ARTWORK_SOURCE_TIER
@@ -409,6 +481,9 @@ object VendorClusterBridge {
             artworkStore.also { artworkStore = null }
         }
         artworkUri = null
+        artworkMedia = null
+        dispatchedTitle = null
+        sourceTypeSent = false
         artworkUriChanges = null
         runCatching { store?.close() }
             .onFailure { Log.w(TAG, "cluster artwork store close failed", it) }
@@ -625,21 +700,24 @@ object VendorClusterBridge {
     }
 
     /** A dynamic proxy for the vendor's plain `IPlaybackInfo` interface. */
-    private fun playbackInfo(context: Context, now: CarPlayNowPlaying, status: Int): Any? {
+    private fun playbackInfo(context: Context, now: CarPlayNowPlaying, status: Int, artwork: android.net.Uri?, sourceType: Int = SOURCE_TYPE_ONLINE): Any? {
         val type = runCatching {
             Class.forName("com.ecarx.xui.adaptapi.diminteraction.IMediaInteraction\$IPlaybackInfo")
         }.getOrNull() ?: return null
         return runCatching {
-            Proxy.newProxyInstance(type.classLoader, arrayOf(type), PlaybackInfoHandler(now, status))
+            Proxy.newProxyInstance(type.classLoader, arrayOf(type), PlaybackInfoHandler(now, status, artwork, sourceType))
         }.getOrElse {
             Log.w(TAG, "cluster playback info proxy failed", it)
             null
         }
     }
 
+
     private class PlaybackInfoHandler(
         private val now: CarPlayNowPlaying,
         private val status: Int,
+        private val artwork: android.net.Uri?,
+        private val sourceType: Int,
     ) : InvocationHandler {
         override fun invoke(proxy: Any?, method: Method, args: Array<out Any?>?): Any? = when (method.name) {
             "getTitle" -> now.title
@@ -647,8 +725,8 @@ object VendorClusterBridge {
             "getAlbum" -> now.album
             "getDuration" -> now.durationMillis ?: 0L
             "getPlaybackStatus" -> status
-            "getSourceType" -> SOURCE_TYPE_ONLINE
-            "getArtwork" -> artworkUri
+            "getSourceType" -> sourceType
+            "getArtwork" -> artwork
             "getPlayingItemPositionInQueue" -> 0
             "getLoopMode" -> 0
             "hashCode" -> System.identityHashCode(proxy)
@@ -838,6 +916,14 @@ internal data class ClusterMediaUpdate(
 )
 
 /** The payload of one push, as the vendor's getters will see it. */
+
+/** Whether [previous] names the same track as [next]; elapsed time and play state do not count. */
+private fun sameTrack(previous: CarPlayNowPlaying?, next: CarPlayNowPlaying): Boolean =
+    previous != null &&
+        previous.title == next.title &&
+        previous.artist == next.artist &&
+        previous.album == next.album
+
 internal fun clusterMediaUpdate(now: CarPlayNowPlaying, artworkUri: android.net.Uri?): ClusterMediaUpdate =
     ClusterMediaUpdate(
         title = now.title,

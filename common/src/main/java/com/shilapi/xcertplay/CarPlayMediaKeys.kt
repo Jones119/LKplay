@@ -97,6 +97,8 @@ internal object CarPlayMediaKeys {
      * already-decoded cover for the transfer the metadata *does* name always wins.
      */
     private var pendingCover: Bitmap? = null
+    /** Transfer id [pendingCover] belongs to; a cover must never be published for another id. */
+    private var pendingCoverId: Int? = null
 
     @Synchronized
     fun attach(context: Context, next: CarPlayController) {
@@ -109,7 +111,6 @@ internal object CarPlayMediaKeys {
         // The placeholder is materialised here so the cluster state machine can be told what not to
         // publish; it is the same instance the media session falls back to.
         if (placeholder == null) placeholder = placeholderArt(context)
-        clusterArtwork = ClusterArtworkAssociation(placeholder = placeholder)
         next.playbackListener = { playing -> onIphonePlaying(next, playing) }
         next.nowPlayingListener = { update -> onNowPlayingChanged(next, update) }
         next.artworkListener = { id, bytes -> onArtworkChanged(next, id, bytes) }
@@ -174,8 +175,17 @@ internal object CarPlayMediaKeys {
                 // which is what lets a track whose artist/album arrive in a later frame keep its cover
                 // instead of being mistaken for a new track (G3).
                 val announced = update.artworkTransferId?.let { artworkCache[it] }
-                val offered = announced ?: pendingCover ?: artwork
+                // Never hand the retained previous picture over as the new track cover: doing that
+                // wrote track A bitmap under track B name, and the cluster showed a one-track lag
+                // (A to A, B to A, D showed C; car 2026-10-23). Only the bitmap the phone paired with
+                // this transfer id may be published; until it arrives the cluster keeps the old one.
+                if (update.artworkTransferId != nowPlaying.artworkTransferId) {
+                    pendingCover = null
+                    pendingCoverId = null
+                }
+                val offered = announced ?: pendingCover?.takeIf { pendingCoverId == update.artworkTransferId }
                 pendingCover = null
+                pendingCoverId = null
                 if (titleOnlyChurn) {
                     Log.i(TAG, "cluster cover held across title churn title=${update.title}")
                 } else {
@@ -209,6 +219,7 @@ internal object CarPlayMediaKeys {
         if (nowPlaying.artworkTransferId == id) {
             artwork = decoded
             pendingCover = null
+            pendingCoverId = null
             session?.setMetadata(MediaSessionBridgeFactory.metadataOf(nowPlaying, shownArtworkLocked()))
             // The single-point id match is kept for the media session, but the cluster's cover is no
             // longer gated on it (G3): it now follows the track's identity instead.
@@ -218,6 +229,7 @@ internal object CarPlayMediaKeys {
             // cluster would show the first track's cover for the rest of the session, which is the
             // reported fault; hold them as the next metadata frame's candidate instead.
             pendingCover = decoded
+            pendingCoverId = id
             Log.i(TAG, "artwork parked id=$id current=${nowPlaying.artworkTransferId}")
         }
     }
@@ -234,24 +246,27 @@ internal object CarPlayMediaKeys {
      * instance for a retained cover, and the metadata stream repeats about twice a second.
      */
     private fun publishClusterCoverLocked(offered: Bitmap?) {
-        val association = clusterArtwork ?: return
-        val cover = association.associate(
-            title = nowPlaying.title,
-            artist = nowPlaying.artist,
-            album = nowPlaying.album,
-            playing = nowPlaying.playing,
-            artwork = offered,
-        )
-        if (cover === clusterCover) return
-        clusterCover = cover
-        // One line per actual cover change, not per metadata frame: this is the line the on-car check
-        // greps for next to the vendor's own `albumCover2`.
+        // The iPhone pairs artwork with the track through artworkTransferId; trust that instead of the
+        // identity machine, which kept dropping covers whose metadata lagged the decode (car
+        // 2026-10-23: `artwork decoded id=132` followed by `artwork=null` for the rest of the track).
+        if (offered == null) {
+            if (clusterCover != null && nowPlaying.playing) {
+                Log.i(TAG, "cluster cover held through track change title=${nowPlaying.title}")
+                return
+            }
+            clusterCover = null
+            runCatching { com.shilapi.xcertplay.media.VendorClusterBridge.setArtwork(null) }
+            return
+        }
+        val repeated = offered === clusterCover
+        if (repeated && com.shilapi.xcertplay.media.VendorClusterBridge.artworkMatches(nowPlaying)) return
+        clusterCover = offered
         Log.i(
             TAG,
-            "cluster cover identity=${association.retainedIdentity()} offered=${offered != null} " +
-                "published=${cover != null}",
+            "cluster cover id=${nowPlaying.artworkTransferId} title=${nowPlaying.title} " +
+                "rehand=${repeated && !com.shilapi.xcertplay.media.VendorClusterBridge.artworkMatches(nowPlaying)}",
         )
-        runCatching { com.shilapi.xcertplay.media.VendorClusterBridge.setArtwork(cover) }
+        runCatching { com.shilapi.xcertplay.media.VendorClusterBridge.setArtwork(offered) }
     }
 
     // Another car app (its own Spotify, the radio) took audio focus and with it the steering-wheel
@@ -298,6 +313,13 @@ internal object CarPlayMediaKeys {
         legacyKeysRegistered = true
         Log.i(TAG, "media keys active (legacy MEDIA_BUTTON) focusGranted=$focusHeld")
     }
+
+    /**
+     * Re-claims the 4.4 MEDIA_BUTTON route. The media centre enables its own receiver when we claim
+     * the source; on 4.4 the last registered receiver wins, and re-registering an already registered
+     * component does not reorder it, so drop ours first.
+     */
+    @Synchronized
 
     @Suppress("DEPRECATION")
     private fun stopLegacyKeys(context: Context) {
@@ -380,6 +402,7 @@ internal object CarPlayMediaKeys {
         clusterArtwork?.reset()
         clusterCover = null
         pendingCover = null
+        pendingCoverId = null
         appContext?.let(::stopLegacyKeys)
         focusHeld = false
     }

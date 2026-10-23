@@ -147,19 +147,19 @@ class ClusterArtworkTierTest {
     /**
      * The name a cover carries in the car media centre's own tree, which is the shape the cluster draws.
      *
-     * Measured on the car on 2026-10-13: `/sdcard/Music/mediacenter/images/逆光-我怀念的-孙燕姿.jpg` is
-     * one of the media centre's own covers, written while its player was on screen with the cover showing
-     * on the instrument cluster.
+     * Measured on the car on 2026-10-23: `DimInteractionHelper` builds `album-title-artist` and only
+     * hands DIM a cover when that exact file exists (2026-10-13 catalogued a title-first file, which
+     * the media centre never looked for).
      */
     @Test
     fun theCarMediaCoverNameFollowsTheConventionTheClusterDraws() {
-        assertEquals("逆光-我怀念的-孙燕姿.jpg", carMediaArtworkFileName("逆光", "我怀念的", "孙燕姿"))
-        assertEquals("甲-乙.jpg", carMediaArtworkFileName("甲", "乙", null))
-        assertEquals("Only Title.jpg", carMediaArtworkFileName("Only Title", null, null))
+        assertEquals("我怀念的-逆光-孙燕姿.jpg", carMediaArtworkFileName("逆光", "我怀念的", "孙燕姿"))
+        assertEquals("乙-甲.jpg", carMediaArtworkFileName("甲", "乙", null))
+        assertEquals("null-Only Title.jpg", carMediaArtworkFileName("Only Title", null, null))
         // No title means nothing to pair the cover with, so the caller's unique name stays.
         assertNull(carMediaArtworkFileName(null, "album", "artist"))
         assertNull(carMediaArtworkFileName("   ", "album", "artist"))
         // No separator a file name may not carry survives, and the parts are trimmed.
-        assertEquals("a_b-c_d-e.jpg", carMediaArtworkFileName("a/b", "c:d", " e "))
+        assertEquals("c_d-a_b-e.jpg", carMediaArtworkFileName("a/b", "c:d", " e "))
     }
 }
