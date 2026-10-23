@@ -64,6 +64,10 @@ object VendorClusterBridge {
     private const val PLAYBACK_STATUS_PAUSED = 0
     private const val PLAYBACK_STATUS_PLAYING = 1
 
+    /** `debug.diplay.cover_refresh=0` disables the post-cover refresh (bench A/B). */
+    private const val COVER_REFRESH_PROPERTY = "debug.diplay.cover_refresh"
+    private const val COVER_REFRESH_DELAY_MILLIS = 1500L
+
     @Volatile
     private var appContext: Context? = null
 
@@ -75,6 +79,9 @@ object VendorClusterBridge {
 
     /** Serialises the media push: it now runs from the iAP2 thread, the main thread and the timer. */
     private val pushLock = Any()
+
+    /** One pending cover refresh; a new cover cancels the previous refresh. */
+    private val coverRefreshHandler = android.os.Handler(android.os.Looper.getMainLooper())
 
     /** The last payload the vendor was handed, so an unchanged one is not dispatched again (G9). */
     private val mediaPushGate = ClusterMediaPushGate()
@@ -161,11 +168,12 @@ object VendorClusterBridge {
     /** The track [artworkUri] was named for; a title-only change must not reuse its cover. */
     @Volatile private var artworkMedia: CarPlayNowPlaying? = null
 
-    /** The track whose metadata DIM has actually received (artwork included). */
-    @Volatile private var dispatchedTitle: String? = null
 
     /** updateCurrentSourceType is a source event; repeating it per frame also aborts DIM sends. */
     @Volatile private var sourceTypeSent = false
+
+    /** The source list is a menu event too; the car app sends it before the current source. */
+    @Volatile private var sourceListSent = false
 
     @Volatile
     private var lastMedia: CarPlayNowPlaying? = null
@@ -247,18 +255,11 @@ object VendorClusterBridge {
      * retried on the next update and by the shorter post-failure timer, instead of being remembered
      * as "sent" forever.
      */
-    private fun dispatchMedia(now: CarPlayNowPlaying, force: Boolean) {
+    private fun dispatchMedia(now: CarPlayNowPlaying, force: Boolean, coverOverride: android.net.Uri? = null, useCoverOverride: Boolean = false) {
         val context = appContext ?: return
         // A cover is only offered for the track it was named for: between a track change and the new
         // artwork decode `artworkUri` still points at the previous track (car 2026-10-23).
-        val cover = artworkUri.takeIf { sameTrack(artworkMedia, now) }
-        // A new track waits for its artwork: an intermediate update with no cover makes DIM send a
-        // "no cover" frame and abort the background frame that follows, which is what made the cover
-        // appear only sometimes (car 2026-10-23). The text follows once the picture is there.
-        if (cover == null && now.playing && now.title != dispatchedTitle) {
-            Log.i(TAG, "cluster media waits for artwork title=${now.title}")
-            return
-        }
+        val cover = if (useCoverOverride) coverOverride else artworkUri.takeIf { sameTrack(artworkMedia, now) }
         val update = clusterMediaUpdate(now, cover)
         // The vendor re-sends its media frame for every changed payload, position included; at ~2 Hz
         // that kept the background (cover) screen from ever being sent, while the car own player
@@ -277,6 +278,10 @@ object VendorClusterBridge {
         val status = if (playing) PLAYBACK_STATUS_PLAYING else PLAYBACK_STATUS_PAUSED
         val info = playbackInfo(context, now, status, cover) ?: return
         var sent = call(target, "updatePlaybackInfo", info)
+        if (!sourceListSent) {
+            sent = call(target, "updateMediaSourceTypeList", intArrayOf(SOURCE_TYPE_ONLINE)) && sent
+            if (sent) sourceListSent = true
+        }
         if (!sourceTypeSent) {
             sent = call(target, "updateCurrentSourceType", SOURCE_TYPE_ONLINE) && sent
             if (sent) sourceTypeSent = true
@@ -284,7 +289,6 @@ object VendorClusterBridge {
         now.elapsedMillis?.let { sent = call(target, "updateCurrentProgress", it) && sent }
         if (sent) {
             mediaPushGate.notePushed(metadata)
-            dispatchedTitle = now.title
             pushSchedule.notePushed(elapsedNow())
         } else {
             mediaPushGate.forget()
@@ -313,7 +317,7 @@ object VendorClusterBridge {
         // is what `dispatchMedia` reports, and the two must not be conflated in a log that the on-car
         // check greps.
         Log.i(TAG, "cluster repush due title=${now.title} playing=${now.playing} artwork=$artworkUri")
-        synchronized(pushLock) { dispatchMedia(now, force = true) }
+        synchronized(pushLock) { dispatchMedia(now, force = false) }
     }
 
     private fun startRepushLoop() {
@@ -386,6 +390,7 @@ object VendorClusterBridge {
             ) {
                 artworkMedia = lastMedia
                 if (enabled) lastMedia?.let { pushMedia(it) }
+                scheduleCoverRefresh()
                 return
             }
             lastStoredBitmap = bitmap
@@ -402,7 +407,45 @@ object VendorClusterBridge {
         }
         // Re-send so the cluster picks the new cover up with the current track.
         if (enabled) lastMedia?.let { pushMedia(it) }
+        scheduleCoverRefresh()
     }
+
+
+    /**
+     * Re-sends the current media about 1.5 s after a cover lands, with an invisible title change.
+     *
+     * DIM dedupes an unchanged (cover,title) pair, and the cluster refreshes a card with the
+     * background it already holds: the frame that carries a new background is the one whose refresh
+     * still shows the previous picture (car 2026-10-23). A later foreground gives the card a refresh
+     * that can use the background already received. `debug.diplay.cover_refresh=0` disables it.
+     */
+    private fun scheduleCoverRefresh() {
+        if (debugProperty(COVER_REFRESH_PROPERTY)?.trim() == "0") return
+        val media = lastMedia ?: return
+        val title = media.title ?: return
+        coverRefreshHandler.removeCallbacksAndMessages(null)
+        coverRefreshHandler.postDelayed({
+            val current = lastMedia ?: return@postDelayed
+            if (current.title != media.title ||
+                current.album != media.album ||
+                current.artist != media.artist
+            ) {
+                return@postDelayed
+            }
+            val refreshed = current.copy(title = title + "\u200B")
+            synchronized(pushLock) {
+                dispatchMedia(
+                    refreshed,
+                    force = true,
+                    coverOverride = android.net.Uri.parse("http://127.0.0.1/refresh"),
+                    useCoverOverride = true,
+                )
+            }
+            Log.i(TAG, "cluster cover refresh title=$title")
+            mediaPushGate.notePushed(clusterMediaUpdate(current, artworkUri).copy(elapsedMillis = null))
+        }, COVER_REFRESH_DELAY_MILLIS)
+    }
+
 
     /**
      * The Uri for this handover: the usable bench override when one is set, the computed one otherwise.
@@ -478,12 +521,13 @@ object VendorClusterBridge {
      */
     fun release() {
         val store = synchronized(pushLock) {
+        coverRefreshHandler.removeCallbacksAndMessages(null)
             artworkStore.also { artworkStore = null }
         }
         artworkUri = null
         artworkMedia = null
-        dispatchedTitle = null
         sourceTypeSent = false
+        sourceListSent = false
         artworkUriChanges = null
         runCatching { store?.close() }
             .onFailure { Log.w(TAG, "cluster artwork store close failed", it) }
@@ -917,12 +961,24 @@ internal data class ClusterMediaUpdate(
 
 /** The payload of one push, as the vendor's getters will see it. */
 
-/** Whether [previous] names the same track as [next]; elapsed time and play state do not count. */
-private fun sameTrack(previous: CarPlayNowPlaying?, next: CarPlayNowPlaying): Boolean =
+/**
+ * Whether [previous] names the same track as [next]; elapsed time and play state do not count.
+ *
+ * A field that was missing when the cover was published may arrive in a later NowPlaying frame
+ * (artist/album are incremental), so a missing previous value is compatible with any later value --
+ * the rule EasyPlay uses in `LegacyVehicleArtwork.Identity.fillsMissingFieldsOf`. A value that was
+ * present must match: otherwise a different track would inherit the previous cover.
+ */
+internal fun sameTrack(previous: CarPlayNowPlaying?, next: CarPlayNowPlaying): Boolean =
     previous != null &&
-        previous.title == next.title &&
-        previous.artist == next.artist &&
-        previous.album == next.album
+        comparableTitle(previous.title) == comparableTitle(next.title) &&
+        sameOrMissing(previous.artist, next.artist) &&
+        sameOrMissing(previous.album, next.album)
+
+private fun sameOrMissing(previous: String?, next: String?): Boolean =
+    previous.isNullOrBlank() || previous == next
+
+private fun comparableTitle(title: String?): String? = title?.replace("\u200B", "")
 
 internal fun clusterMediaUpdate(now: CarPlayNowPlaying, artworkUri: android.net.Uri?): ClusterMediaUpdate =
     ClusterMediaUpdate(

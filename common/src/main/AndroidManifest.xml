@@ -109,12 +109,19 @@
             </intent-filter>
         </receiver>
 
-        <!-- CS11 / Android 4.4: steering-wheel media keys arrive as MEDIA_BUTTON broadcasts. -->
+        <!--
+            CS11 / Android 4.4: steering-wheel media keys arrive as MEDIA_BUTTON broadcasts.
+            The priority is the one playtool 1.6 uses (2147483647) so this manifest receiver wins
+            against any other manifest receiver for the same key; the explicit
+            AudioManager.registerMediaButtonEventReceiver in CarPlayMediaKeys still decides between
+            this receiver and a dynamically registered one (the media centre registers its own when
+            an app calls requestPlay).
+        -->
         <receiver
             android:name="com.shilapi.xcertplay.MediaButtonReceiver"
             android:enabled="true"
             android:exported="true">
-            <intent-filter>
+            <intent-filter android:priority="2147483647">
                 <action android:name="android.intent.action.MEDIA_BUTTON" />
             </intent-filter>
         </receiver>
