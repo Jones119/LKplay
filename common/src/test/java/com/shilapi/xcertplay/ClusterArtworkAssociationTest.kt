@@ -1,6 +1,7 @@
 package com.shilapi.xcertplay
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Test
@@ -102,14 +103,15 @@ class ClusterArtworkAssociationTest {
     }
 
     @Test
-    fun pausedPlaybackClearsTheRetainedCover() {
+    fun pausedPlaybackKeepsTheRetainedCover() {
         val covers = ClusterArtworkAssociation<String>()
         assertSame(coverOne, covers.associate("Track A", "Artist", "Album", playing = true, artwork = coverOne))
 
-        assertNull(covers.associate("Track A", "Artist", "Album", playing = false, artwork = null))
-        assertNull(covers.retainedIdentity())
-        // Nothing was retained, so resuming has no cover to fall back on until the iPhone sends one.
-        assertNull(covers.associate("Track A", "Artist", "Album", playing = true, artwork = null))
+        // A paused frame arrives mid-playback (and whenever the car radio takes focus for a moment); the
+        // cover stays so it does not flash and vanish, and resuming brings it straight back.
+        assertSame(coverOne, covers.associate("Track A", "Artist", "Album", playing = false, artwork = null))
+        assertNotNull(covers.retainedIdentity())
+        assertSame(coverOne, covers.associate("Track A", "Artist", "Album", playing = true, artwork = null))
     }
 
     @Test

@@ -12,8 +12,9 @@ package com.shilapi.xcertplay
  *
  * - a retained cover survives pure position/album-art-less updates of the same track, so a track that
  *   is announced in pieces keeps the cover it already had;
- * - it is dropped when the identity changes, when there is no title to attach it to, or when playback
- *   is paused -- never kept "just in case" and shown against the wrong song;
+ * - it is dropped when the identity changes, or when there is no title to attach it to -- never kept
+ *   "just in case" and shown against the wrong song. A paused frame keeps it: pauses are transient and the
+ *   phone sends them mid-playback, and clearing there made the cover flash and vanish (2026-10-23);
  * - when an update carries no new artwork, the retained cover comes back out, so an update that only
  *   moved the position re-associates the same image rather than clearing it;
  * - metadata arriving in pieces is tracked with the pending-title / inherited-artist / inherited-album
@@ -86,8 +87,11 @@ internal class ClusterArtworkAssociation<Cover : Any>(private val placeholder: C
     ): Cover? {
         val offered = artwork?.takeIf { it !== placeholder }
         val identity = Identity(nonBlank(title), nonBlank(artist), nonBlank(album))
-        // A cover is only ever kept for a named, playing track; anything else invalidates it.
-        val canRetain = identity.title != null && playing
+        // A cover is only ever kept for a named track. Pause deliberately no longer invalidates it: the
+        // iPhone sends a paused frame in the middle of ordinary playback (and every time the car radio takes
+        // focus for a moment), and clearing there is what made a cover flash and disappear within a second
+        // (measured on the car 2026-10-23). A real stop clears the title, which still drops it.
+        val canRetain = identity.title != null
         if (canRetain) {
             if (retainedFor != identity) clearRetained()
         } else {

@@ -1,5 +1,7 @@
 package com.shilapi.xcertplay.media
 
+import android.util.Log
+
 import com.shilapi.xcertplay.iap2.body.Iap2BodyReader
 import com.shilapi.xcertplay.iap2.message.Iap2ControlMessages
 import com.shilapi.xcertplay.iap2.wire.Iap2Frame
@@ -44,6 +46,21 @@ class CarPlayPlaybackStatus {
             elapsedMillis = playback.updatedU32(ELAPSED, previous.elapsedMillis),
             playing = playback.updatedStatus(previous.playing),
         )
+        // Diagnostic for the cluster cover that flashes and disappears (2026-10-23): a frame that
+        // carries an empty TITLE clears the identity and the cover with it.
+        if (previous.title != null && next.title == null) {
+            runCatching {
+                Log.i(
+                    "DiPlay-MediaKeys",
+                    "now playing title cleared titlePresent=${media?.has(TITLE)} artist=${next.artist} " +
+                        "album=${next.album} artworkId=${next.artworkTransferId} playing=${next.playing} " +
+                        "source=${next.sourceApp}",
+                )
+            }
+        }
+        if (previous.artworkTransferId != next.artworkTransferId) {
+            runCatching { Log.i("DiPlay-MediaKeys", "now playing artwork id=${next.artworkTransferId} title=${next.title}") }
+        }
         if (next == previous) return null
         nowPlaying = next
         // Mirror what is playing onto the instrument cluster (inert unless the cluster switch is on).

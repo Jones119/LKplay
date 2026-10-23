@@ -8,6 +8,7 @@ import android.view.KeyEvent
 import com.shilapi.xcertplay.airplay.CarPlayMediaButton
 import com.shilapi.xcertplay.media.CarPlayNowPlaying
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
@@ -145,6 +146,23 @@ class CarPlayMediaCallbackTest {
         assertSame(cached, CarPlayMediaKeys.nextArtwork(7, mapOf(7 to cached), previous))
         assertNull(CarPlayMediaKeys.nextArtwork(7, mapOf(7 to null), previous))
         assertNull(CarPlayMediaKeys.nextArtwork(null, mapOf(7 to cached), previous))
+    }
+
+    @Test
+    fun aTitleThatMovesAloneIsNotATrackChange() {
+        val first = CarPlayNowPlaying(
+            title = "line one",
+            artist = "Artist",
+            album = "Album",
+            durationMillis = 1_000,
+            artworkTransferId = 7,
+        )
+        assertTrue(CarPlayMediaKeys.clusterTitleOnlyChurn(first, first.copy(title = "line two")))
+        assertFalse(CarPlayMediaKeys.clusterTitleOnlyChurn(first, first.copy(title = "line two", artworkTransferId = 8)))
+        assertFalse(CarPlayMediaKeys.clusterTitleOnlyChurn(first, first.copy(title = "line two", durationMillis = 2_000)))
+        assertFalse(CarPlayMediaKeys.clusterTitleOnlyChurn(first, first.copy(title = "line two", artist = "Other")))
+        // A title correction with nothing else changed also keeps the cover.
+        assertTrue(CarPlayMediaKeys.clusterTitleOnlyChurn(first, first.copy(title = "Corrected")))
     }
 
     @Test

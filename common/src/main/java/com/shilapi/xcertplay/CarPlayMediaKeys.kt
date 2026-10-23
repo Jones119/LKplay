@@ -150,6 +150,14 @@ internal object CarPlayMediaKeys {
                     artwork = nextArtwork(update.artworkTransferId, artworkCache, artwork)
                 }
                 if (nowPlaying.elapsedMillis != update.elapsedMillis) elapsedUpdatedAt = SystemClock.elapsedRealtime()
+                if (previousArtwork != null && artwork == null) {
+                    Log.i(TAG, "artwork cleared for transfer=${update.artworkTransferId} title=${update.title} " +
+                    "playing=${update.playing}")
+                }
+                // QQ Music streams lyric lines through the title field and the iPhone corrects a title just after
+                // the cover arrived. Neither is a new track: artist, album, duration and the artwork transfer
+                // all stay, so the cover must not be re-associated (it flashes and disappears otherwise).
+                val titleOnlyChurn = clusterTitleOnlyChurn(nowPlaying, update)
                 val metadataChanged = metadataChanged(nowPlaying, update) || artwork !== previousArtwork
                 nowPlaying = update
                 // The iPhone repeats NowPlayingUpdate about twice a second for the position alone.
@@ -168,7 +176,11 @@ internal object CarPlayMediaKeys {
                 val announced = update.artworkTransferId?.let { artworkCache[it] }
                 val offered = announced ?: pendingCover ?: artwork
                 pendingCover = null
-                publishClusterCoverLocked(offered)
+                if (titleOnlyChurn) {
+                    Log.i(TAG, "cluster cover held across title churn title=${update.title}")
+                } else {
+                    publishClusterCoverLocked(offered)
+                }
             }
         }
     }
@@ -351,6 +363,7 @@ internal object CarPlayMediaKeys {
     }
 
     private fun releaseLocked() {
+        Log.i(TAG, "media session released title=${nowPlaying.title} playing=${nowPlaying.playing}")
         artworkOwner = null
         artworkQueue.clear()
         MediaKeyEchoGate.reset()
@@ -409,6 +422,22 @@ internal object CarPlayMediaKeys {
         val sent = synchronized(this) { controller }?.sendMediaButton(index) ?: false
         Log.i(TAG, "media key $source -> CarPlay $index sent=$sent")
     }
+
+    /**
+     * A title that moved while artist, album, duration and the artwork transfer all stayed put.
+     *
+     * QQ Music streams lyric lines through the NowPlayingUpdate title field, and the iPhone sometimes corrects
+     * a title right after the cover arrives. Neither is a track change, so the cluster cover must stay
+     * (measured on the car 2026-10-23: the cover was published and cleared again within half a second on every
+     * lyric line).
+     */
+    internal fun clusterTitleOnlyChurn(previous: CarPlayNowPlaying, next: CarPlayNowPlaying): Boolean =
+        previous.title != null && next.title != null &&
+            previous.title != next.title &&
+            previous.artist == next.artist &&
+            previous.album == next.album &&
+            previous.durationMillis == next.durationMillis &&
+            previous.artworkTransferId == next.artworkTransferId
 
     /** Whether [next] changes what the media session's metadata shows; position and play state do not. */
     internal fun metadataChanged(previous: CarPlayNowPlaying, next: CarPlayNowPlaying): Boolean =
