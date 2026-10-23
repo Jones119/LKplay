@@ -548,6 +548,9 @@ class CarPlayHostActivity : ComponentActivity() {
             }
         }
         applyFullscreenMode()
+        // Bench: db shell setprop debug.diplay.settings_menu 1 opens the three-finger menu on start, so
+        // the layout can be screenshotted at a head unit's exact resolution without injecting multi-touch.
+        if (debugSettingsMenuRequested()) window.decorView.post { openSettingsMenu() }
         onBackPressedDispatcher.addCallback(
             this,
             object : OnBackPressedCallback(true) {
@@ -1251,11 +1254,15 @@ class CarPlayHostActivity : ComponentActivity() {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(settingsTheme.surface)
         }
+        // The car's window is 1280x650 (the launcher keeps a bar below it). Nine categories plus a
+        // three-row footer do not fit that height with the tablet spacing, so the menu uses a compact
+        // scale there: smaller rail and type, and a scrolling rail so no category is cut off.
+        val compact = compactSettingsMenu()
 
         val header = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(16), dp(16), dp(32), dp(4))
+            setPadding(dp(if (compact) 10 else 16), dp(if (compact) 6 else 16), dp(if (compact) 16 else 32), dp(if (compact) 2 else 4))
         }
         header.addView(
             SettingsWidgets.createButton(
@@ -1282,10 +1289,14 @@ class CarPlayHostActivity : ComponentActivity() {
         val body = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         val nav = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(24), dp(8), dp(24), dp(16))
+            setPadding(dp(if (compact) 12 else 24), dp(if (compact) 4 else 8), dp(if (compact) 12 else 24), dp(if (compact) 8 else 16))
         }
         val pageHost = FrameLayout(this)
-        body.addView(nav, LinearLayout.LayoutParams(dp(280), ViewGroup.LayoutParams.MATCH_PARENT))
+        val navScroll = ScrollView(this).apply {
+            isFillViewport = false
+            addView(nav, ViewGroup.LayoutParams(-1, -2))
+        }
+        body.addView(navScroll, LinearLayout.LayoutParams(dp(if (compact) 200 else 280), ViewGroup.LayoutParams.MATCH_PARENT))
         body.addView(pageHost, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
         panel.addView(body, LinearLayout.LayoutParams(-1, 0, 1f))
 
@@ -1302,7 +1313,7 @@ class CarPlayHostActivity : ComponentActivity() {
             val column = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER_HORIZONTAL
-                setPadding(dp(8), dp(8), dp(40), dp(24))
+                setPadding(dp(if (compact) 4 else 8), dp(if (compact) 4 else 8), dp(if (compact) 16 else 40), dp(if (compact) 20 else 24))
             }
             val scroll = ScrollView(this).apply {
                 isFillViewport = true
@@ -1313,14 +1324,14 @@ class CarPlayHostActivity : ComponentActivity() {
             pages[name] = scroll
             val label = TextView(this).apply {
                 text = title
-                textSize = 17f
+                textSize = if (compact) 15f else 17f
                 setTextColor(settingsTheme.textSecondary)
-                setPadding(dp(16), dp(16), dp(16), dp(16))
+                setPadding(dp(if (compact) 10 else 16), dp(if (compact) 7 else 16), dp(if (compact) 10 else 16), dp(if (compact) 7 else 16))
                 isClickable = true
                 isFocusable = true
                 setOnClickListener { selectPage(name) }
             }
-            nav.addView(label, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(2) })
+            nav.addView(label, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(if (compact) 0 else 2) })
             navLabels[name] = label
             return column
         }
@@ -1694,7 +1705,7 @@ class CarPlayHostActivity : ComponentActivity() {
 
         val footer = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(32), dp(4), dp(32), dp(16))
+            setPadding(dp(if (compact) 16 else 32), dp(if (compact) 2 else 4), dp(if (compact) 16 else 32), dp(if (compact) 6 else 16))
         }
         panel.addView(footer, LinearLayout.LayoutParams(-1, -2))
 
@@ -1703,11 +1714,12 @@ class CarPlayHostActivity : ComponentActivity() {
             getString(R.string.save_and_reconnect),
             style = SettingsWidgets.ButtonStyle.PRIMARY,
             theme = settingsTheme,
+            minHeightDp = if (compact) 40 else 52,
         ) { saveSettingsAndReconnect() }
         footer.addView(save, LinearLayout.LayoutParams(-1, -2))
 
         val primaryRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        footer.addView(primaryRow, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
+        footer.addView(primaryRow, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(if (compact) 4 else 8) })
 
         // The one action that leaves CarPlay: the danger tier, so it is as unmissable as the white button
         // and still reads as the irreversible one.
@@ -1716,6 +1728,7 @@ class CarPlayHostActivity : ComponentActivity() {
             getString(R.string.exit_application),
             style = SettingsWidgets.ButtonStyle.DANGER,
             theme = settingsTheme,
+            minHeightDp = if (compact) 40 else 52,
         ) { exitApplication() }
         primaryRow.addView(
             exitApplicationButton,
@@ -1729,7 +1742,7 @@ class CarPlayHostActivity : ComponentActivity() {
         )
 
         val secondaryRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        footer.addView(secondaryRow, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
+        footer.addView(secondaryRow, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(if (compact) 4 else 8) })
 
         var gestureFingerLabel = gestureFingerCount
         val gestureButton = settingsAction(
@@ -2993,7 +3006,7 @@ class CarPlayHostActivity : ComponentActivity() {
     private fun settingsAction(
         title: String,
         onClick: () -> Unit,
-    ): Button = SettingsWidgets.createButton(this, title, theme = settingsTheme) { onClick() }
+    ): Button = SettingsWidgets.createButton(this, title, theme = settingsTheme, minHeightDp = if (compactSettingsMenu()) 40 else 52) { onClick() }
 
     private fun updateHotspotStatus(status: CarPlayStatus) {
         if (!wirelessEnabled) return
@@ -3181,6 +3194,17 @@ class CarPlayHostActivity : ComponentActivity() {
      * the stream size the iPhone is asked for, so a different aspect ratio than the view will letterbox.
      * Kept read-only and opt-in: an absent or malformed property changes nothing.
      */
+    /** `debug.diplay.settings_menu` as a bench switch: 1/true opens the settings menu at start. */
+    private fun debugSettingsMenuRequested(): Boolean = runCatching {
+        val raw = Class.forName("android.os.SystemProperties")
+            .getMethod("get", String::class.java)
+            .invoke(null, "debug.diplay.settings_menu") as? String
+        val text = raw?.trim().orEmpty()
+        text == "1" || text.equals("true", ignoreCase = true)
+    }.getOrDefault(false)
+    /** The head unit keeps a 1280x650 window above its own bar; the tablet has room to spare. */
+    private fun compactSettingsMenu(): Boolean = resources.displayMetrics.heightPixels < 800
+
     private fun debugCanvasOverride(): DisplaySize? = runCatching {
         val raw = Class.forName("android.os.SystemProperties")
             .getMethod("get", String::class.java)
