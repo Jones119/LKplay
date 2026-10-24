@@ -163,12 +163,12 @@ object VendorClusterBridge {
     @Volatile private var positionAdvancing = false
     @Volatile private var lastElapsedAt = 0L
 
-    /** The last payload the vendor accepted; used to tell lyric churn from a new track. */
-    @Volatile private var lastPushedUpdate: ClusterMediaUpdate? = null
+    /** The song name of the current track: the first title seen, kept across lyric-line churn. */
+    @Volatile private var stableTitle: String? = null
 
+    /** The raw media the stable title was taken from; a new track replaces it. */
+    @Volatile private var stableTitleMedia: CarPlayNowPlaying? = null
 
-    /** Transfer id of [lastPushedUpdate]; a lyric line keeps it, a new track changes it. */
-    @Volatile private var lastPushedArtworkId: Int? = null
     /** The bitmap last written to the shared tree; a same-name repeat must not rewrite it. */
     @Volatile private var lastStoredBitmap: android.graphics.Bitmap? = null
     /** The track [artworkUri] was named for; a title-only change must not reuse its cover. */
@@ -226,8 +226,19 @@ object VendorClusterBridge {
         get() = appContext != null && resolveClusterBridgeEnabled(settingEnabled, clusterSwitchProperty())
 
     /**
+     * The media the cluster should see. With `debug.diplay.cluster_lyrics=0` the title is pinned to
+     * the first title of the track -- the song name -- so QQ Music lyric-line titles cannot refresh
+     * the card around the cover. The raw frames still decide when a new track starts.
+     */
+    private fun displayMedia(now: CarPlayNowPlaying): CarPlayNowPlaying {
+        if (isNewTrack(stableTitleMedia, now)) stableTitle = now.title
+        stableTitleMedia = now
+        val stable = stableTitle
+        return if (!clusterLyricsEnabled() && stable != null) now.copy(title = stable) else now
+    }
+
+    /**
      * Submits what the iPhone is playing.
-     *
      * Two things keep the cost of this down and the cluster correct (docs/_digest/45 G7/G9): an
      * unchanged payload never reaches the vendor's binder again, and a running timer repeats the last
      * payload every few seconds so a service that restarted -- or a cluster screen that was switched
@@ -235,20 +246,21 @@ object VendorClusterBridge {
      * exactly what the vendor can see, so an update that only moved `artworkTransferId` or `sourceApp`
      */
     fun pushMedia(now: CarPlayNowPlaying) {
-        lastMedia = now
+        val media = displayMedia(now)
+        lastMedia = media
         val at = elapsedNow()
         val previous = lastElapsedMillis
         val previousAt = lastElapsedAt
-        positionAdvancing = now.elapsedMillis != null &&
+        positionAdvancing = media.elapsedMillis != null &&
             previous != null &&
-            now.elapsedMillis > previous &&
+            media.elapsedMillis > previous &&
             at - previousAt < 2000L
-        if (now.elapsedMillis != null) {
-            lastElapsedMillis = now.elapsedMillis
+        if (media.elapsedMillis != null) {
+            lastElapsedMillis = media.elapsedMillis
             lastElapsedAt = at
         }
         startRepushLoop()
-        synchronized(pushLock) { dispatchMedia(now, force = false) }
+        synchronized(pushLock) { dispatchMedia(media, force = false) }
     }
 
     /**
@@ -277,14 +289,6 @@ object VendorClusterBridge {
             now.elapsedMillis?.let { call(target, "updateCurrentProgress", it) }
             return
         }
-        // CS11 cannot show live lyrics and a cover at once (HY box manual). With
-        // debug.diplay.cluster_lyrics=0 the title stays at the track name so lyric-line title churn
-        // does not keep refreshing the card around the cover.
-        if (!force && !clusterLyricsEnabled() && titleOnlyChange(lastPushedUpdate, metadata, lastPushedArtworkId, now.artworkTransferId)) {
-            val target = mediaInteraction(context) ?: return
-            now.elapsedMillis?.let { call(target, "updateCurrentProgress", it) }
-            return
-        }
         val target = mediaInteraction(context) ?: return
         // The iPhone sometimes leaves the playback-status field at paused while audio and position
         // keep going; DIM refuses a cover frame for basePlayState=0 (car 2026-10-23).
@@ -304,9 +308,7 @@ object VendorClusterBridge {
         if (sent) {
             mediaPushGate.notePushed(metadata)
             pushSchedule.notePushed(elapsedNow())
-            lastPushedUpdate = metadata
         } else {
-            lastPushedArtworkId = now.artworkTransferId
             mediaPushGate.forget()
             interactions.invalidateMedia()
             pushSchedule.noteFailed(elapsedNow())
@@ -463,8 +465,6 @@ object VendorClusterBridge {
             }
             Log.i(TAG, "cluster cover refresh title=$title")
             mediaPushGate.notePushed(clusterMediaUpdate(current, artworkUri).copy(elapsedMillis = null))
-            lastPushedUpdate = clusterMediaUpdate(current, artworkUri).copy(elapsedMillis = null)
-            lastPushedArtworkId = current.artworkTransferId
         }, COVER_REFRESH_DELAY_MILLIS)
     }
 
@@ -551,8 +551,6 @@ object VendorClusterBridge {
         sourceTypeSent = false
         sourceListSent = false
         artworkUriChanges = null
-        lastPushedUpdate = null
-        lastPushedArtworkId = null
         runCatching { store?.close() }
             .onFailure { Log.w(TAG, "cluster artwork store close failed", it) }
         // The port is the process's, not the store's, which is why it is released here and not in
@@ -1002,14 +1000,22 @@ private fun sameOrMissing(previous: String?, next: String?): Boolean =
 
 private fun comparableTitle(title: String?): String? = title?.replace("\u200B", "")
 
-/** True when only [title] differs; the same artwork transfer and the same track fields. */
-internal fun titleOnlyChange(
-    previous: ClusterMediaUpdate?,
-    next: ClusterMediaUpdate,
-    previousArtworkId: Int?,
-    nextArtworkId: Int?,
-): Boolean = previous != null && previousArtworkId == nextArtworkId &&
-    previous.copy(title = next.title) == next
+/**
+ * Whether [next] is a different track from [previous]: a new artist/album, a materially different
+ * duration, or a new artwork transfer. Missing fields are compatible because they can arrive later,
+ * the same rule [sameTrack] uses.
+ */
+internal fun isNewTrack(previous: CarPlayNowPlaying?, next: CarPlayNowPlaying): Boolean =
+    previous == null ||
+        !sameOrMissing(previous.artist, next.artist) ||
+        !sameOrMissing(previous.album, next.album) ||
+        durationChanged(previous.durationMillis, next.durationMillis) ||
+        (previous.artworkTransferId != null && next.artworkTransferId != null &&
+            previous.artworkTransferId != next.artworkTransferId)
+
+private fun durationChanged(previous: Long?, next: Long?): Boolean =
+    previous != null && next != null && previous > 0 && next > 0 &&
+        kotlin.math.abs(previous - next) > 1000L
 
 internal fun clusterMediaUpdate(now: CarPlayNowPlaying, artworkUri: android.net.Uri?): ClusterMediaUpdate =
     ClusterMediaUpdate(

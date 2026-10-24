@@ -67,35 +67,64 @@ class ClusterMediaTrackMatchTest {
     }
 
     @Test
-    fun aTitleChangeWithTheSameArtworkTransferIsLyricChurn() {
-        val base = clusterMediaUpdate(now("晴天", "周杰伦", "叶惠美"), null)
-        val lyricLine = base.copy(title = "刮风这天")
+    fun aLyricLineIsNotANewTrack() {
+        val previous = now("晴天", "周杰伦", "叶惠美", artworkTransferId = 7)
+        val lyricLine = previous.copy(title = "刮风这天")
 
-        assertTrue(titleOnlyChange(base, lyricLine, 7, 7))
+        assertFalse(isNewTrack(previous, lyricLine))
     }
 
     @Test
-    fun aNewArtworkTransferIsNotLyricChurn() {
-        val base = clusterMediaUpdate(now("晴天", "周杰伦", "叶惠美"), null)
+    fun aNewArtworkTransferIsANewTrack() {
+        val previous = now("晴天", "周杰伦", "叶惠美", artworkTransferId = 7)
+        val nextTrack = now("晴天", "周杰伦", "叶惠美", artworkTransferId = 8)
 
-        assertFalse(titleOnlyChange(base, base, 7, 8))
+        assertTrue(isNewTrack(previous, nextTrack))
     }
 
     @Test
-    fun aTitleChangeWithADifferentDurationIsNotLyricChurn() {
-        val base = clusterMediaUpdate(now("晴天", "周杰伦", "叶惠美"), null)
-        val nextTrack = base.copy(title = "晴天 (Live)", durationMillis = 300_000L)
+    fun anArtistThatArrivesLaterIsNotANewTrack() {
+        val previous = now("晴天", null, "叶惠美", artworkTransferId = 7)
+        val later = now("晴天", "周杰伦", "叶惠美", artworkTransferId = 7)
 
-        assertFalse(titleOnlyChange(base, nextTrack, 7, 7))
+        assertFalse(isNewTrack(previous, later))
+    }
+
+    @Test
+    fun aDifferentArtistIsANewTrack() {
+        val previous = now("晴天", "周杰伦", "叶惠美", artworkTransferId = 7)
+        val other = now("晴天", "翻唱歌手", "叶惠美", artworkTransferId = 7)
+
+        assertTrue(isNewTrack(previous, other))
+    }
+
+    @Test
+    fun aDurationThatFillsInFromZeroIsNotANewTrack() {
+        val previous = now("晴天", "周杰伦", "叶惠美", durationMillis = 0L, artworkTransferId = 7)
+        val later = now("晴天", "周杰伦", "叶惠美", durationMillis = 252_000L, artworkTransferId = 7)
+
+        assertFalse(isNewTrack(previous, later))
+    }
+
+    @Test
+    fun aMateriallyDifferentDurationIsANewTrack() {
+        val previous = now("晴天", "周杰伦", "叶惠美", durationMillis = 252_000L, artworkTransferId = 7)
+        val other = now("晴天", "周杰伦", "叶惠美", durationMillis = 300_000L, artworkTransferId = 7)
+
+        assertTrue(isNewTrack(previous, other))
     }
 
     private fun now(
         title: String?,
         artist: String?,
         album: String?,
+        durationMillis: Long? = null,
+        artworkTransferId: Int? = null,
     ) = CarPlayNowPlaying(
         title = title,
         artist = artist,
         album = album,
+        durationMillis = durationMillis,
+        artworkTransferId = artworkTransferId,
     )
 }
