@@ -66,9 +66,36 @@ class ClusterMediaTrackMatchTest {
         assertFalse(sameTrack(null, now(title = "晴天", artist = "周杰伦", album = "叶惠美")))
     }
 
+    @Test
+    fun aTitleChangeWithTheSameArtworkTransferIsLyricChurn() {
+        val base = clusterMediaUpdate(now("晴天", "周杰伦", "叶惠美"), null)
+        val lyricLine = base.copy(title = "刮风这天")
+
+        assertTrue(titleOnlyChange(base, lyricLine, 7, 7))
+    }
+
+    @Test
+    fun aNewArtworkTransferIsNotLyricChurn() {
+        val base = clusterMediaUpdate(now("晴天", "周杰伦", "叶惠美"), null)
+
+        assertFalse(titleOnlyChange(base, base, 7, 8))
+    }
+
+    @Test
+    fun aTitleChangeWithADifferentDurationIsNotLyricChurn() {
+        val base = clusterMediaUpdate(now("晴天", "周杰伦", "叶惠美"), null)
+        val nextTrack = base.copy(title = "晴天 (Live)", durationMillis = 300_000L)
+
+        assertFalse(titleOnlyChange(base, nextTrack, 7, 7))
+    }
+
     private fun now(
         title: String?,
         artist: String?,
         album: String?,
-    ) = CarPlayNowPlaying(title = title, artist = artist, album = album)
+    ) = CarPlayNowPlaying(
+        title = title,
+        artist = artist,
+        album = album,
+    )
 }

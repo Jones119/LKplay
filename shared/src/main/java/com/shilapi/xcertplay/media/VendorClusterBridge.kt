@@ -163,6 +163,12 @@ object VendorClusterBridge {
     @Volatile private var positionAdvancing = false
     @Volatile private var lastElapsedAt = 0L
 
+    /** The last payload the vendor accepted; used to tell lyric churn from a new track. */
+    @Volatile private var lastPushedUpdate: ClusterMediaUpdate? = null
+
+
+    /** Transfer id of [lastPushedUpdate]; a lyric line keeps it, a new track changes it. */
+    @Volatile private var lastPushedArtworkId: Int? = null
     /** The bitmap last written to the shared tree; a same-name repeat must not rewrite it. */
     @Volatile private var lastStoredBitmap: android.graphics.Bitmap? = null
     /** The track [artworkUri] was named for; a title-only change must not reuse its cover. */
@@ -271,6 +277,14 @@ object VendorClusterBridge {
             now.elapsedMillis?.let { call(target, "updateCurrentProgress", it) }
             return
         }
+        // CS11 cannot show live lyrics and a cover at once (HY box manual). With
+        // debug.diplay.cluster_lyrics=0 the title stays at the track name so lyric-line title churn
+        // does not keep refreshing the card around the cover.
+        if (!force && !clusterLyricsEnabled() && titleOnlyChange(lastPushedUpdate, metadata, lastPushedArtworkId, now.artworkTransferId)) {
+            val target = mediaInteraction(context) ?: return
+            now.elapsedMillis?.let { call(target, "updateCurrentProgress", it) }
+            return
+        }
         val target = mediaInteraction(context) ?: return
         // The iPhone sometimes leaves the playback-status field at paused while audio and position
         // keep going; DIM refuses a cover frame for basePlayState=0 (car 2026-10-23).
@@ -290,7 +304,9 @@ object VendorClusterBridge {
         if (sent) {
             mediaPushGate.notePushed(metadata)
             pushSchedule.notePushed(elapsedNow())
+            lastPushedUpdate = metadata
         } else {
+            lastPushedArtworkId = now.artworkTransferId
             mediaPushGate.forget()
             interactions.invalidateMedia()
             pushSchedule.noteFailed(elapsedNow())
@@ -411,6 +427,10 @@ object VendorClusterBridge {
     }
 
 
+    /** `debug.diplay.cluster_lyrics=0` keeps the title stable so the cover can be shown. */
+    private fun clusterLyricsEnabled(): Boolean =
+        debugProperty("debug.diplay.cluster_lyrics")?.trim() != "0"
+
     /**
      * Re-sends the current media about 1.5 s after a cover lands, with an invisible title change.
      *
@@ -423,7 +443,7 @@ object VendorClusterBridge {
         if (debugProperty(COVER_REFRESH_PROPERTY)?.trim() == "0") return
         val media = lastMedia ?: return
         val title = media.title ?: return
-        coverRefreshHandler.removeCallbacksAndMessages(null)
+            coverRefreshHandler.removeCallbacksAndMessages(null)
         coverRefreshHandler.postDelayed({
             val current = lastMedia ?: return@postDelayed
             if (current.title != media.title ||
@@ -443,6 +463,8 @@ object VendorClusterBridge {
             }
             Log.i(TAG, "cluster cover refresh title=$title")
             mediaPushGate.notePushed(clusterMediaUpdate(current, artworkUri).copy(elapsedMillis = null))
+            lastPushedUpdate = clusterMediaUpdate(current, artworkUri).copy(elapsedMillis = null)
+            lastPushedArtworkId = current.artworkTransferId
         }, COVER_REFRESH_DELAY_MILLIS)
     }
 
@@ -521,7 +543,7 @@ object VendorClusterBridge {
      */
     fun release() {
         val store = synchronized(pushLock) {
-        coverRefreshHandler.removeCallbacksAndMessages(null)
+            coverRefreshHandler.removeCallbacksAndMessages(null)
             artworkStore.also { artworkStore = null }
         }
         artworkUri = null
@@ -529,6 +551,8 @@ object VendorClusterBridge {
         sourceTypeSent = false
         sourceListSent = false
         artworkUriChanges = null
+        lastPushedUpdate = null
+        lastPushedArtworkId = null
         runCatching { store?.close() }
             .onFailure { Log.w(TAG, "cluster artwork store close failed", it) }
         // The port is the process's, not the store's, which is why it is released here and not in
@@ -959,8 +983,6 @@ internal data class ClusterMediaUpdate(
     val artworkUri: android.net.Uri?,
 )
 
-/** The payload of one push, as the vendor's getters will see it. */
-
 /**
  * Whether [previous] names the same track as [next]; elapsed time and play state do not count.
  *
@@ -979,6 +1001,15 @@ private fun sameOrMissing(previous: String?, next: String?): Boolean =
     previous.isNullOrBlank() || previous == next
 
 private fun comparableTitle(title: String?): String? = title?.replace("\u200B", "")
+
+/** True when only [title] differs; the same artwork transfer and the same track fields. */
+internal fun titleOnlyChange(
+    previous: ClusterMediaUpdate?,
+    next: ClusterMediaUpdate,
+    previousArtworkId: Int?,
+    nextArtworkId: Int?,
+): Boolean = previous != null && previousArtworkId == nextArtworkId &&
+    previous.copy(title = next.title) == next
 
 internal fun clusterMediaUpdate(now: CarPlayNowPlaying, artworkUri: android.net.Uri?): ClusterMediaUpdate =
     ClusterMediaUpdate(
