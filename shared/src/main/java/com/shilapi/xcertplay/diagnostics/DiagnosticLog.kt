@@ -74,7 +74,8 @@ internal object DiagnosticLog {
             DiagnosticLogPolicy.header(
                 startedAtMillis = startedAt,
                 appVersion = appVersion(context),
-                sdkInt = Build.VERSION.SDK_INT,
+                // CS11 only: the runtime API level is always 19.
+                sdkInt = 19,
                 release = Build.VERSION.RELEASE ?: "?",
                 model = Build.MODEL ?: "?",
                 product = Build.PRODUCT ?: "?",

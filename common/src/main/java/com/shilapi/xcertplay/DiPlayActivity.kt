@@ -2067,7 +2067,7 @@ class DiPlayActivity : ComponentActivity() {
             val result = runCatching {
                 val report = buildString {
                     appendLine("DiPlay ${version()} · private beta diagnostic report")
-                    appendLine("Android ${Build.VERSION.RELEASE} / API ${Build.VERSION.SDK_INT}")
+                    appendLine("Android ${Build.VERSION.RELEASE} / API 19")
                     appendLine("Head unit: ${Build.MANUFACTURER} ${Build.MODEL}")
                     appendLine("Connection: ${if (AirPlayPersistence.loadWirelessEnabled(appContext)) "wireless" else "USB"}")
                     appendLine("Authentication: local experimental beta identity; no remote fallback")

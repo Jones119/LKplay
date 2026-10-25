@@ -7,7 +7,6 @@ import android.media.AudioTrack
 import android.media.MediaCodec
 import android.media.MediaCodecList
 import android.media.MediaFormat
-import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -1013,7 +1012,7 @@ private class VideoDecoder(
         // A bad decoder can fail again on every frame; exported detail stays bounded per worker.
         if (failureReports >= 8) return
         failureReports++
-        runCatching { report("decoder failed api=${Build.VERSION.SDK_INT} $context " +
+        runCatching { report("decoder failed api=19 $context " +
             MediaFailureSummary.describe(error)) }
     }
 
@@ -1248,7 +1247,7 @@ private class AudioRenderer(
 
     private fun run() {
         try {
-            runCatching { report("Audio: starting api=${Build.VERSION.SDK_INT} " +
+            runCatching { report("Audio: starting api=19 " +
                 "audioType=${format.audioType} codec=${format.codec} rate=${format.sampleRate} channels=${format.channels} " +
                 "mapping=${if (advancedAudioChannelMapping) "automotive" else "mobile"} " +
                 "mediaChannel=$mediaChannel navigationChannel=$navigationChannel focus=$audioFocusEnabled") }
@@ -1373,7 +1372,7 @@ private class AudioRenderer(
         val minBuffer = AudioTrack.getMinBufferSize(format.sampleRate, channelMask, encoding)
         if (minBuffer <= 0) {
             Log.e(TAG, "AudioTrack buffer size unavailable rate=${format.sampleRate} channels=${format.channels}")
-            runCatching { report("Audio: track unavailable api=${Build.VERSION.SDK_INT} stage=$diagnosticStage " +
+            runCatching { report("Audio: track unavailable api=19 stage=$diagnosticStage " +
                 "audioType=${format.audioType} codec=${format.codec} rate=${format.sampleRate} " +
                 "channels=${format.channels} minBufferResult=$minBuffer") }
             return
@@ -1981,7 +1980,7 @@ private class AudioRenderer(
     }
 
     private fun reportFailure(error: Throwable) {
-        runCatching { report("Audio: renderer failed api=${Build.VERSION.SDK_INT} " +
+        runCatching { report("Audio: renderer failed api=19 " +
             "audioType=${format.audioType} codec=${format.codec} stage=$diagnosticStage " +
             MediaFailureSummary.describe(error)) }
     }

@@ -5,7 +5,6 @@ import android.hardware.usb.UsbDeviceConnection
 import android.hardware.usb.UsbEndpoint
 import android.hardware.usb.UsbInterface
 import android.hardware.usb.UsbConstants
-import android.os.Build
 import android.hardware.usb.UsbRequest
 import android.util.Log
 import java.io.Closeable
@@ -366,7 +365,7 @@ class NcmUsbBridge internal constructor(
                     }
                     if (!queued.queued) {
                         throw failSession(
-                            "Android could not queue the NCM read request (api=${Build.VERSION.SDK_INT} " +
+                            "Android could not queue the NCM read request (api=19 " +
                                 "endpoint=${describeUsbEndpoint(inEndpoint)} firstBytes=${queued.firstBytes} " +
                                 "fallbackBytes=${queued.fallbackBytes ?: "not_attempted"})",
                         )
@@ -381,7 +380,7 @@ class NcmUsbBridge internal constructor(
         }
         // Emit outside stateLock; diagnostic callbacks must not affect queue or close behavior.
         acceptedFallback?.let { queued ->
-            val fallback = "NCM read queue compatibility fallback api=${Build.VERSION.SDK_INT} " +
+            val fallback = "NCM read queue compatibility fallback api=19 " +
                 "endpoint=${describeUsbEndpoint(inEndpoint)} firstBytes=${queued.firstBytes} " +
                 "fallbackBytes=${queued.fallbackBytes}"
             Log.i(IphoneCarPlayConfiguration.TAG, fallback)

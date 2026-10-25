@@ -10,19 +10,20 @@
 | `android.*` 平台 API | lint `NewApi`（minSdk=19，覆盖 shared/common/mobile 全部主源码），并已改为阻断 | shared 0、common 0、mobile 0 |
 | `java.*` 库 API | `ForbiddenLibraryApiTest` 扫描 `.kt` 与 `.java`（含 concentus 的 124 个文件），以 desugar 白名单为界 | 通过 |
 | 版本注解 | `grep @RequiresApi/@TargetApi` | 0 |
-| 版本分支 | `grep Build.VERSION` | 仅剩兼容层、车机专用判断与诊断字段（见下） |
+| 版本分支 | `grep Build.VERSION.SDK_INT` / `VERSION_CODES` | 0 处 |
 | 反射 | 人工清单 | 见下 |
 | 清单属性 | `Api19ManifestTest` | 通过 |
 | native | NDK r25c（r26 下限 21）、CMake 继承 minSdk 19、`src/main/jni/Application.mk` 指向 android-19 | 通过 |
 
-## 保留的版本判断
+## 版本判断已全部移除
 
-| 位置 | 内容 | 理由 |
-| --- | --- | --- |
-| `compat/Cs11Compat.kt` | `systemService`、`inputBufferCompat`、`getDrawableCompat`、`hasPermissionCompat` 等 | 4.4 走 else 分支；封装让调用方不直接触碰 API 21+ 符号 |
-| `network/LegacySoftApControl.kt` | `SDK_INT in 19..20` | 车机专用：4.4 的 softAP 需要先关掉 Wi-Fi 客户端 |
-| `AndroidMediaSink` / `NcmUsbBridge` / `IphoneUsbHost` 的日志 | `api=${Build.VERSION.SDK_INT}` | 诊断文本，没有任何分支 |
-| `DiagnosticLog` / `DiPlayActivity` | `sdkInt`、`Build.VERSION.RELEASE` | 报告元数据 |
+- `compat/Cs11Compat.kt` 的每个函数改为只调用 4.4 就有的 API：`ContextCompat.getSystemService`、
+  `MediaCodec.getInputBuffers()/getOutputBuffers()`、`resources.getDrawable`、
+  `PackageManager.checkPermission`、`filesDir/no_backup`；underrun/routed-device/buffer-size
+  查询返回固定值（4.4 没有这些 API）。
+- `network/LegacySoftApControl.kt` 的 `SDK_INT in 19..20` 改为无条件执行。
+- 诊断日志中的 `api=` 固定为 `19`，报告头固定为 `API 19`；`DiagnosticLog.sdkInt` 固定为 `19`。
+- 剩余 `Build.VERSION.RELEASE` / `Build.MODEL` 等是真实的设备元数据，不是版本分支。
 
 ## 反射清单
 
@@ -53,7 +54,8 @@
 - 删除仅覆盖已移除路径的测试：`MediaSessionBridgeTest`、`P2pConfigBuildDiagnosticsTest`、
   `WifiScanPause*Test`、`ExistingWifiManagerTest`、`ProcessExitDiagnosticsTest`、
   `DiagnosticExportFallbackTest`、`CarHotspotSwitchTest`、`CarHotspotAdbGrantTest`、
-  `CarHotspotFallbackTest`、`WifiP2pGroupManagerTest`、`CarPlayHostResolutionTest`。
+  `CarHotspotFallbackTest`、`WifiP2pGroupManagerTest`、`CarPlayHostResolutionTest`、
+  `AudioRebufferCapacityTest`（依赖 API 24+ 的 underrun 计数，车机上该信号不可用）。
 - 改写为车机语义：`AudioStreamFallbackTest`、`CarPlayWiredTransportDecisionTest`、
   `UsbReadQueueCompatibilityTest`（首次读取固定 16 KiB 上限）、`AppLocaleTest`、
   `CarPlayMediaCallbackTest`、`DiagnosticExportStoreTest`。

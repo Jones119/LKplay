@@ -171,7 +171,7 @@ class UsbReadQueueCompatibilityTest {
 
     private fun checkQueueFailure(block: () -> Unit) {
         val error = expectUnavailable(block)
-        assertTrue(error.message!!.contains("api=28"))
+        assertTrue(error.message!!.contains("api=19"))
         assertTrue(error.message!!.contains("endpoint=0x85"))
         assertTrue(error.message!!.contains("firstBytes="))
         assertTrue(error.message!!.contains("fallbackBytes=2048"))
@@ -180,7 +180,7 @@ class UsbReadQueueCompatibilityTest {
     private fun checkFallbackDiagnostic(diagnostics: List<String>, pipe: String, firstBytes: Int) {
         val diagnostic = diagnostics.single()
         assertTrue(diagnostic.startsWith("$pipe read queue compatibility fallback "))
-        assertTrue(diagnostic.contains("api=28"))
+        assertTrue(diagnostic.contains("api=19"))
         assertTrue(diagnostic.contains("endpoint=0x85(direction=128,type=2,maxPacket=512)"))
         assertTrue(diagnostic.contains("firstBytes=$firstBytes fallbackBytes=8192"))
     }

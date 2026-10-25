@@ -4,7 +4,6 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.net.wifi.WifiConfiguration
 import android.net.wifi.WifiManager
-import android.os.Build
 import android.util.Log
 import com.shilapi.xcertplay.compat.systemServiceOrNull
 import java.util.BitSet
@@ -124,26 +123,24 @@ object LegacySoftApControl {
             log("legacy AP: already up (state=$initial)")
             return true
         }
-        if (Build.VERSION.SDK_INT in 19..20) {
-            val clientState = wifiState(wifi)
-            if (clientState == WIFI_STATE_ENABLED || clientState == WIFI_STATE_ENABLING) {
-                log("legacy AP: switching the Wi-Fi client off (softAP needs the radio on 4.4)")
-                clientDisabledByUs = true
-                if (runCatching { wifi.setWifiEnabled(false) }.getOrDefault(false) != true) {
-                    log("legacy AP: the platform refused to switch Wi-Fi off")
-                    clientDisabledByUs = false
-                    return false
-                }
-                val deadline = System.nanoTime() + CLIENT_SWITCH_TIMEOUT_NANOS
-                while (System.nanoTime() < deadline) {
-                    val state = wifiState(wifi)
-                    if (state != WIFI_STATE_DISABLING && state != WIFI_STATE_ENABLING &&
-                        state != WIFI_STATE_ENABLED
-                    ) break
-                    Thread.sleep(POLL_MILLIS)
-                }
-                log("legacy AP: Wi-Fi client state now ${wifiState(wifi)} (1=disabled)")
+        val clientState = wifiState(wifi)
+        if (clientState == WIFI_STATE_ENABLED || clientState == WIFI_STATE_ENABLING) {
+            log("legacy AP: switching the Wi-Fi client off (softAP needs the radio on 4.4)")
+            clientDisabledByUs = true
+            if (runCatching { wifi.setWifiEnabled(false) }.getOrDefault(false) != true) {
+                log("legacy AP: the platform refused to switch Wi-Fi off")
+                clientDisabledByUs = false
+                return false
             }
+            val deadline = System.nanoTime() + CLIENT_SWITCH_TIMEOUT_NANOS
+            while (System.nanoTime() < deadline) {
+                val state = wifiState(wifi)
+                if (state != WIFI_STATE_DISABLING && state != WIFI_STATE_ENABLING &&
+                    state != WIFI_STATE_ENABLED
+                ) break
+                Thread.sleep(POLL_MILLIS)
+            }
+            log("legacy AP: Wi-Fi client state now ${wifiState(wifi)} (1=disabled)")
         }
         val raw = runCatching {
             WifiManager::class.java.getMethod("getWifiApConfiguration").invoke(wifi) as? WifiConfiguration

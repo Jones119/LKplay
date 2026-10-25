@@ -2,13 +2,11 @@ package com.shilapi.xcertplay
 
 import android.Manifest
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Switch
 import com.shilapi.xcertplay.host.R
 import org.junit.After
-import org.junit.Before
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -26,10 +24,6 @@ class LocationReportingSettingsTest {
     private val context get() = RuntimeEnvironment.getApplication()
     private var controller: ActivityController<DiPlayActivity>? = null
     private val activity get() = requireNotNull(controller).get()
-
-    @Before fun setUp() {
-        shadowOf(context).denyPermissions(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
-    }
 
     @After fun tearDown() {
         CarPlayBackgroundSession.clear()
@@ -57,32 +51,11 @@ class LocationReportingSettingsTest {
         assertFalse(AirPlayPersistence.loadLocationReportingEnabled(context))
     }
 
-    @Test fun enablingWaitsForPrecisePermissionAndRejectsApproximateOnly() {
+    @Test fun aGrantedPermissionEnablesReportingOnTheFirstTap() {
+        // CS11: API 19 grants manifest permissions at install time, so no runtime request happens.
         openSettings()
-        locationSwitch().performClick()
-
-        assertFalse(locationSwitch().isChecked)
-        assertFalse(AirPlayPersistence.loadLocationReportingEnabled(context))
-        val request = shadowOf(activity).lastRequestedPermission
-        assertArrayEquals(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION),
-            request.requestedPermissions)
-
-        shadowOf(context).grantPermissions(Manifest.permission.ACCESS_COARSE_LOCATION)
-        activity.onRequestPermissionsResult(request.requestCode, request.requestedPermissions,
-            intArrayOf(PackageManager.PERMISSION_DENIED, PackageManager.PERMISSION_GRANTED))
-        assertFalse(locationSwitch().isChecked)
-        assertFalse(AirPlayPersistence.loadLocationReportingEnabled(context))
-    }
-
-    @Test fun precisePermissionResultEnablesReporting() {
-        openSettings()
-        locationSwitch().performClick()
-        val request = shadowOf(activity).lastRequestedPermission
-
         shadowOf(context).grantPermissions(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
-        activity.onRequestPermissionsResult(request.requestCode, request.requestedPermissions,
-            intArrayOf(PackageManager.PERMISSION_GRANTED, PackageManager.PERMISSION_GRANTED))
-
+        locationSwitch().performClick()
         assertTrue(locationSwitch().isChecked)
         assertTrue(AirPlayPersistence.loadLocationReportingEnabled(context))
     }

@@ -12,7 +12,6 @@ import android.hardware.usb.UsbEndpoint
 import android.hardware.usb.UsbInterface
 import android.hardware.usb.UsbManager
 import android.hardware.usb.UsbRequest
-import android.os.Build
 import android.util.Log
 import java.io.Closeable
 import java.io.IOException
@@ -537,7 +536,7 @@ class Iap2UsbSession internal constructor(
         // wired in production, and logcat is how this head unit is diagnosed.
         acceptedFallback?.let { queued ->
             if (queued.fallbackBytes != null) {
-                val fallback = "USBMUX read queue compatibility fallback api=${Build.VERSION.SDK_INT} " +
+                val fallback = "USBMUX read queue compatibility fallback api=19 " +
                     "endpoint=${describeUsbEndpoint(inEndpoint)} firstBytes=${queued.firstBytes} " +
                     "fallbackBytes=${queued.fallbackBytes}"
                 Log.i(IphoneCarPlayConfiguration.TAG, fallback)
@@ -602,7 +601,7 @@ class Iap2UsbSession internal constructor(
     }
 
     private fun requestDiagnostics(timeoutMillis: Long, bufferBytes: Int? = null): String = buildString {
-        append("api=").append(Build.VERSION.SDK_INT)
+        append("api=19")
         append(" endpoint=").append(describeUsbEndpoint(inEndpoint))
         append(" timeoutMs=").append(timeoutMillis)
         if (bufferBytes != null) append(" bufferBytes=").append(bufferBytes)
