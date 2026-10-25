@@ -2,7 +2,6 @@ package com.shilapi.xcertplay.media
 
 import android.media.MediaCodec
 import android.media.MediaFormat
-import android.os.Build
 
 /**
  * One honest line about the codecs this head unit actually provides.
@@ -20,8 +19,8 @@ object CodecCapabilityReport {
     fun line(): String {
         val h264 = probeDecoder(MediaFormat.MIMETYPE_VIDEO_AVC)
         val aac = probeDecoder(MediaFormat.MIMETYPE_AUDIO_AAC)
-        val opusDecoder = if (Build.VERSION.SDK_INT >= 21) probeDecoder(OPUS) else "no(api<21)"
-        val opusEncoder = if (Build.VERSION.SDK_INT >= 21) probeEncoder(OPUS) else "no(api<21)"
+        val opusDecoder = probeDecoder(OPUS)
+        val opusEncoder = probeEncoder(OPUS)
         val libopus = if (LegacyNativeOpus.available) "yes" else "no"
         return "codec capabilities h264=$h264 aac=$aac platformOpusDecode=$opusDecoder " +
             "platformOpusEncode=$opusEncoder bundledLibopus=$libopus"

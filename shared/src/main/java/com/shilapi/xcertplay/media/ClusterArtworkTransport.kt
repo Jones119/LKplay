@@ -1160,8 +1160,6 @@ internal class ClusterArtworkStore(
     },
     /** The raw file operations the base probe uses; the car leaves the defaults in place. */
     private val raw: RawFileSystem = RawFileSystem(),
-    /** The platform level, injected so the sandbox-alias candidates can be reasoned about in a test. */
-    private val sdkInt: Int = Build.VERSION.SDK_INT,
     /** The shared roots to try, in order; the car leaves this at [clusterArtworkSharedBases]. */
     private val sharedBases: List<String>? = null,
     /**
@@ -1203,27 +1201,23 @@ internal class ClusterArtworkStore(
      * external files directory with the alias spelling of its `Android/` tail ahead of it. Whichever
      * candidate wins, the base handed to [publish] is the one whose own probe read the cover back
      * through the string that will be delivered -- the alias spelling when it works, the spelling that
-     * did when it does not. On API 29+ the sandbox alias is dropped: the platform documents that path
-     * as unreadable for other apps there, so it would only add a rejection line to a tablet that does
-     * not need it.
+     * did when it does not.
      */
     private val externalDirectories: List<String> = ArrayList<String>(resolvedSharedBases.size + 4).apply {
         addAll(resolvedSharedBases)
         externalFilesDir?.let { add(File(it, CLUSTER_ARTWORK_DIRECTORY).path) }
-        if (sdkInt < Build.VERSION_CODES.Q) {
-            addAll(
-                frameworkAliasCandidates(
-                    externalFilesDir,
-                    // `/sdcard` first: of these spellings it is the one a reader outside our process can
-                    // open, and the framework's own answer is the one it cannot.
-                    listOfNotNull(
-                        File(CLUSTER_ARTWORK_SDCARD_ROOT),
-                        externalStorageRoot()?.let(::File),
-                        File("/storage/emulated/legacy"),
-                    ),
-                ).map { File(it, CLUSTER_ARTWORK_DIRECTORY).path },
-            )
-        }
+        addAll(
+            frameworkAliasCandidates(
+                externalFilesDir,
+                // `/sdcard` first: of these spellings it is the one a reader outside our process can
+                // open, and the framework's own answer is the one it cannot.
+                listOfNotNull(
+                    File(CLUSTER_ARTWORK_SDCARD_ROOT),
+                    externalStorageRoot()?.let(::File),
+                    File("/storage/emulated/legacy"),
+                ),
+            ).map { File(it, CLUSTER_ARTWORK_DIRECTORY).path },
+        )
     }
         .map(::clusterArtworkCandidatePath)
         .distinct()

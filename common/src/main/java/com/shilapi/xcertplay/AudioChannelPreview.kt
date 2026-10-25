@@ -1,10 +1,8 @@
 package com.shilapi.xcertplay
 
-import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioTrack
-import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -43,55 +41,25 @@ internal class AudioChannelPreview(private val onUnavailable: (Int) -> Unit) : C
                 )
                 check(minimum > 0) { "No PCM output buffer is available" }
                 val bufferBytes = maxOf(minimum, SAMPLE_RATE / 10 * 2)
-                val built = if (channel == 0 && Build.VERSION.SDK_INT >= 23) {
-                    AudioTrack.Builder()
-                        .setAudioAttributes(
-                            AudioAttributes.Builder()
-                                .setUsage(if (navigation) AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE
-                                    else AudioAttributes.USAGE_MEDIA)
-                                .setContentType(if (navigation) AudioAttributes.CONTENT_TYPE_SPEECH
-                                    else AudioAttributes.CONTENT_TYPE_MUSIC)
-                                .build(),
-                        )
-                        .setAudioFormat(
-                            AudioFormat.Builder()
-                                .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                                .setSampleRate(SAMPLE_RATE)
-                                .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
-                                .build(),
-                        )
-                        .setTransferMode(AudioTrack.MODE_STREAM)
-                        .setBufferSizeInBytes(bufferBytes)
-                        .build()
-                } else {
-                    // Match playback and let the head unit handle vendor-specific stream types.
-                    // CS11: AudioTrack.Builder 是 API23+；channel==0 在 4.4 上退为 STREAM_MUSIC
-                    val streamType = if (channel != 0) channel else AudioManager.STREAM_MUSIC
-                    @Suppress("DEPRECATION")
-                    AudioTrack(streamType, SAMPLE_RATE, AudioFormat.CHANNEL_OUT_MONO,
-                        AudioFormat.ENCODING_PCM_16BIT, bufferBytes, AudioTrack.MODE_STREAM)
-                }
+                // Match playback and let the head unit handle vendor-specific stream types.
+                // CS11: channel==0 退为 STREAM_MUSIC
+                val streamType = if (channel != 0) channel else AudioManager.STREAM_MUSIC
+                @Suppress("DEPRECATION")
+                val built = AudioTrack(streamType, SAMPLE_RATE, AudioFormat.CHANNEL_OUT_MONO,
+                    AudioFormat.ENCODING_PCM_16BIT, bufferBytes, AudioTrack.MODE_STREAM)
                 track = built
                 check(built.state == AudioTrack.STATE_INITIALIZED) { "Audio output did not initialize" }
                 if (closed || generation.get() != request) return@submit
                 activeTrack.set(built)
-                // CS11: setVolume(float) 是 API21+；4.4 走 setStereoVolume
-                if (Build.VERSION.SDK_INT >= 21) {
-                    built.setVolume(0.6f)
-                } else {
-                    @Suppress("DEPRECATION")
-                    built.setStereoVolume(0.6f, 0.6f)
-                }
+                // CS11: 4.4 走 setStereoVolume
+                @Suppress("DEPRECATION")
+                built.setStereoVolume(0.6f, 0.6f)
                 built.play()
                 var written = 0
                 while (written < pcm.size && !closed && generation.get() == request) {
                     val length = minOf(4096, pcm.size - written)
-                    val count = if (Build.VERSION.SDK_INT >= 23) {
-                        built.write(pcm, written, length, AudioTrack.WRITE_BLOCKING)
-                    } else {
-                        // CS11: write(ByteArray,…,mode) 是 API23+；4.4 用 3 参阻塞写
-                        built.write(pcm, written, length)
-                    }
+                    // CS11: 4.4 用 3 参阻塞写
+                    val count = built.write(pcm, written, length)
                     check(count > 0) { "Could not write preview tone" }
                     written += count
                 }

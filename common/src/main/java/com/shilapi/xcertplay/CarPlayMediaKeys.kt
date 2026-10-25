@@ -5,10 +5,8 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.media.AudioManager
-import android.os.Build
 import android.os.Handler
 import android.os.Looper
-import android.os.SystemClock
 import android.util.Log
 import android.view.KeyEvent
 import androidx.core.graphics.drawable.toBitmap
@@ -25,24 +23,16 @@ import com.shilapi.xcertplay.compat.WorkerThreads
 /**
  * Steering-wheel and other hardware media buttons for CarPlay.
  *
- * Android delivers media keys to a media session; the head unit picks the session of the audio-focus
- * owner. Once CarPlay plays music, DiPlay holds audio focus and an active session until the
- * CarPlay session ends, so play also works after a pause. Keys go to the iPhone as CarPlay media
- * HID presses ([CarPlayMediaButton]).
- *
- * CS11 约定（`docs/_digest/08 §4.3`、`docs/_digest/17 §2` 第 3 条）：本 object 的方法体在 4.4 上会被
- * Dalvik 校验，所以字段与**所有**方法体里都不能出现 API 21+ 的类型——`MediaSession`/`MediaMetadata`/
- * `PlaybackState`/`AudioFocusRequest` 全部搬进 [Api21MediaSession]（由 [MediaSessionBridge.of] 按版本
- * 加载），本文件只通过 [MediaSessionBridge] 接口与它交互。4.4 仍走 `MEDIA_BUTTON` 广播的遗留路径
- * （[startLegacyKeys]，与 HYLink 的 `SwcMediaButtonReceiver` 同法）。
+ * CS11 上方向盘媒体键走 `MEDIA_BUTTON` 广播的遗留路径（[startLegacyKeys]，与 HYLink 的
+ * `SwcMediaButtonReceiver` 同法）：CarPlay 播放时 DiPlay 持有 audio focus，车机把按键投递到本应用。
+ * Keys go to the iPhone as CarPlay media HID presses ([CarPlayMediaButton]).
  */
 internal object CarPlayMediaKeys {
     private const val TAG = "DiPlay-MediaKeys"
-    private const val UNKNOWN_POSITION = -1L
 
     private val mainHandler = Handler(Looper.getMainLooper())
 
-    /** 4.4/21–25 的遗留焦点监听；26+ 的请求对象式 API 由 [Api21MediaSession] 自己持有。 */
+    /** 遗留焦点监听；车机以音频焦点决定方向盘按键的归属。 */
     private val legacyFocusListener = AudioManager.OnAudioFocusChangeListener { change ->
         Log.i(TAG, "audio focus change=$change")
         // Only a permanent loss moves the car's media keys elsewhere; transient losses come back.
@@ -60,16 +50,10 @@ internal object CarPlayMediaKeys {
     private var artworkOwner: Any? = null
     private var controller: CarPlayController? = null
 
-    /**
-     * CS11: declared as the interface so this object never references a media-session class; stays
-     * null below API 21, where the legacy `MEDIA_BUTTON` registration is used instead.
-     */
-    private var session: MediaSessionBridge? = null
     private var focusHeld = false
     private var appContext: Context? = null
     private var mediaAudioActive = false
     private var nowPlaying = CarPlayNowPlaying()
-    private var elapsedUpdatedAt = 0L
     private var artwork: Bitmap? = null
     private val artworkCache = LinkedHashMap<Int, Bitmap?>()
     private var placeholder: Bitmap? = null
@@ -150,7 +134,6 @@ internal object CarPlayMediaKeys {
                 if (nowPlaying.artworkTransferId != update.artworkTransferId) {
                     artwork = nextArtwork(update.artworkTransferId, artworkCache, artwork)
                 }
-                if (nowPlaying.elapsedMillis != update.elapsedMillis) elapsedUpdatedAt = SystemClock.elapsedRealtime()
                 if (previousArtwork != null && artwork == null) {
                     Log.i(TAG, "artwork cleared for transfer=${update.artworkTransferId} title=${update.title} " +
                     "playing=${update.playing}")
@@ -159,16 +142,7 @@ internal object CarPlayMediaKeys {
                 // the cover arrived. Neither is a new track: artist, album, duration and the artwork transfer
                 // all stay, so the cover must not be re-associated (it flashes and disappears otherwise).
                 val titleOnlyChurn = clusterTitleOnlyChurn(nowPlaying, update)
-                val metadataChanged = metadataChanged(nowPlaying, update) || artwork !== previousArtwork
                 nowPlaying = update
-                // The iPhone repeats NowPlayingUpdate about twice a second for the position alone.
-                // Republishing the metadata each time sent a copy of the artwork through system_server
-                // to every media listener, and on one head unit that exhausted memory within
-                // minutes. The position goes in the playback state.
-                if (metadataChanged) session?.setMetadata(
-                    MediaSessionBridgeFactory.metadataOf(update, shownArtworkLocked()),
-                )
-                publishPlaybackStateLocked()
                 // The cluster's cover follows the *identity*, not the transfer id. The picture offered
                 // is the one decoded for the announced transfer, else the candidate held from a decode
                 // that arrived early, else the one already loaded -- the reference's `song.artwork`,
@@ -220,9 +194,7 @@ internal object CarPlayMediaKeys {
             artwork = decoded
             pendingCover = null
             pendingCoverId = null
-            session?.setMetadata(MediaSessionBridgeFactory.metadataOf(nowPlaying, shownArtworkLocked()))
-            // The single-point id match is kept for the media session, but the cluster's cover is no
-            // longer gated on it (G3): it now follows the track's identity instead.
+            // The cluster's cover follows the track's identity (G3).
             publishClusterCoverLocked(decoded)
         } else {
             // Bytes for a transfer the metadata has not named -- yet, or ever. Drop them and the
@@ -273,29 +245,24 @@ internal object CarPlayMediaKeys {
     // keys. When CarPlay starts playing again it becomes the car's media source again, as any player
     // would; only the start counts, so a car source picked while the iPhone plays on is not undone.
     private fun regainFocusLocked() {
-        val active = session ?: return
-        if (!active.isActive) return
-        active.activate()
+        val context = appContext ?: return
+        val audio = context.systemServiceOrNull(AudioManager::class.java) ?: return
+        focusHeld = audio.requestAudioFocus(
+            legacyFocusListener, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN,
+        ) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
     }
 
     private fun updateLocked(active: Boolean) {
         val context = appContext ?: return
         if (controller == null) return
         mediaAudioActive = active
-        if (active && session == null) start(context) else if (active) regainFocusLocked()
-        publishPlaybackStateLocked()
+        if (active && !legacyKeysRegistered) start(context) else if (active) regainFocusLocked()
     }
 
     private fun start(context: Context) {
-        // CS11: MediaSession 是 API21+；4.4（CS11）改走遗留 MEDIA_BUTTON 广播路径——
-        // 车机以 ACTION_MEDIA_BUTTON 广播方向盘媒体键，报名的接收器收到（与 HYLink 同法，见 _digest/08）
-        if (Build.VERSION.SDK_INT < MediaKeysPlatform.MEDIA_SESSION_API) {
-            startLegacyKeys(context)
-            return
-        }
-        session = MediaSessionBridge.of(context, sessionController)
-        session?.setMetadata(MediaSessionBridgeFactory.metadataOf(nowPlaying, shownArtworkLocked()))
-        Log.i(TAG, "media keys active focusGranted=$focusHeld")
+        // CS11: 4.4 走遗留 MEDIA_BUTTON 广播路径——车机以 ACTION_MEDIA_BUTTON 广播方向盘媒体键，
+        // 报名的接收器收到（与 HYLink 同法，见 _digest/08）
+        startLegacyKeys(context)
     }
 
     /** 4.4: the wheel's media keys arrive as android.intent.action.MEDIA_BUTTON broadcasts (the same
@@ -365,35 +332,12 @@ internal object CarPlayMediaKeys {
         return true
     }
 
-    /**
-     * What [Api21MediaSession] calls back into. Every member is API-19-safe by construction, which is
-     * what keeps the bridge from having to know anything about this object's internals.
-     */
-    private val sessionController = object : MediaSessionController {
-        override fun mediaKey(index: Int, source: String) = send(index, source)
-
-        override fun unclaimedMediaKey(event: KeyEvent): Boolean = dispatchMediaKey(event, "session")
-
-        override fun audioFocusHeld(held: Boolean) {
-            focusHeld = held
-        }
-
-        override fun audioFocusChanged(change: Int) {
-            // Only a permanent loss moves the car's media keys elsewhere; transient losses come back.
-            if (change == AudioManager.AUDIOFOCUS_LOSS) synchronized(this@CarPlayMediaKeys) { focusHeld = false }
-        }
-    }
-
     private fun releaseLocked() {
         Log.i(TAG, "media session released title=${nowPlaying.title} playing=${nowPlaying.playing}")
         artworkOwner = null
         artworkQueue.clear()
         MediaKeyEchoGate.reset()
         runCatching { com.shilapi.xcertplay.media.VendorClusterBridge.setArtwork(null) }
-        // CS11: MediaSession.release() 与 abandonAudioFocusRequest 都是 21+/26+，且在桥内一并处理；
-        // 4.4 上 session 恒为 null，只走下面的遗留按键注销。21–25 由桥发遗留 abandon。
-        session?.release()
-        session = null
         mediaAudioActive = false
         nowPlaying = CarPlayNowPlaying()
         artwork = null
@@ -405,34 +349,6 @@ internal object CarPlayMediaKeys {
         pendingCoverId = null
         appContext?.let(::stopLegacyKeys)
         focusHeld = false
-    }
-
-    private fun publishPlaybackStateLocked() {
-        val request = playbackStateRequest(nowPlaying, mediaAudioActive, elapsedUpdatedAt)
-        session?.setPlaybackState(
-            MediaSessionBridgeFactory.playbackStateOf(request.playing, request.position, request.updatedAt),
-        )
-    }
-
-    /** The play state, position and update time the bridge turns into a `PlaybackState`. */
-    internal data class PlaybackStateRequest(val playing: Boolean, val position: Long, val updatedAt: Long)
-
-    /**
-     * The two independent "is it playing" signals: explicit iPhone now-playing metadata, else the
-     * audio-on-the-wire flag. Testable without an Android device, which is the only part of the
-     * playback-state publish that a JVM test can still reach after the bridge split.
-     */
-    internal fun playbackStateRequest(
-        info: CarPlayNowPlaying,
-        mediaAudioActive: Boolean,
-        updatedAt: Long,
-    ): PlaybackStateRequest {
-        val hasMetadata = info.elapsedMillis != null || info.title != null
-        return PlaybackStateRequest(
-            playing = if (hasMetadata) info.playing else mediaAudioActive,
-            position = info.elapsedMillis ?: UNKNOWN_POSITION,
-            updatedAt = updatedAt,
-        )
     }
 
     private fun send(index: Int, source: String) {
@@ -461,14 +377,6 @@ internal object CarPlayMediaKeys {
             previous.album == next.album &&
             previous.durationMillis == next.durationMillis &&
             previous.artworkTransferId == next.artworkTransferId
-
-    /** Whether [next] changes what the media session's metadata shows; position and play state do not. */
-    internal fun metadataChanged(previous: CarPlayNowPlaying, next: CarPlayNowPlaying): Boolean =
-        previous.copy(elapsedMillis = null, playing = false) != next.copy(elapsedMillis = null, playing = false)
-
-    // Without art the car draws DiPlay's bright launcher icon instead.
-    private fun shownArtworkLocked(): Bitmap? =
-        artwork ?: placeholder ?: appContext?.let(::placeholderArt)?.also { placeholder = it }
 
     internal fun placeholderArt(context: Context): Bitmap? = context
         .getDrawableCompat(R.drawable.art_now_playing_placeholder)

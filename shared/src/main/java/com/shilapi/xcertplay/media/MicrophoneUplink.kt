@@ -110,24 +110,10 @@ internal class MicrophoneUplink(
         var chosen: AudioRecord? = null
         for (candidate in sourceLadder(source)) {
             val candidateRecorder = try {
-                if (Build.VERSION.SDK_INT >= 23) {
-                    AudioRecord.Builder()
-                        .setAudioSource(candidate)
-                        .setAudioFormat(
-                            AndroidAudioFormat.Builder()
-                                .setEncoding(AndroidAudioFormat.ENCODING_PCM_16BIT)
-                                .setSampleRate(config.sampleRate)
-                                .setChannelMask(channelMask)
-                                .build(),
-                        )
-                        .setBufferSizeInBytes(bufferSize)
-                        .build()
-                } else {
-                    // CS11: AudioRecord.Builder 是 API23+；4.4 走 legacy 构造
-                    @Suppress("DEPRECATION")
-                    AudioRecord(candidate, config.sampleRate, channelMask,
-                        AndroidAudioFormat.ENCODING_PCM_16BIT, bufferSize)
-                }
+                // CS11: 4.4 走 legacy 构造
+                @Suppress("DEPRECATION")
+                AudioRecord(candidate, config.sampleRate, channelMask,
+                    AndroidAudioFormat.ENCODING_PCM_16BIT, bufferSize)
             } catch (error: Exception) {
                 Log.e(TAG, "microphone recorder creation failed source=$candidate", error)
                 continue
@@ -284,12 +270,8 @@ internal class MicrophoneUplink(
         try {
             while (running.get()) {
                 stats.reading()
-                // CS11: read(…,mode) 是 API23+；4.4 的 3 参 read 即阻塞
-                val count = if (Build.VERSION.SDK_INT >= 23) {
-                    recorder.read(readBuffer, 0, readBuffer.size, AudioRecord.READ_BLOCKING)
-                } else {
-                    recorder.read(readBuffer, 0, readBuffer.size)
-                }
+                // CS11: 4.4 的 3 参 read 即阻塞
+                val count = recorder.read(readBuffer, 0, readBuffer.size)
                 stats.read(count)
                 if (count < 0) {
                     if (running.get()) {

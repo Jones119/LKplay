@@ -68,22 +68,8 @@ object MicrophoneAvailability {
 
     @Suppress("DEPRECATION")
     private fun create(source: Int, channelMask: Int, bufferSize: Int): AudioRecord =
-        if (Build.VERSION.SDK_INT >= 23) {
-            AudioRecord.Builder()
-                .setAudioSource(source)
-                .setAudioFormat(
-                    AudioFormat.Builder()
-                        .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                        .setSampleRate(SAMPLE_RATE)
-                        .setChannelMask(channelMask)
-                        .build(),
-                )
-                .setBufferSizeInBytes(bufferSize)
-                .build()
-        } else {
-            // CS11: AudioRecord.Builder 是 API23+；4.4 走 legacy 构造
-            AudioRecord(source, SAMPLE_RATE, channelMask, AudioFormat.ENCODING_PCM_16BIT, bufferSize)
-        }
+        // CS11: 4.4 走 legacy 构造
+        AudioRecord(source, SAMPLE_RATE, channelMask, AudioFormat.ENCODING_PCM_16BIT, bufferSize)
 
     /** Same order as [MicrophoneUplink.sourceLadder]: the voice sources first, then the plain ones. */
     private val SOURCE_LADDER = listOf(

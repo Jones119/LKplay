@@ -15,23 +15,17 @@ import android.media.AudioManager
 internal sealed class AudioTrackRoute {
     data class Stream(val streamType: Int) : AudioTrackRoute()
 
-    /** API 23+ usage-based route; the legacy AudioTrack constructor is the only fallback below it. */
-    data object UsageAttributes : AudioTrackRoute()
-
     /** Short label for the existing `Audio: ready ... route=` report line. */
     val label: String
-        get() = when (this) {
-            is Stream -> "streamType=$streamType"
-            UsageAttributes -> "usage"
-        }
+        get() = "streamType=${(this as Stream).streamType}"
 }
 
 internal object AudioStreamFallback {
     /**
      * Stream types to try in order for the stream this renderer selected, preferred first.
      *
-     * [AudioManager.USE_DEFAULT_STREAM_TYPE] means the renderer is not on a legacy stream at all
-     * (API 23+ takes the usage-based route), so there is no stream to fix up.
+     * [AudioManager.USE_DEFAULT_STREAM_TYPE] means the renderer is not on a legacy stream, so there
+     * is no stream to fix up.
      */
     fun candidates(preferredStreamType: Int): List<Int> {
         if (preferredStreamType == AudioManager.USE_DEFAULT_STREAM_TYPE) return emptyList()
@@ -43,13 +37,9 @@ internal object AudioStreamFallback {
      * Routes to attempt, in order, when the preferred stream is rejected or builds an
      * uninitialized track. Empty when [preferredStreamType] is not a legacy stream.
      */
-    fun fallbackCandidates(preferredStreamType: Int, sdkInt: Int): List<AudioTrackRoute> =
+    fun fallbackCandidates(preferredStreamType: Int): List<AudioTrackRoute> =
         candidates(preferredStreamType).map { streamType ->
-            if (sdkInt >= USAGE_ATTRIBUTES_MIN_API && streamType != AudioManager.STREAM_MUSIC) {
-                AudioTrackRoute.UsageAttributes
-            } else {
-                AudioTrackRoute.Stream(streamType)
-            }
+            AudioTrackRoute.Stream(streamType)
         }.distinct()
 
     /** One diagnostic line naming the stream that failed and the stream that carries the audio. */
@@ -58,6 +48,4 @@ internal object AudioStreamFallback {
         return "Audio: stream rejected preferred=$preferredStreamType attempts=" +
             attempts.joinToString(">") { it.label }
     }
-
-    private const val USAGE_ATTRIBUTES_MIN_API = 23
 }

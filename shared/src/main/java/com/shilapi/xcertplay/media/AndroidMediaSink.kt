@@ -45,11 +45,10 @@ internal class AudioFocusCoordinator(
     private val enabled: Boolean,
     private val report: (String) -> Unit = {},
 ) {
-    private data class Entry(val channel: AudioChannel, val attributes: Any?, val streamType: Int)
+    private data class Entry(val channel: AudioChannel, val streamType: Int)
 
     private val manager = context?.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
     private val active = LinkedHashMap<AudioTrack, Entry>()
-    private var request: Any? = null
     private var held = false
     private var requestedChannel: AudioChannel? = null
     private val listener = AudioManager.OnAudioFocusChangeListener { change ->
@@ -78,9 +77,9 @@ internal class AudioFocusCoordinator(
     }
 
     @Synchronized
-    fun acquire(track: AudioTrack, channel: AudioChannel, attributes: Any?, streamType: Int = AudioManager.STREAM_MUSIC) {
+    fun acquire(track: AudioTrack, channel: AudioChannel, streamType: Int = AudioManager.STREAM_MUSIC) {
         if (!enabled || manager == null) return
-        active[track] = Entry(channel, attributes, streamType)
+        active[track] = Entry(channel, streamType)
         refreshRequest()
     }
 
@@ -108,19 +107,9 @@ internal class AudioFocusCoordinator(
             AudioChannel.ASSISTANT -> AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK
             AudioChannel.NAVIGATION -> AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK
         }
-        // CS11: AudioFocusRequest 是 API26+；4.4 走遗留 requestAudioFocus(listener, streamType, gain)
-        // API26+ 的类型全部隔离在 AudioApiBridge（Dalvik 按方法验证时会急切解析类型引用）
-        val result = if (Build.VERSION.SDK_INT >= 26) {
-            val attrs = primary.attributes ?: return
-            val activeManager = manager ?: return
-            val next = AudioApiBridge.buildFocusRequestApi26(gain, attrs, listener)
-            request = next
-            AudioApiBridge.requestFocusApi26(activeManager, next)
-        } else {
-            // The legacy call carries the stream the car's volume keys should follow: stream 12 on the
-            // CS11 (vendor STREAM_NAVI_TTS) for guidance, STREAM_MUSIC otherwise.
-            manager?.requestAudioFocus(listener, primary.streamType, gain)
-        }
+        // CS11: 遗留调用携带车机音量键应跟随的 stream：导航走 stream 12（vendor
+        // STREAM_NAVI_TTS），其余走 STREAM_MUSIC。
+        val result = manager?.requestAudioFocus(listener, primary.streamType, gain)
         held = true
         requestedChannel = primary.channel
         val line = "Audio: focus requested channel=${primary.channel} stream=${primary.streamType} " +
@@ -130,17 +119,7 @@ internal class AudioFocusCoordinator(
     }
 
     private fun abandonFocus() {
-        // CS11: abandonAudioFocusRequest 是 API26+；4.4 走 abandonAudioFocus(listener)
-        if (Build.VERSION.SDK_INT >= 26) {
-            val activeManager = manager
-            val activeRequest = request
-            if (activeManager != null && activeRequest != null) {
-                AudioApiBridge.abandonFocusApi26(activeManager, activeRequest)
-            }
-        } else {
-            manager?.abandonAudioFocus(listener)
-        }
-        request = null
+        manager?.abandonAudioFocus(listener)
         held = false
     }
 
@@ -754,7 +733,7 @@ private class VideoDecoder(
         val attempts = listOf(
             DecoderAttempt(codecName = null, tuned = !untuned),
             DecoderAttempt(codecName = null, tuned = false),
-        ) + softwareDecoderName(mime)?.let { listOf(DecoderAttempt(it, tuned = false)) }.orEmpty() +
+        ) +
             // Last resort: every other registered name for this MIME. This ROM's vendor H.264
             // component can refuse a configure/start (docs/_digest/36, /37) and createDecoderByType
             // only ever offers the default, so walking the rest is worth having before giving up.
@@ -795,9 +774,8 @@ private class VideoDecoder(
      * API-21-only reference must never share a body with an API-19 one.
      */
     @Suppress("DEPRECATION")
-    private fun enumeratedCodecNames(mime: String): List<String> {
-        if (Build.VERSION.SDK_INT >= 21) return emptyList()
-        return runCatching {
+    private fun enumeratedCodecNames(mime: String): List<String> =
+        runCatching {
             val count = android.media.MediaCodecList.getCodecCount()
             (0 until count).mapNotNull { index ->
                 val info = android.media.MediaCodecList.getCodecInfoAt(index) ?: return@mapNotNull null
@@ -808,7 +786,6 @@ private class VideoDecoder(
                 }
             }.filter { it.isNotBlank() }
         }.getOrDefault(emptyList())
-    }
 
     private fun buildFormat(mime: String, csd: List<ByteArray>, tuned: Boolean): MediaFormat =
         MediaFormat.createVideoFormat(mime, width, height).apply {
@@ -846,10 +823,6 @@ private class VideoDecoder(
             val format = buildFormat(mime, csd, attempt.tuned)
             val codec = attempt.codecName?.let { MediaCodec.createByCodecName(it) } ?: createDecoder(mime)
             candidate = codec
-            if (attempt.tuned && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
-                codec.codecInfo.getCapabilitiesForType(mime).isFeatureSupported("low-latency")) {
-                format.setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
-            }
             codec.configure(format, surface, null, 0)
             codec.start()
             codec
@@ -866,13 +839,6 @@ private class VideoDecoder(
         }
     }
 
-    private fun softwareDecoderName(mime: String): String? {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
-        return MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos.firstOrNull {
-            !it.isEncoder && it.isSoftwareOnly && mime in it.supportedTypes
-        }?.name
-    }
-
     private fun createDecoder(mime: String): MediaCodec = MediaCodec.createDecoderByType(mime)
 
     private fun changeSurface(surface: Surface?) {
@@ -883,22 +849,12 @@ private class VideoDecoder(
             Log.i(TAG, "video decoder detached from surface")
             return
         }
-        val codec = decoder
-        if (codec != null && Build.VERSION.SDK_INT >= 23) { // CS11: setOutputSurface 是 API23+；4.4 走重建解码器
-            try {
-                codec.setOutputSurface(surface)
-                Log.i(TAG, "video decoder output surface updated")
-                return
-            } catch (error: Exception) {
-                Log.w(TAG, "video decoder output surface update failed; reconfiguring", error)
-            }
-        }
         releaseDecoder()
         // CS11: rebuilding the vendor decoder immediately after releasing it makes the component fall
         // back to client-side buffers ("OMX_SetParameter() failed for StoreMetaDataInBuffers" then
         // "Using client-side OMX mux"), and those frames never reach the visible surface — the black
         // screen after the surface is recreated. Letting the old instance tear down avoids it.
-        if (Build.VERSION.SDK_INT < 23) runCatching { Thread.sleep(200L) }
+        runCatching { Thread.sleep(200L) }
         lastConfig?.let(::configureDecoder)
     }
 
@@ -1124,15 +1080,7 @@ private class AudioRenderer(
 ) : Closeable {
     private data class AudioPacket(val rtp: ByteArray, val sample: Int)
 
-    private var trackAttributes: Any? = null
-    /**
-     * Routing attributes configured for the track that is playing.
-     *
-     * A field rather than a local in [createTrack] because a fallback route swaps it while the
-     * track is being built, and focus/volume follow whichever route won.
-     */
-    private var attributes: Any? = null
-    /** Stream this renderer's track actually plays on; guidance focus follows it on API 19. */
+    /** Stream this renderer's track actually plays on; guidance focus follows it. */
     private var effectiveStreamType = AudioManager.STREAM_MUSIC
     private var mappedChannel: AudioChannel? = null
     private val queue = LinkedBlockingQueue<AudioPacket>(MAX_QUEUED_PACKETS)
@@ -1433,70 +1381,53 @@ private class AudioRenderer(
         val selection = mappedSelection()
         mappedChannel = selection.channel
         val streamOverride = channelOverride(selection.channel)
-        attributes = if (Build.VERSION.SDK_INT >= 21) AudioApiBridge.attributesFor(selection, streamOverride) else null // CS11: AudioAttributes 是 API21+
-        trackAttributes = attributes
         val plan = MediaAudioBuffer.plan(selection.channel == AudioChannel.MEDIA,
             format.sampleRate, format.channels, minBuffer, mediaBufferMillis)
         bytesPerSecond = format.sampleRate * frameBytes
         val built: AudioTrack
         var routeLabel: String
         diagnosticStage = "track-build"
-        if (streamOverride == 0 && Build.VERSION.SDK_INT >= 23) {
-            val usageAttributes = AudioApiBridge.attributesFor(selection)
-            attributes = usageAttributes
-            routeLabel = "usage"
-            built = AudioApiBridge.builderTrack(
-                usageAttributes, format.sampleRate, encoding, channelMask, plan.trackBufferBytes,
-            )
-        } else {
-            // CS11: AudioTrack.Builder 是 API23+；4.4 一律走 legacy 构造（usage 路由退为 mapper 的 streamType）
-            val streamType = if (streamOverride != 0) streamOverride else streamType()
-            effectiveStreamType = streamType
-            routeLabel = if (streamOverride != 0) "streamType=$streamType" else "streamType=$streamType(api<23)"
-            val attempts = LegacyAudioFallback.Attempts(
-                AudioStreamFallback.fallbackCandidates(streamType, Build.VERSION.SDK_INT),
-            )
-            built = LegacyAudioFallback.build(
-                createLegacy = { buildLegacyTrack(streamType, plan) },
-                isInitialized = { it.state == AudioTrack.STATE_INITIALIZED },
-                release = { it.release() },
-                createFallback = {
-                    diagnosticStage = "track-fallback-build"
-                    val choice = attempts.next(
-                        build = { route ->
-                            routeLabel = "${route.label}(fallback)"
-                            buildRouteTrack(route, selection, plan)
-                        },
-                        isInitialized = { it.state == AudioTrack.STATE_INITIALIZED },
-                        release = { it.release() },
-                    )
-                    // Guidance lands on the music stream here, so focus and the volume stream
-                    // follow the stream that actually carries the sound, not the preferred one
-                    // the ROM refused.
-                    (choice.route as? AudioTrackRoute.Stream)?.let { effectiveStreamType = it.streamType }
-                    // The report names every stream this channel tried once the sound is up;
-                    // before that there is nothing useful to say beyond the per-attempt logs.
-                    AudioStreamFallback.rejectionReport(streamType, choice.attempted)?.let { line ->
-                        Log.w(TAG, line)
-                        runCatching { report(line) }
-                    }
-                    choice.track
-                },
-            )
-        }
+        // CS11: 4.4 一律走 legacy 构造（usage 路由退为 mapper 的 streamType）
+        val streamType = if (streamOverride != 0) streamOverride else streamType()
+        effectiveStreamType = streamType
+        routeLabel = "streamType=$streamType"
+        val attempts = LegacyAudioFallback.Attempts(
+            AudioStreamFallback.fallbackCandidates(streamType),
+        )
+        built = LegacyAudioFallback.build(
+            createLegacy = { buildLegacyTrack(streamType, plan) },
+            isInitialized = { it.state == AudioTrack.STATE_INITIALIZED },
+            release = { it.release() },
+            createFallback = {
+                diagnosticStage = "track-fallback-build"
+                val choice = attempts.next(
+                    build = { route ->
+                        routeLabel = "${route.label}(fallback)"
+                        buildRouteTrack(route, plan)
+                    },
+                    isInitialized = { it.state == AudioTrack.STATE_INITIALIZED },
+                    release = { it.release() },
+                )
+                // Guidance lands on the music stream here, so focus and the volume stream
+                // follow the stream that actually carries the sound, not the preferred one
+                // the ROM refused.
+                (choice.route as? AudioTrackRoute.Stream)?.let { effectiveStreamType = it.streamType }
+                // The report names every stream this channel tried once the sound is up;
+                // before that there is nothing useful to say beyond the per-attempt logs.
+                AudioStreamFallback.rejectionReport(streamType, choice.attempted)?.let { line ->
+                    Log.w(TAG, line)
+                    runCatching { report(line) }
+                }
+                choice.track
+            },
+        )
         track = built
-        diagnosticStage = "track-attributes"
-        trackAttributes = if (Build.VERSION.SDK_INT >= 21) attributes?.let { AudioApiBridge.attributesForFocus(built, it) } else null // CS11: <21 无 AudioAttributes
         diagnosticStage = "track-capacity"
-        val capacityBytes = if (Build.VERSION.SDK_INT >= 23) built.bufferSizeInFrames * frameBytes else plan.trackBufferBytes // CS11: getBufferSizeInFrames 是 API23+
+        val capacityBytes = plan.trackBufferBytes
         startThresholdBytes = MediaAudioBuffer.startBytesFor(plan.startBytes, capacityBytes, PREBUFFER_WRITE_CHUNK_BYTES)
         val trackMetadata = runCatching {
-            val usageLabel = if (Build.VERSION.SDK_INT >= 21) AudioApiBridge.usageLabel(trackAttributes)
-            else "usage=n/a contentType=n/a"
-            "api=${Build.VERSION.SDK_INT} trackState=${built.state} trackRate=${built.sampleRate} " +
-                "$usageLabel " +
-                "attributesSource=${if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) "track" else "configured"}"
-        }.getOrDefault("api=${Build.VERSION.SDK_INT} trackMetadata=unavailable")
+            "trackState=${built.state} trackRate=${built.sampleRate}"
+        }.getOrDefault("trackMetadata=unavailable")
         report("Audio: ready audioType=${format.audioType} codec=${format.codec} " +
             "rate=${format.sampleRate} channels=${format.channels} " +
             "route=$routeLabel " +
@@ -1514,7 +1445,7 @@ private class AudioRenderer(
             TAG,
             "audio route type=${format.payloadType} audioType=${format.audioType} " +
                 "mode=${if (advancedAudioChannelMapping) AudioChannelMappingMode.AUTOMOTIVE_BUS else AudioChannelMappingMode.MOBILE_COMPATIBLE} " +
-                "channel=${selection.channel} usage=${if (Build.VERSION.SDK_INT >= 21) AudioApiBridge.usageLabel(attributes) else "n/a"} " +
+                "channel=${selection.channel} " +
                 "streamOverride=$streamOverride " +
                 "focus=${if (audioFocusEnabled) "on" else "off"}",
         )
@@ -1550,13 +1481,7 @@ private class AudioRenderer(
             Log.i(TAG, "audio focus skipped channel=NAVIGATION; overlays without ducking")
             return
         }
-        // CS11: 4.4 没有 AudioAttributes（API21），trackAttributes 恒为 null；但遗留的
-        // requestAudioFocus(listener, streamType, gain) 不需要属性，所以这里不能一票否决，
-        // 否则 AudioFocusCoordinator 里那条为 4.4 写的遗留分支永远不可达。
-        // 只有 API26+ 的 AudioFocusRequest 才必须有属性，那时仍保持原来的静默跳过。
-        val attributes = trackAttributes
-        if (attributes == null && Build.VERSION.SDK_INT >= 26) return
-        track?.let { audioFocusCoordinator.acquire(it, channel, attributes, effectiveStreamType) }
+        track?.let { audioFocusCoordinator.acquire(it, channel, effectiveStreamType) }
     }
 
     private fun abandonAudioFocus() {
@@ -1568,21 +1493,8 @@ private class AudioRenderer(
         plan.trackBufferBytes, AudioTrack.MODE_STREAM,
     )
 
-    private fun buildRouteTrack(
-        route: AudioTrackRoute,
-        selection: AudioChannelSelection,
-        plan: MediaAudioBuffer.Plan,
-    ): AudioTrack = when (route) {
-        is AudioTrackRoute.Stream -> buildLegacyTrack(route.streamType, plan)
-        AudioTrackRoute.UsageAttributes -> {
-            val routeAttributes = AudioApiBridge.attributesFor(selection)
-            attributes = routeAttributes
-            AudioApiBridge.builderTrack(
-                routeAttributes, format.sampleRate, AndroidAudioFormat.ENCODING_PCM_16BIT, channelMask(),
-                plan.trackBufferBytes,
-            )
-        }
-    }
+    private fun buildRouteTrack(route: AudioTrackRoute, plan: MediaAudioBuffer.Plan): AudioTrack =
+        buildLegacyTrack((route as AudioTrackRoute.Stream).streamType, plan)
 
     private fun channelMask(): Int =
         if (format.channels >= 2) AndroidAudioFormat.CHANNEL_OUT_STEREO else AndroidAudioFormat.CHANNEL_OUT_MONO
@@ -1944,12 +1856,8 @@ private class AudioRenderer(
             }
             val writeStarted = System.nanoTime()
             diagnosticStage = "track-write"
-            val count = if (Build.VERSION.SDK_INT >= 23) {
-                track.write(data, offset + written, writeLength, AudioTrack.WRITE_BLOCKING)
-            } else {
-                // CS11: write(ByteArray,…,mode) 是 API23+；4.4 用 3 参阻塞写
-                track.write(data, offset + written, writeLength)
-            }
+            // CS11: 4.4 用 3 参阻塞写
+            val count = track.write(data, offset + written, writeLength)
             maxWriteMs = maxOf(maxWriteMs, (System.nanoTime() - writeStarted) / 1_000_000L)
             if (count < 0) {
                 writeErrorsThisWindow++
@@ -1986,7 +1894,7 @@ private class AudioRenderer(
         // getCurMasterStream, which follows the stream holding focus, so the keys stay on media
         // between prompts and switch to the navigation stream while one is speaking.
         if (mappedChannel == AudioChannel.NAVIGATION) {
-            audioFocusCoordinator.acquire(track, AudioChannel.NAVIGATION, trackAttributes, effectiveStreamType)
+            audioFocusCoordinator.acquire(track, AudioChannel.NAVIGATION, effectiveStreamType)
         }
     }
 
