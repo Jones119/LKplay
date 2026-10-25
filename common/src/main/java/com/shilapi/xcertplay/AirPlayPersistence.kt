@@ -1,7 +1,6 @@
 package com.shilapi.xcertplay
 
 import android.content.Context
-import android.os.Build
 import com.shilapi.xcertplay.airplay.AirPlayDisplaySettings
 import com.shilapi.xcertplay.airplay.AirPlayPhysicalSizeBasis
 import com.shilapi.xcertplay.airplay.CarPlayDisplayScale
@@ -460,10 +459,9 @@ object AirPlayPersistence {
      * made it send up to ~53 fps at ~9.5 Mbps; the CS11 pipeline fell behind, every frame older than
      * 250 ms was dropped instead of presented (shown 27-33 fps while rx reached 53), and the >1 s
      * backlog recreated the decoder roughly every 5 s. A requested 30 fps keeps rx == shown with zero
-     * recoveries and roughly half the bitrate. Modern devices keep the 60 fps default.
+     * recoveries and roughly half the bitrate.
      */
-    private fun defaultFps(): Int =
-        if (Build.VERSION.SDK_INT < 21) 30 else AirPlayDisplaySettings.DEFAULT_FPS
+    private fun defaultFps(): Int = 30
 
     fun loadFps(context: Context): Int = AirPlayDisplaySettings.sanitizeFps(
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)

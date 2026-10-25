@@ -9,8 +9,6 @@ import android.view.Window
 import android.bluetooth.BluetoothManager
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
-import android.content.res.ColorStateList
 import android.content.res.Configuration
 import android.graphics.BitmapFactory
 import android.graphics.Color
@@ -131,7 +129,6 @@ class DiPlayActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         languagePreferenceAtCreate = AppLocale.preference(this)
         WindowCompat.setDecorFitsSystemWindows(window, true)
-        if (Build.VERSION.SDK_INT >= 21) { window.statusBarColor = BG; window.navigationBarColor = BG } // CS11: API21+；4.4 由主题值兜底
         WindowInsetsControllerCompat(window, window.decorView).apply {
             isAppearanceLightStatusBars = false
             hide(WindowInsetsCompat.Type.statusBars())
@@ -214,7 +211,7 @@ class DiPlayActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        if (Build.VERSION.SDK_INT < 33 && AppLocale.preference(this) != languagePreferenceAtCreate) {
+        if (AppLocale.preference(this) != languagePreferenceAtCreate) {
             recreate()
             return
         }
@@ -328,16 +325,13 @@ class DiPlayActivity : ComponentActivity() {
         )
         header.addView(
             label(getString(R.string.diplay), if (compact) 18 else 24, TEXT, true).apply {
-                if (Build.VERSION.SDK_INT >= 21) letterSpacing = .34f
                 setPadding(if (compact) dp(10) else dp(14), 0, 0, 0)
             },
             LinearLayout.LayoutParams(0, if (compact) dp(36) else dp(56), 1f),
         )
         if (!compact) {
             header.addView(
-                label("CARPLAY · CS11", 13, MUTED).apply {
-                    if (Build.VERSION.SDK_INT >= 21) letterSpacing = .16f
-                },
+                label("CARPLAY · CS11", 13, MUTED),
             )
         }
         if (page != "home" || !compact) {
@@ -421,7 +415,7 @@ class DiPlayActivity : ComponentActivity() {
         val wide = resources.configuration.screenWidthDp >= 850
         val body = column()
         val left = column()
-        left.addView(label(getString(R.string.your_phone_your_drive), 12, MUTED, true).apply { if (Build.VERSION.SDK_INT >= 21) letterSpacing = .18f })
+        left.addView(label(getString(R.string.your_phone_your_drive), 12, MUTED, true))
         // The state line is the page's headline now rather than a card title: it is what the driver reads
         // first, and it is the sentence the whole screen is about.
         status = label(getString(R.string.ready_when_you_are), if (wide) 40 else 34, TEXT, true).apply { setPadding(0, dp(14), 0, dp(12)) }
@@ -438,7 +432,7 @@ class DiPlayActivity : ComponentActivity() {
         }.apply { visibility = View.GONE }
         left.addView(disconnectButton, matchButton(12, 56))
         val card = card()
-        card.addView(label(getString(R.string.wireless_carplay), 12, MUTED, true).apply { if (Build.VERSION.SDK_INT >= 21) letterSpacing = .12f })
+        card.addView(label(getString(R.string.wireless_carplay), 12, MUTED, true))
         val connectionHint = when (AirPlayPersistence.loadWirelessHotspotMode(this)) {
             WirelessHotspotMode.EXISTING_WIFI -> getString(R.string.existing_wifi_hint)
             WirelessHotspotMode.MANUAL -> getString(R.string.hotspot_hint_manual)
@@ -477,7 +471,7 @@ class DiPlayActivity : ComponentActivity() {
             )
             val caption = row().apply { setPadding(dp(18), dp(14), dp(18), dp(14)) }
             caption.addView(
-                label("CONNECT TO CARPLAY", 12, MUTED).apply { if (Build.VERSION.SDK_INT >= 21) letterSpacing = .16f },
+                label("CONNECT TO CARPLAY", 12, MUTED),
                 LinearLayout.LayoutParams(0, -2, 1f),
             )
             caption.addView(label("fe80::2", 12, MUTED))
@@ -487,7 +481,7 @@ class DiPlayActivity : ComponentActivity() {
         right.addView(label(getString(R.string.plug_your_iphone_into_a_usb_data_port_allow_carplay_when_y), 14, MUTED).apply { gravity = Gravity.CENTER; setPadding(dp(8), dp(10), dp(8), dp(24)) })
         right.addView(button(getString(R.string.settings), false) { page = "settings"; render() }, matchButton())
         right.addView(label(getString(R.string.make_diplay_feel_right_for_your_car), 14, MUTED).apply { gravity = Gravity.CENTER; setPadding(0, dp(10), 0, dp(24)) })
-        right.addView(label("${getString(R.string.home_public_preview)}${version()}", 12, MUTED).apply { if (Build.VERSION.SDK_INT >= 21) letterSpacing = .08f })
+        right.addView(label("${getString(R.string.home_public_preview)}${version()}", 12, MUTED))
         if (wide) {
             // Both rows share column widths. The USB button starts at the wireless
             // card's top edge, independently of hero wrapping or font scaling.
@@ -670,12 +664,11 @@ class DiPlayActivity : ComponentActivity() {
         }
         section(content, getString(R.string.diagnostics), R.drawable.ic_dp_diagnostics) { card ->
             exportButton = button(if (exportInProgress) getString(R.string.saving_report) else getString(R.string.save_diagnostic_report), false) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) exportDiagnostics()
-                else chooseReportDestination()
+                chooseReportDestination()
             }.apply { isEnabled = !exportInProgress }
             card.addView(exportButton, matchButton(10, 60))
             card.addView(button(getString(R.string.choose_save_location), false) { chooseReportDestination() }, matchButton(10, 60))
-            val destination = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) getString(R.string.reports_save_to_downloads_diplay) else getString(R.string.choose_where_to_save_your_report)
+            val destination = getString(R.string.choose_where_to_save_your_report)
             card.addView(label(destination + getString(R.string.nothing_is_sent_automatically_protocol_payloads_and_creden), 14, MUTED).apply { setPadding(0, dp(12), 0, 0) })
         }
         section(content, getString(R.string.automatic_connection), R.drawable.ic_dp_automation) { card ->
@@ -694,10 +687,6 @@ class DiPlayActivity : ComponentActivity() {
                 DiPlayPreferences.connectOnPhoneBluetooth(this)) { enabled ->
                 if (!enabled) {
                     DiPlayPreferences.saveConnectOnPhoneBluetooth(this, false)
-                } else if (Build.VERSION.SDK_INT >= 31 &&
-                    checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED
-                ) {
-                    bluetoothAutoConnectPermission.launch(Manifest.permission.BLUETOOTH_CONNECT)
                 } else {
                     // CS11 (API 19) has no runtime Bluetooth permission, so enabling takes effect here.
                     DiPlayPreferences.saveConnectOnPhoneBluetooth(this, true)
@@ -1875,7 +1864,6 @@ class DiPlayActivity : ComponentActivity() {
             setImageBitmap(custom ?: BitmapFactory.decodeResource(resources, R.raw.ic_car_home))
             scaleType = ImageView.ScaleType.CENTER_CROP
             background = rounded(SURFACE, BORDER)
-            if (Build.VERSION.SDK_INT >= 21) clipToOutline = true
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
         }, LinearLayout.LayoutParams(dp(72), dp(72)).apply { marginEnd = dp(16) })
         val text = column()
@@ -1946,13 +1934,6 @@ class DiPlayActivity : ComponentActivity() {
         if (wireless && DiPlayPreferences.phoneAddress(this) == null) {
             pendingWireless = true; choosePhone(); return
         }
-        val preferences = getSharedPreferences("diplay", MODE_PRIVATE)
-        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED && !preferences.getBoolean("notification_asked", false)) {
-            preferences.edit().putBoolean("notification_asked", true).apply()
-            notificationTransport = wireless
-            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
-            return
-        }
         val open = {
             AirPlayPersistence.saveWirelessEnabled(this, wireless)
             openProjection()
@@ -1964,9 +1945,6 @@ class DiPlayActivity : ComponentActivity() {
         startActivity(Intent(this, CarPlayHostActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
     }
     private fun choosePhone() {
-        if (Build.VERSION.SDK_INT >= 31 && checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
-            bluetoothPermission.launch(Manifest.permission.BLUETOOTH_CONNECT); return
-        }
         val adapter = systemServiceOrNull(BluetoothManager::class.java)?.adapter ?: android.bluetooth.BluetoothAdapter.getDefaultAdapter()
         if (adapter == null || !adapter.isEnabled) {
             AlertDialog.Builder(this).setTitle(getString(R.string.turn_on_bluetooth))
@@ -2018,10 +1996,8 @@ class DiPlayActivity : ComponentActivity() {
             }.setNegativeButton(getString(R.string.cancel), null).show()
     }
 
-    // CS11: WifiP2pManager.Channel.close 是 API27+；低版本无法关闭（句柄随进程释放）
-    private fun closeP2pChannel(channel: android.net.wifi.p2p.WifiP2pManager.Channel) {
-        if (Build.VERSION.SDK_INT >= 27) channel.close()
-    }
+    // CS11: API19 无法关闭 Channel（句柄随进程释放）
+    private fun closeP2pChannel(channel: android.net.wifi.p2p.WifiP2pManager.Channel) = Unit
 
     private fun resetWirelessGroup() {
         val manager = systemServiceOrNull(android.net.wifi.p2p.WifiP2pManager::class.java)
@@ -2243,7 +2219,6 @@ class DiPlayActivity : ComponentActivity() {
                 // without this an unselected channel would render as bare text with no box.
                 setTextColor(TEXT)
                 background = ripple(secondaryControl())
-                if (Build.VERSION.SDK_INT >= 21) stateListAnimator = null
                 setOnClickListener {
                     val previous = navigationStreamType
                     navigationStreamType = i
@@ -2257,10 +2232,8 @@ class DiPlayActivity : ComponentActivity() {
             val params = GridLayout.LayoutParams().apply {
                 width = 0
                 height = dp(48)
-                columnSpec = if (Build.VERSION.SDK_INT >= 21) GridLayout.spec(GridLayout.UNDEFINED, 1f)
-                // CS11: spec(int,float) 与 spec(int,int,float)（带权重）都是 API21+；4.4 只能用
-                // API14 的 spec(int,int)，退化为等宽而不是加权等宽。
-                else GridLayout.spec(GridLayout.UNDEFINED, 1)
+                // CS11: 4.4 只能用 API14 的 spec(int,int)，退化为等宽而不是加权等宽。
+                columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1)
                 setMargins(dp(4), dp(4), dp(4), dp(4))
             }
             grid.addView(btn, params)
@@ -2289,9 +2262,7 @@ class DiPlayActivity : ComponentActivity() {
         // parameter stays because every call site passes one, but the mark is a rule now (docs/_digest/60).
         val heading = column().apply { setPadding(0, 0, 0, dp(14)) }
         heading.addView(
-            label(title.uppercase(), 12, MUTED, true).apply {
-                if (Build.VERSION.SDK_INT >= 21) letterSpacing = .2f
-            },
+            label(title.uppercase(), 12, MUTED, true),
         )
         heading.addView(
             View(this).apply { setBackgroundColor(BORDER) },
@@ -2368,7 +2339,6 @@ class DiPlayActivity : ComponentActivity() {
             ripple(secondaryControl())
         }
         setPadding(dp(16), 0, dp(16), 0); minHeight = if (primary) dp(56) else dp(52)
-        if (Build.VERSION.SDK_INT >= 21) stateListAnimator = null
         setOnClickListener { click() }
     }
     /** A single bottom hairline: the separator this system uses instead of outlining every row. */
@@ -2396,9 +2366,8 @@ class DiPlayActivity : ComponentActivity() {
      * chips. One definition, so the two tiers cannot drift apart again.
      */
     private fun secondaryControl() = rounded(RAISED, CONTROL_BORDER)
-    // CS11: RippleDrawable 是 API21+；4.4 回退为静态圆角底
-    private fun ripple(content: android.graphics.drawable.Drawable): android.graphics.drawable.Drawable =
-        if (Build.VERSION.SDK_INT >= 21) android.graphics.drawable.RippleDrawable(ColorStateList.valueOf(0x336F9FD9), content, null) else content
+    // CS11: 4.4 上使用静态圆角底（没有 RippleDrawable）
+    private fun ripple(content: android.graphics.drawable.Drawable): android.graphics.drawable.Drawable = content
     private fun matchButton(top: Int = 0, height: Int = 68) = LinearLayout.LayoutParams(-1, dp(height)).apply { topMargin = dp(top) }
     private fun space(height: Int) = View(this).apply { layoutParams = LinearLayout.LayoutParams(1, dp(height)) }
     // Rounded, not truncated: below 160 dpi dp(1) became 0 and every border vanished.

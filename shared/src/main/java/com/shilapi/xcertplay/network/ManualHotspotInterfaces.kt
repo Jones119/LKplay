@@ -3,11 +3,6 @@ package com.shilapi.xcertplay.network
 import android.annotation.SuppressLint
 import android.content.Context
 import android.net.ConnectivityManager
-import android.net.NetworkCapabilities
-import android.net.TetheringInterface
-import android.net.TetheringManager
-import android.os.Build
-import androidx.annotation.RequiresApi
 import java.io.Closeable
 import java.io.File
 import java.net.NetworkInterface
@@ -19,29 +14,13 @@ internal class ManualHotspotInterfaces(
     private val onDiagnostic: (String) -> Unit = {},
 ) : Closeable {
     private val connectivity = context.systemService(ConnectivityManager::class.java)
-    private val publicTethering = if (Build.VERSION.SDK_INT >= 36) PublicTethering(context) else null
     private var lastLegacyDiagnostic: String? = null
 
     fun sample(): HotspotNetworkSnapshot {
-        val ap = publicTethering?.interfaces ?: legacyApInterfaces()
-        // CS11/4.4 has no ConnectivityManager.getActiveNetwork (API 23), so the default network
-        // cannot be sampled there: an unobservable sample must not look like a changing network.
-        val defaultObservable = Build.VERSION.SDK_INT >= 23
-        val before = if (defaultObservable) runCatching { connectivity?.activeNetwork } else null
-        // allNetworks (API 21) is missing on the same firmware, so the Wi-Fi upstream set is
-        // unobservable there as well; that must not disqualify every hotspot candidate.
-        val upstreamObservable = Build.VERSION.SDK_INT >= 21
-        val upstreams = runCatching {
-            checkNotNull(connectivity)
-            connectivity.allNetworks.mapNotNull { network ->
-                val caps = checkNotNull(connectivity.getNetworkCapabilities(network))
-                val links = checkNotNull(connectivity.getLinkProperties(network))
-                links.interfaceName?.takeIf { caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) }
-            }.toSet()
-        }.getOrNull()
-        val defaultName = runCatching {
-            before?.getOrNull()?.let { connectivity?.getLinkProperties(it)?.interfaceName }
-        }.getOrNull()
+        val ap = legacyApInterfaces()
+        // CS11/4.4 has neither getActiveNetwork (API 23) nor allNetworks (API 21), so the default
+        // network and the Wi-Fi upstream set are unobservable; an unobservable sample must not look
+        // like a changing network.
         val interfaces = runCatching {
             Collections.list(NetworkInterface.getNetworkInterfaces()).mapNotNull { iface ->
                 runCatching {
@@ -52,12 +31,11 @@ internal class ManualHotspotInterfaces(
                 }.getOrNull()
             }
         }.getOrDefault(emptyList())
-        val after = if (defaultObservable) runCatching { connectivity?.activeNetwork } else null
         return HotspotNetworkSnapshot(
-            interfaces, ap, upstreams, defaultName,
-            consistent = defaultNetworkSampleConsistent(defaultObservable, before, after),
+            interfaces, ap, null, null,
+            consistent = true,
             apEnabled = CarHotspotStatus.isEnabled(context),
-            upstreamObservable = upstreamObservable,
+            upstreamObservable = false,
         )
     }
 
@@ -81,27 +59,7 @@ internal class ManualHotspotInterfaces(
         ap
     }.getOrNull()
 
-    override fun close() { publicTethering?.close() }
-
-    @RequiresApi(36)
-    private class PublicTethering(context: Context) : Closeable {
-        @Volatile var interfaces: Set<String>? = null
-            private set
-        private val manager = context.systemService(TetheringManager::class.java)
-        private val callback = object : TetheringManager.TetheringEventCallback {
-            override fun onTetheredInterfacesChanged(interfaces: Set<TetheringInterface>) {
-                this@PublicTethering.interfaces = interfaces.filter { it.type == TetheringManager.TETHERING_WIFI }
-                    .map { it.getInterface() }.toSet()
-            }
-        }
-        private val registered = runCatching {
-            checkNotNull(manager).registerTetheringEventCallback(context.mainExecutor, callback)
-        }.isSuccess
-
-        override fun close() {
-            if (registered) runCatching { manager?.unregisterTetheringEventCallback(callback) }
-        }
-    }
+    override fun close() = Unit
 }
 
 internal fun legacyHotspotInterfaces(tethered: List<String>, wifiRegexes: List<String>): Set<String>? {

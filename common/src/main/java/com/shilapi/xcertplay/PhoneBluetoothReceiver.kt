@@ -1,12 +1,9 @@
 package com.shilapi.xcertplay
 
-import android.Manifest
 import android.bluetooth.BluetoothDevice
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
-import android.os.Build
 import android.os.SystemClock
 import android.util.Log
 
@@ -26,17 +23,8 @@ class PhoneBluetoothReceiver : BroadcastReceiver() {
             return
         }
         val selected = DiPlayPreferences.phoneAddress(context) ?: return
-        if (Build.VERSION.SDK_INT >= 31 &&
-            context.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED
-        ) {
-            return
-        }
-        val device = if (Build.VERSION.SDK_INT >= 33) {
-            intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
-        } else {
-            @Suppress("DEPRECATION")
-            intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE)
-        } ?: return
+        @Suppress("DEPRECATION")
+        val device = intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE) ?: return
         val address = runCatching { device.address }.getOrNull() ?: return
         if (!address.equals(selected, ignoreCase = true)) return
 

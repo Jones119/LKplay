@@ -111,6 +111,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.roundToInt
 import com.shilapi.xcertplay.compat.systemService
 import com.shilapi.xcertplay.compat.hasPermissionCompat
+import com.shilapi.xcertplay.compat.noBackupFilesDirCompat
 
 /**
  * Full-screen CarPlay host. It renders decoded video through a [TextureView], forwards touch to
@@ -610,7 +611,7 @@ class CarPlayHostActivity : ComponentActivity() {
         com.shilapi.xcertplay.compat.WorkerThreads.start("diplay-mfi-preload") {
             runCatching {
                 LocalMfiAuthenticationClient.preload(
-                    java.io.File(noBackupFilesDir, LocalMfiAuthenticationClient.DIRECTORY),
+                    java.io.File(noBackupFilesDirCompat(), LocalMfiAuthenticationClient.DIRECTORY),
                 )
             }
         }
@@ -769,17 +770,7 @@ class CarPlayHostActivity : ComponentActivity() {
         }
 
     private fun requiredWirelessPermissions(): List<String> = when {
-        wirelessHotspotMode == WirelessHotspotMode.EXISTING_WIFI ->
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) listOf(Manifest.permission.BLUETOOTH_CONNECT) else emptyList()
-        Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU -> listOf(
-            Manifest.permission.BLUETOOTH_CONNECT,
-            Manifest.permission.NEARBY_WIFI_DEVICES,
-        )
-        Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> listOf(
-            Manifest.permission.BLUETOOTH_CONNECT,
-            Manifest.permission.ACCESS_COARSE_LOCATION,
-            Manifest.permission.ACCESS_FINE_LOCATION,
-        )
+        wirelessHotspotMode == WirelessHotspotMode.EXISTING_WIFI -> emptyList()
         else -> listOf(
             Manifest.permission.ACCESS_COARSE_LOCATION,
             Manifest.permission.ACCESS_FINE_LOCATION,
@@ -874,7 +865,7 @@ class CarPlayHostActivity : ComponentActivity() {
             openPicturePanel()
         }
         val languagePreference = AppLocale.preference(this)
-        if (Build.VERSION.SDK_INT < 33 && languagePreference != languagePreferenceAtCreate) {
+        if (languagePreference != languagePreferenceAtCreate) {
             languagePreferenceAtCreate = languagePreference
             recreate()
             return
@@ -1114,7 +1105,6 @@ class CarPlayHostActivity : ComponentActivity() {
         val title = TextView(this).apply {
             text = getString(R.string.diplay)
             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-            if (Build.VERSION.SDK_INT >= 21) letterSpacing = .34f
         }
         lockup.addView(title, LinearLayout.LayoutParams(-2, -2).apply { leftMargin = dp(14) })
         lockup.addView(
@@ -1122,7 +1112,6 @@ class CarPlayHostActivity : ComponentActivity() {
                 text = "CARPLAY · CS11"
                 textSize = 13f
                 setTextColor(WaitingScreenColors.of(darkMode).secondary)
-                if (Build.VERSION.SDK_INT >= 21) letterSpacing = .16f
             },
             LinearLayout.LayoutParams(-2, -2).apply { leftMargin = dp(16) },
         )
@@ -1773,24 +1762,22 @@ class CarPlayHostActivity : ComponentActivity() {
             ).apply { topMargin = dp(12) },
         )
 
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
-            content.addView(
-                settingsCategoryHeader(getString(R.string.android_9_compatibility)),
-                LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
-                ).apply { topMargin = dp(40) },
-            )
-            content.addView(
-                settingsDescription(
-                    getString(R.string.settings_android9_compat),
-                ),
-                LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
-                ).apply { topMargin = dp(12) },
-            )
-        }
+        content.addView(
+            settingsCategoryHeader(getString(R.string.android_9_compatibility)),
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = dp(40) },
+        )
+        content.addView(
+            settingsDescription(
+                getString(R.string.settings_android9_compat),
+            ),
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = dp(12) },
+        )
 
         // The preview belongs to the display page: it describes resolution and identity, not an action.
         val displayColumn = (pages["display"] as ScrollView).getChildAt(0) as LinearLayout
@@ -2166,17 +2153,6 @@ class CarPlayHostActivity : ComponentActivity() {
             val switch = Switch(this@CarPlayHostActivity).apply {
                 isChecked = locationReportingEnabled
                 contentDescription = getString(R.string.report_android_location_to_the_iphone)
-                if (Build.VERSION.SDK_INT >= 21) showText = false
-                if (Build.VERSION.SDK_INT >= 23) {
-                    thumbTintList = ColorStateList(
-                        arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
-                        intArrayOf(settingsTheme.accent, settingsTheme.textSecondary),
-                    )
-                    trackTintList = ColorStateList(
-                        arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
-                        intArrayOf(settingsTheme.accentTrack, settingsTheme.trackOff),
-                    )
-                }
                 setOnCheckedChangeListener { _, checked ->
                     onLocationReportingChanged(checked)
                 }
@@ -2347,8 +2323,6 @@ class CarPlayHostActivity : ComponentActivity() {
         val seekBar = SeekBar(this).apply {
             max = (values.size - 1).coerceAtLeast(0)
             progress = selectedIndex
-            if (Build.VERSION.SDK_INT >= 21) splitTrack = false
-            if (Build.VERSION.SDK_INT >= 21) { progressTintList = ColorStateList.valueOf(settingsTheme.accent); thumbTintList = ColorStateList.valueOf(settingsTheme.accent) }
             setOnSeekBarChangeListener(
                 object : SeekBar.OnSeekBarChangeListener {
                     override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
@@ -2831,9 +2805,6 @@ class CarPlayHostActivity : ComponentActivity() {
             setPadding(0, dp(8), 0, 0)
         }
         val modes = buildList {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                add(WirelessHotspotMode.WIFI_P2P to getString(R.string.wi_fi_p2p_5_ghz))
-            }
             add(WirelessHotspotMode.MANUAL to getString(R.string.built_in_car_hotspot))
             add(WirelessHotspotMode.EXISTING_WIFI to getString(R.string.existing_wifi_title))
         }
@@ -3234,52 +3205,22 @@ class CarPlayHostActivity : ComponentActivity() {
     private fun largerCanvasSupport(display: AirPlayDisplayConfig): CanvasSupport =
         if (maxOf(display.widthPixels, display.heightPixels) > 3840 || minOf(display.widthPixels, display.heightPixels) > 2160) {
             CanvasSupport(false, "canvas_4k_limit", "Decoder capability check skipped: canvas exceeds enlargement limit")
-        } else decoderCanvasSupport(display)
+        } else decoderCanvasSupport()
 
-    private fun decoderCanvasSupport(display: AirPlayDisplayConfig): CanvasSupport {
+    private fun decoderCanvasSupport(): CanvasSupport {
         return try {
         val mime = MediaFormat.MIMETYPE_VIDEO_AVC
         // CS11: 4.4 没有 VideoCapabilities 探测；确认默认解码器可创建即可
-        if (Build.VERSION.SDK_INT < 21) {
-            val probe = runCatching { android.media.MediaCodec.createDecoderByType(mime) }.getOrNull()
-            return if (probe == null) {
-                CanvasSupport(false, "no_decoder", "Decoder capability mime=$mime result=no_decoder (api<21)")
-            } else {
-                try {
-                    CanvasSupport(true, "api<21_unverified",
-                        "Decoder capability codec=${probe.name} mime=$mime result=api<21_unverified")
-                } finally {
-                    runCatching { probe.release() }
-                }
-            }
-        }
-        // Match MediaCodec.createDecoderByType's first suitable decoder; do not silently force
-        // an enlarged stream through a software decoder on a slower head unit.
-        val decoder = MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos.firstOrNull {
-            !it.isEncoder && it.supportedTypes.any { type -> type.equals(mime, ignoreCase = true) }
-        }
-        if (decoder == null) {
+        val probe = runCatching { android.media.MediaCodec.createDecoderByType(mime) }.getOrNull()
+        if (probe == null) {
             CanvasSupport(false, "no_decoder", "Decoder capability mime=$mime result=no_decoder")
         } else {
-            val hardware = if (Build.VERSION.SDK_INT >= 29) decoder.isHardwareAccelerated
-                else !decoder.name.startsWith("OMX.google.") && !decoder.name.startsWith("c2.android.")
-            val video = decoder.getCapabilitiesForType(mime).videoCapabilities
-            val sizeSupported = video?.isSizeSupported(display.widthPixels, display.heightPixels) == true
-            val rateSupported = sizeSupported && video?.areSizeAndRateSupported(
-                display.widthPixels, display.heightPixels, display.fps.toDouble()) == true
-            val reason = when {
-                !hardware -> "software_decoder"
-                video == null -> "no_video_capabilities"
-                !sizeSupported -> "canvas_dimensions_unsupported"
-                !rateSupported -> "frame_rate_unsupported"
-                else -> "supported"
+            try {
+                CanvasSupport(true, "api19_unverified",
+                    "Decoder capability codec=${probe.name} mime=$mime result=api19_unverified")
+            } finally {
+                runCatching { probe.release() }
             }
-            CanvasSupport(reason == "supported", reason,
-                "Decoder capability codec=${decoder.name} mime=$mime hardware=$hardware " +
-                    "sizeSupported=$sizeSupported rateSupported=$rateSupported " +
-                    "widths=${video?.supportedWidths} heights=${video?.supportedHeights} " +
-                    "alignment=${video?.widthAlignment}x${video?.heightAlignment} " +
-                    "fpsRange=${video?.supportedFrameRates} result=$reason")
         }
     } catch (error: Exception) {
         CanvasSupport(false, "capability_query_${error.javaClass.simpleName}",
@@ -4078,7 +4019,7 @@ class CarPlayHostActivity : ComponentActivity() {
         try {
             val serviceIntent = Intent(this, DiPlaySessionService::class.java)
             // CS11: startForegroundService 是 API26；4.4 走 startService
-            if (Build.VERSION.SDK_INT >= 26) startForegroundService(serviceIntent) else startService(serviceIntent)
+            startService(serviceIntent)
             next.start()
         } catch (error: RuntimeException) {
             appendLog("Connection could not start: ${error.javaClass.simpleName}")
@@ -4161,7 +4102,7 @@ class CarPlayHostActivity : ComponentActivity() {
     }
 
     private fun isMultiWindowActive(): Boolean {
-        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && isInMultiWindowMode
+        return false
     }
 
 
@@ -4502,7 +4443,7 @@ class CarPlayHostActivity : ComponentActivity() {
     private fun exitApplication() {
         if (shuttingDown.get()) return
         restoreSettingsBaseline()
-        if (Build.VERSION.SDK_INT >= 21) finishAndRemoveTask() else finish() // CS11: finishAndRemoveTask 是 API21+
+        finish()
         shutdown(terminateProcess = true, reason = "settings exit application")
     }
 
@@ -4861,7 +4802,6 @@ class CarPlayHostActivity : ComponentActivity() {
                     this.text = "%02d".format(index + 1)
                     textSize = 12f
                     setTextColor(colors.secondary)
-                    if (Build.VERSION.SDK_INT >= 21) letterSpacing = .1f
                 },
                 LinearLayout.LayoutParams(dp(34), -2),
             )
@@ -5056,7 +4996,7 @@ class CarPlayHostActivity : ComponentActivity() {
 
     // CS11: backgroundTintList 是 API21+；4.4 退化为纯色背景
     private fun View.tintBackgroundCompat(color: Int) {
-        if (Build.VERSION.SDK_INT >= 21) backgroundTintList = ColorStateList.valueOf(color) else setBackgroundColor(color)
+        setBackgroundColor(color)
     }
 
     private fun CarPlayStatus.describe(): String = when (this) {

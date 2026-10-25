@@ -1,7 +1,6 @@
 package com.shilapi.xcertplay.settings
 
 import android.content.Context
-import android.content.res.ColorStateList
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
@@ -16,7 +15,6 @@ import android.widget.Switch
 import android.widget.TextView
 import com.shilapi.xcertplay.airplay.CarPlayDisplayScale
 import com.shilapi.xcertplay.host.R
-import android.os.Build
 
 object SettingsWidgets {
 
@@ -27,7 +25,7 @@ object SettingsWidgets {
      * so on the actual head unit the switch fell through to the framework's own Holo assets and none of the
      * palette applied — the control the owner could not pick out was drawing colours this project never
      * chose. `GradientDrawable` and `setThumbResource` / `setTrackResource` exist at API 1, so one path
-     * covers the car and the tablet with no `Build.VERSION` branch and no per-state inflation.
+     * covers the car with no `Build.VERSION` branch and no per-state inflation.
      *
      * The colours are swapped by [checked] instead of by a state list because each is two integers; a
      * `StateListDrawable` here would mean building four drawables to express two.
@@ -76,14 +74,9 @@ object SettingsWidgets {
         //    guard around it does not run, and the label stayed — the car showed "关闭"/"开启" inside every
         //    switch (measured 2026-10-18). Guarding `showText` at 16 instead would make every switch throw
         //    NoSuchMethodError on 4.4, because Dalvik refuses the whole method the first time it runs.
-        //  * `setTextOn`/`setTextOff` are API 1 and are what the API 19 switch actually reads to size and
-        //    draw that label. Emptying them is the API-19-safe way to remove it, and it is harmless on 21+
-        //    where `showText` does the job.
+        //  * `setTextOn`/`setTextOff` are what the API 19 switch reads to size and draw its label.
         switch.setTextOn("")
         switch.setTextOff("")
-        if (Build.VERSION.SDK_INT >= 21) {
-            switch.showText = false
-        }
     }
 
     private fun TextView.applyTextStyle(context: Context, theme: SettingsTheme, bold: Boolean = false) {
@@ -214,9 +207,6 @@ object SettingsWidgets {
         }
         if (minHeightDp > 0) minHeight = theme.dp(context, minHeightDp)
         if (minWidthDp > 0) minWidth = theme.dp(context, minWidthDp)
-        // CS11: the framework's default elevation animator is API 21+ and would otherwise be the only thing
-        // left giving these buttons a shadow the rest of the design does not have.
-        if (Build.VERSION.SDK_INT >= 21) stateListAnimator = null
         setOnClickListener { onClick() }
     }
 
@@ -332,7 +322,6 @@ object SettingsWidgets {
         text = if (theme.isOverlay) title else title.uppercase()
         textSize = if (theme.isOverlay) 16f else 12f
         setTextColor(if (theme.isOverlay) theme.accent else theme.textSecondary)
-        if (Build.VERSION.SDK_INT >= 21) letterSpacing = if (theme.isOverlay) .06f else .2f
         applyTextStyle(context, theme, bold = true)
     }
 
@@ -453,10 +442,6 @@ object SettingsWidgets {
                 this.text = text
                 textSize = 17f
                 setTextColor(theme.textSecondary)
-                if (Build.VERSION.SDK_INT >= 21) buttonTintList = ColorStateList(
-                    arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
-                    intArrayOf(theme.accent, theme.textSecondary),
-                )
                 tag = value
                 isChecked = value == selected
             }
@@ -539,11 +524,6 @@ object SettingsWidgets {
         val seekBar = SeekBar(context).apply {
             max = CarPlayDisplayScale.MAX_PERCENT - CarPlayDisplayScale.MIN_PERCENT
             progress = initial - CarPlayDisplayScale.MIN_PERCENT
-            if (Build.VERSION.SDK_INT >= 21) {
-                splitTrack = false
-                progressTintList = ColorStateList.valueOf(theme.accent)
-                thumbTintList = ColorStateList.valueOf(theme.accent)
-            }
             setOnSeekBarChangeListener(
                 object : SeekBar.OnSeekBarChangeListener {
                     override fun onProgressChanged(sb: SeekBar, progress: Int, fromUser: Boolean) {

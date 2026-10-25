@@ -2,7 +2,6 @@ package com.shilapi.xcertplay.network
 
 import android.annotation.SuppressLint
 import android.content.Context
-import android.net.wifi.SoftApConfiguration
 import android.net.wifi.WifiConfiguration
 import android.net.wifi.WifiManager
 import android.os.Build
@@ -111,7 +110,6 @@ class ManualHotspotManager(
         val hostAddresses = hotspotAdvertisedAddresses(
             network?.inetAddresses?.toList().orEmpty(), selected.index, localInterface.hostAddress,
         )
-        val connectionFrequency = frequencyFromConnectionInfo()
         val scanFrequency = frequencyFromScanResult(localInterface)
         // The AP's own driver is the most direct evidence of the channel it runs on, but read-only
         // and last: the reader is inert until the native module is built (shared/build.gradle), and
@@ -119,14 +117,13 @@ class ManualHotspotManager(
         val driverReading = LegacyHotspotRadio.read(localInterface.name, bandLabelFor(expectedBand))
         val channel = observedManualHotspotChannel(
             apChannel = apConfiguration?.channel ?: 0,
-            connectionFrequencyMHz = connectionFrequency,
+            connectionFrequencyMHz = null,
             scanFrequencyMHz = scanFrequency,
             apFrequencyMHz = apConfiguration?.frequencyMHz,
             driverFrequencyMHz = driverReading.frequencyMHz,
         )
         val frequencyMHz = when {
             apConfiguration?.frequencyMHz != null -> apConfiguration.frequencyMHz
-            connectionFrequency != null -> connectionFrequency
             scanFrequency != null -> scanFrequency
             driverReading.frequencyMHz != null -> driverReading.frequencyMHz
             else -> null
@@ -245,18 +242,6 @@ class ManualHotspotManager(
         }
     }
 
-    private fun frequencyFromConnectionInfo(): Int? {
-        val connectionInfo = try {
-            wifiManager.connectionInfo
-        } catch (_: SecurityException) {
-            null
-        } ?: return null
-        if (unquote(connectionInfo.ssid) != expectedSsid) return null
-        // CS11: WifiInfo.getFrequency 是 API21+；4.4 返回 null（上层按未知处理）
-        if (Build.VERSION.SDK_INT < 21) return null
-        return connectionInfo.frequency.takeIf { it > 0 }
-    }
-
     private fun frequencyFromScanResult(localInterface: LocalHotspotInterface): Int? {
         val localBssid = localInterface.hardwareAddress ?: return null
         val scanResults = try {
@@ -272,47 +257,7 @@ class ManualHotspotManager(
     }
 
     @SuppressLint("PrivateApi")
-    private fun readApConfiguration(): ManualApConfiguration? =
-        readSoftApConfiguration() ?: readLegacyApConfiguration()
-
-    @SuppressLint("PrivateApi")
-    private fun readSoftApConfiguration(): ManualApConfiguration? {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null
-        return try {
-            val method = WifiManager::class.java.getMethod("getSoftApConfiguration")
-            val configuration = method.invoke(wifiManager) as? SoftApConfiguration
-                ?: return null
-            val ssid = configuration.ssid ?: return null
-            val bandAndChannel = when {
-                Build.VERSION.SDK_INT >= 36 -> {
-                    val channels = configuration.channels
-                    if (channels.size() == 0) null else channels.keyAt(0) to channels.valueAt(0)
-                }
-                else -> {
-                    val band = (
-                        SoftApConfiguration::class.java
-                            .getMethod("getBand")
-                            .invoke(configuration) as? Number
-                        )?.toInt()
-                    val channel = SoftApConfiguration::class.java
-                        .getMethod("getChannel")
-                        .invoke(configuration) as? Number
-                    if (band == null || channel == null) null else band to channel.toInt()
-                }
-            }
-            val band = bandAndChannel?.first
-            val channel = bandAndChannel?.second ?: 0
-            ManualApConfiguration(
-                ssid = ssid,
-                band = band,
-                channel = channel,
-                frequencyMHz = wifiChannelToFrequencyMhz(channel, band),
-                security = mapSoftApSecurity(configuration.securityType),
-            )
-        } catch (_: Throwable) {
-            null
-        }
-    }
+    private fun readApConfiguration(): ManualApConfiguration? = readLegacyApConfiguration()
 
     @SuppressLint("PrivateApi")
     private fun readLegacyApConfiguration(): ManualApConfiguration? {
@@ -341,15 +286,6 @@ class ManualHotspotManager(
         } catch (_: Throwable) {
             null
         }
-    }
-
-    private fun mapSoftApSecurity(securityType: Int): Iap2WirelessSecurity = when (securityType) {
-        SoftApConfiguration.SECURITY_TYPE_OPEN -> Iap2WirelessSecurity.NONE
-        SoftApConfiguration.SECURITY_TYPE_WPA2_PSK -> Iap2WirelessSecurity.WPA_WPA2
-        SoftApConfiguration.SECURITY_TYPE_WPA3_SAE_TRANSITION ->
-            Iap2WirelessSecurity.WPA3_TRANSITION
-        SoftApConfiguration.SECURITY_TYPE_WPA3_SAE -> Iap2WirelessSecurity.WPA3_ONLY
-        else -> Iap2WirelessSecurity.WPA_WPA2
     }
 
     private fun mapWifiConfigurationSecurity(

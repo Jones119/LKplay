@@ -380,12 +380,7 @@ class CarPlayBonjour(
             serviceName = config.deviceName
             serviceType = AIRPLAY_SERVICE_TYPE
             port = config.port
-            // CS11: NsdServiceInfo.setAttribute 是 API21+；4.4 跳过 TXT 记录（无线发现降级）
-            if (Build.VERSION.SDK_INT >= 21) {
-                CarPlayBonjourProtocol.airPlayTxtRecords(config, identity).forEach { (key, value) ->
-                    setAttribute(key, value)
-                }
-            }
+            // CS11: API19 has no NsdServiceInfo TXT attributes; wireless discovery is degraded.
             localAdvertisedAddress?.let(::setHost)
         }
         nsdManager.registerService(
@@ -451,15 +446,8 @@ class CarPlayBonjour(
         if (port !in 1..65535) return
         val serviceName = resolved.serviceName ?: service.serviceName ?: return
         val host = address.hostAddress ?: return
-        // CS11: NsdServiceInfo.getAttributes 是 API21+
-        val bluetoothId = if (Build.VERSION.SDK_INT >= 21) {
-            resolved.attributes
-                ?.get("id")
-                ?.let(::decodeTxtValue)
-                ?.takeIf { it.isNotBlank() }
-        } else {
-            null
-        }
+        // CS11: API19 has no NsdServiceInfo TXT attributes.
+        val bluetoothId: String? = null
         val endpoint = CarPlayBonjourEndpoint(
             serviceName = serviceName,
             host = host,
@@ -525,11 +513,7 @@ class CarPlayBonjour(
 
     @Suppress("DEPRECATION")
     private fun preferredAddress(serviceInfo: NsdServiceInfo): InetAddress? {
-        val addresses = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            serviceInfo.hostAddresses.orEmpty()
-        } else {
-            listOfNotNull(serviceInfo.host)
-        }
+        val addresses = listOfNotNull(serviceInfo.host)
         return addresses.firstOrNull { it is Inet6Address && it.isLinkLocalAddress }
             ?.let(::applyLocalScope)
             ?: addresses.firstOrNull { it is Inet4Address }
@@ -653,9 +637,6 @@ class CarPlayBonjour(
             Log.w(TAG, "CarPlay Bonjour event callback failed", error)
         }
     }
-
-    private fun decodeTxtValue(value: ByteArray): String =
-        String(value, StandardCharsets.UTF_8).trimEnd('\u0000')
 
     private fun joinWorker(worker: Thread) {
         if (worker === Thread.currentThread()) return

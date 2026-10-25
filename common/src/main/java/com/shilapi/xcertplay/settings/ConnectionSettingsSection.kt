@@ -1,7 +1,6 @@
 package com.shilapi.xcertplay.settings
 
 import android.content.Context
-import android.os.Build
 import com.shilapi.xcertplay.host.R
 import com.shilapi.xcertplay.orchestration.MfiTarget
 import com.shilapi.xcertplay.orchestration.WirelessHotspotMode
@@ -47,9 +46,6 @@ object ConnectionSettingsSection {
         onSelected: (WirelessHotspotMode) -> Unit,
     ): SettingsWidgets.ChoiceRowResult<WirelessHotspotMode> {
         val modes = buildList {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                add(WirelessHotspotMode.WIFI_P2P to context.getString(R.string.wi_fi_p2p_5_ghz))
-            }
             add(WirelessHotspotMode.MANUAL to context.getString(R.string.built_in_car_hotspot))
             add(WirelessHotspotMode.EXISTING_WIFI to context.getString(R.string.existing_wifi_title))
         }

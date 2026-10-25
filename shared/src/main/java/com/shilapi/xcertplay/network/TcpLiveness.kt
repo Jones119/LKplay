@@ -94,11 +94,7 @@ internal object TcpLiveness {
         val fd = duplicate.fileDescriptor
         return object : SocketOptions {
             override fun set(option: Int, value: Int) {
-                if (Build.VERSION.SDK_INT >= 26) {
-                    Os.setsockoptInt(fd, IPPROTO_TCP, option, value)
-                } else {
-                    libcoreSetSockopt(fd, option, value)
-                }
+                libcoreSetSockopt(fd, option, value)
             }
 
             override fun close() = duplicate.close()
@@ -106,19 +102,15 @@ internal object TcpLiveness {
     }
 
     /**
-     * A duplicate we may close. On API < 29 `ParcelFileDescriptor.fromSocket()` takes ownership of the
-     * live session descriptor (this ROM can even return null), so closing it would tear the session
-     * down; `getFileDescriptor$()` plus `ParcelFileDescriptor.dup()` gives us a private copy instead.
+     * A duplicate we may close. `ParcelFileDescriptor.fromSocket()` takes ownership of the live
+     * session descriptor (this ROM can even return null), so closing it would tear the session down;
+     * `getFileDescriptor$()` plus `ParcelFileDescriptor.dup()` gives us a private copy instead.
      */
     private fun duplicateDescriptor(socket: Socket): ParcelFileDescriptor? = try {
-        if (Build.VERSION.SDK_INT >= 29) {
-            ParcelFileDescriptor.fromSocket(socket)
-        } else {
-            val original = synchronized(socket) {
-                Socket::class.java.getMethod("getFileDescriptor\$").invoke(socket) as? FileDescriptor
-            }
-            original?.let { ParcelFileDescriptor.dup(it) }
+        val original = synchronized(socket) {
+            Socket::class.java.getMethod("getFileDescriptor\$").invoke(socket) as? FileDescriptor
         }
+        original?.let { ParcelFileDescriptor.dup(it) }
     } catch (failure: Exception) {
         null
     }

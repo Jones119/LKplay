@@ -6,7 +6,6 @@ import com.shilapi.xcertplay.adb.AdbKeys
 import com.shilapi.xcertplay.adb.LocalAdb
 import java.io.Closeable
 import java.util.concurrent.atomic.AtomicBoolean
-import android.os.Build
 
 /** Explicit settings action; connection startup never grants these permissions. */
 internal object UsbPermissionSetup {
@@ -20,8 +19,8 @@ internal object UsbPermissionSetup {
                 ACCESSIBILITY -> UsbAutoConfirmService.isEnabled(context) &&
                     Settings.Secure.getInt(context.contentResolver, Settings.Secure.ACCESSIBILITY_ENABLED, 0) == 1
                 USAGE -> HomeScreenMonitor.hasAccess(context)
-                // CS11: canDrawOverlays 是 API23+；4.4 安装即授予
-                OVERLAY -> if (Build.VERSION.SDK_INT < 23) true else Settings.canDrawOverlays(context)
+                // CS11: 4.4 上 OVERLAY 安装即授予
+                OVERLAY -> true
             }
         }.getOrDefault(false)
     }
