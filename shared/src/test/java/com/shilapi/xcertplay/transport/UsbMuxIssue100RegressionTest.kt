@@ -258,10 +258,11 @@ class EvidenceUsbConnectionShadow {
         UsbEvidenceReplay.writes.add(buffer.copyOf(length))
         return length
     }
-    @Implementation fun requestWait(timeoutMillis: Long): UsbRequest {
+    @Implementation fun requestWait(timeoutMillis: Long): UsbRequest = requestWait()
+    @Implementation fun requestWait(): UsbRequest {
         if (UsbEvidenceReplay.cancelled) return UsbEvidenceReplay.request!!
         val bytes = UsbEvidenceReplay.transfers.pollFirst() ?: run {
-            Thread.sleep(timeoutMillis.coerceAtMost(50))
+            Thread.sleep(50)
             UsbEvidenceReplay.timedOutReads++
             throw TimeoutException()
         }
@@ -282,6 +283,7 @@ class EvidenceUsbRequestShadow {
         UsbEvidenceReplay.cancelled = false
         return true
     }
+    @Implementation fun queue(buffer: ByteBuffer, length: Int): Boolean = queue(buffer)
     @Implementation fun cancel(): Boolean { UsbEvidenceReplay.cancelled = true; return true }
     @Implementation fun close() = Unit
 }

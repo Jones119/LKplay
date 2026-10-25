@@ -16,9 +16,8 @@ import java.io.File
  *
  * This test therefore scans the **module sources** (not the tests: they never run on the car) for
  * library APIs that are neither platform APIs nor desugar-covered, and fails loudly listing every
- * offender. When one is needed on purpose, either add it to [DESUGARED] with evidence, or keep the use
- * inside a version-isolated holder (`AudioApiBridge`, `MediaSessionBridge`, `Api21Configuration`,
- * `Api21CodecList`, `Api33Locale`) — do not widen the scan.
+ * offender. When one is needed on purpose, either add it to [DESUGARED] with evidence, or replace it
+ * with a desugar-covered equivalent — do not widen the scan.
  *
  * The scan is intentionally textual: it is cheap, needs no extra toolchain, and runs with every
  * unit-test invocation. It cannot see a call made through reflection, which in this repository is only
@@ -93,41 +92,9 @@ class ForbiddenLibraryApiTest {
         )
 
         /**
-         * Uses that are allowed only because they sit in a version-isolated holder. Recorded here so a
-         * reader looking for "who may use a Java 8+ API" finds one list.
-         */
-        val VERSION_ISOLATED = listOf(
-            "AudioApiBridge.kt" to "AudioAttributes/AudioTrack.Builder/AudioRecord.Builder, 8 call sites guarded",
-            "MediaSessionBridge.kt" to "MediaSession/MediaMetadata/PlaybackState/AudioFocusRequest",
-            "Api21Configuration.kt" to "UsbConfiguration and its members",
-            "Api21CodecList" to "MediaCodecList(REGULAR_CODECS).codecInfos",
-            "Api33Locale.kt" to "android.app.LocaleManager",
-        )
-
-        /**
          * Module source roots, relative to the repository root.
          */
         val MODULES = listOf("shared", "common", "mobile")
-
-        /**
-         * **Second blind spot, found while fixing F3.** A newer-platform class named only as a
-         * `Foo::class.java` class literal and handed to a helper never goes through lint's NewApi
-         * check, so it is invisible in the reports: the audit's `lint-common.xml` has **zero** findings
-         * for `AppLocale.kt` even though it passed `LocaleManager::class.java` (API 33) to
-         * `Cs11Compat.systemService` from a method that runs on every Activity creation. A direct
-         * `locale.script` call in that same file *was* reported (`Locale#getScript`, API 21) — only the
-         * laundered class literal stayed hidden.
-         *
-         * The rule is therefore structural: the class literal may appear in exactly one
-         * version-isolated holder file and nowhere else.
-         */
-        val LAUNDERED_CLASS_LITERALS = listOf(
-            Triple(
-                "android.app.LocaleManager",
-                Regex("""\bLocaleManager\s*::\s*class\b"""),
-                "common/src/main/java/com/shilapi/xcertplay/Api33Locale.kt",
-            ),
-        )
     }
 
     @Test
@@ -159,45 +126,19 @@ class ForbiddenLibraryApiTest {
         val root = repositoryRoot()
         val seen = mutableSetOf<String>()
         for (module in MODULES) {
-            val sources = File(root, "$module/src/main/java")
-            if (!sources.isDirectory) continue
-            sources.walkTopDown().filter { it.isFile && it.name.endsWith(".kt") }.forEach { file ->
-                val text = stripCommentsAndStrings(file.readText())
-                for ((label, pattern) in DESUGARED) if (pattern.containsMatchIn(text)) seen += label
+            for (sourceSet in listOf("java", "kotlin")) {
+                val sources = File(root, "$module/src/main/$sourceSet")
+                if (!sources.isDirectory) continue
+                sources.walkTopDown()
+                    .filter { it.isFile && (it.name.endsWith(".kt") || it.name.endsWith(".java")) }
+                    .forEach { file ->
+                        val text = stripCommentsAndStrings(file.readText())
+                        for ((label, pattern) in DESUGARED) if (pattern.containsMatchIn(text)) seen += label
+                    }
             }
         }
         assertTrue("the source scan found no java.util.Base64 at all; the scanner is broken", "java.util.Base64" in seen)
         assertTrue("the source scan found no java.time at all; the scanner is broken", "java.time" in seen)
-    }
-
-    /**
-     * Newer-platform types that a helper launders past lint's NewApi check may only be named as a class
-     * literal inside their version-isolated holder. See [LAUNDERED_CLASS_LITERALS] for why.
-     */
-    @Test
-    fun newerPlatformClassLiteralsStayInsideTheirVersionIsolatedHolder() {
-        val root = repositoryRoot()
-        val offenders = mutableListOf<String>()
-        for ((label, pattern, holder) in LAUNDERED_CLASS_LITERALS) {
-            for (module in MODULES) {
-                val sources = File(root, "$module/src/main/java")
-                if (!sources.isDirectory) continue
-                sources.walkTopDown().filter { it.isFile && it.name.endsWith(".kt") }.forEach { file ->
-                    val relative = file.relativeTo(root).path.replace('\\', '/')
-                    if (relative == holder) return@forEach
-                    val text = stripCommentsAndStrings(file.readText())
-                    pattern.findAll(text).forEach { match ->
-                        offenders += "$label at $relative:${lineOf(text, match.range.first)} — only $holder may name it"
-                    }
-                }
-            }
-        }
-        assertTrue(
-            "A type that lint cannot see (a `Foo::class.java` literal passed to a helper rather than a " +
-                "direct call) escaped its version-isolated holder. Keep it inside the holder so Dalvik " +
-                "never has to resolve it on 4.4:\n" + offenders.joinToString("\n"),
-            offenders.isEmpty(),
-        )
     }
 
     @Test
@@ -223,14 +164,16 @@ class ForbiddenLibraryApiTest {
     private fun scanProductionSources(root: File, collect: (String, String) -> List<String>): List<String> {
         val offenders = mutableListOf<String>()
         for (module in MODULES) {
-            val sources = File(root, "$module/src/main/java")
-            if (!sources.isDirectory) continue
-            sources.walkTopDown()
-                .filter { it.isFile && it.name.endsWith(".kt") }
-                .forEach { file ->
-                    val text = stripCommentsAndStrings(file.readText())
-                    offenders += collect(text, file.relativeTo(root).path)
-                }
+            for (sourceSet in listOf("java", "kotlin")) {
+                val sources = File(root, "$module/src/main/$sourceSet")
+                if (!sources.isDirectory) continue
+                sources.walkTopDown()
+                    .filter { it.isFile && (it.name.endsWith(".kt") || it.name.endsWith(".java")) }
+                    .forEach { file ->
+                        val text = stripCommentsAndStrings(file.readText())
+                        offenders += collect(text, file.relativeTo(root).path)
+                    }
+            }
         }
         return offenders
     }

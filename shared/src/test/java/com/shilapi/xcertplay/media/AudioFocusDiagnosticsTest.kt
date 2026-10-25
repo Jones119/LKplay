@@ -70,9 +70,9 @@ class AudioFocusDiagnosticsTest {
      */
     private fun holdFocusWithOneActiveTrack(coordinator: AudioFocusCoordinator) {
         val entry = Class.forName("com.shilapi.xcertplay.media.AudioFocusCoordinator\$Entry")
-            .getDeclaredConstructors().single { it.parameterCount == 3 }
+            .getDeclaredConstructors().single { it.parameterCount == 2 }
             .apply { isAccessible = true }
-            .newInstance(AudioChannel.MEDIA, null, AudioManager.STREAM_MUSIC)
+            .newInstance(AudioChannel.MEDIA, AudioManager.STREAM_MUSIC)
         val track = AudioTrack(
             AudioManager.STREAM_MUSIC,
             48_000,

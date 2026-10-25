@@ -208,13 +208,15 @@ class NcmFramingRequestShadow {
         NcmFramingReplay.buffer = buffer
         return true
     }
+    @Implementation fun queue(buffer: ByteBuffer, length: Int): Boolean = queue(buffer)
     @Implementation fun cancel() = true
     @Implementation fun close() = Unit
 }
 
 @Implements(UsbDeviceConnection::class)
 class NcmFramingConnectionShadow {
-    @Implementation fun requestWait(timeoutMillis: Long): UsbRequest {
+    @Implementation fun requestWait(timeoutMillis: Long): UsbRequest = requestWait()
+    @Implementation fun requestWait(): UsbRequest {
         val chunk = NcmFramingReplay.chunks.pollFirst() ?: throw TimeoutException()
         NcmFramingReplay.buffer!!.put(chunk)
         NcmFramingReplay.completions += 1
