@@ -7,12 +7,13 @@
 DiPlay 的 CS11 分支：把 CarPlay 接收端跑在领克 CS11 车机上。
 
 - 车机：`cs11_19a_h`，**Android 4.4.3 / API 19 / Dalvik / 32 位 ARM**，是**唯一交付目标**。
-- 平板（小米 `2307BRPDCC`，Android 15 / API 35）只是**台架**：用来在车不方便上电时复现问题、拿 ASan 行号。
+- 本分支的 `minSdk` 与 `targetSdk` 都是 **19**；`targetSdk 19` 的 APK 在 Android 14+ 默认无法安装
+  （只能 `adb install --bypass-low-target-sdk-block`），因此平板不再是验证目标。
 - 分支 `cs11-api19`；环境事实见 `docs/DEV-ENVIRONMENT-CS11.md`；历史结论见 `docs/_digest/`。
 
-## 1. 平板调试的兼容性规则（**硬性**）
+## 1. API 19 兼容性规则（**硬性**）
 
-> 在使用平板进行调试时，所做的**任何修改、新增**，都必须保证**兼容 API 19**。
+> 所做的**任何修改、新增**，都必须保证**兼容 API 19**；没有高版本回退分支可以依赖。
 
 具体含义，缺一不可：
 
@@ -21,10 +22,9 @@ DiPlay 的 CS11 分支：把 CarPlay 接收端跑在领克 CS11 车机上。
    典型反例：`finishAndRemoveTask()`（API 21）、`UsbDeviceConnection.setInterface()`（API 21）、
    `Context.RECEIVER_NOT_EXPORTED`（API 33）、`PendingIntent.FLAG_MUTABLE`（API 31）——
    这些在车机上都必须走回退分支。
-2. **平板验证通过 ≠ 车机可用**。为台架新增的路径（例如让 API 21+ 也走 userspace lwIP）必须复用
-   API 19 已有的实现，而不是另起一套只在平板上成立的逻辑。
-3. **提交说明必须写清 API 19 路径的验证状态**：`✅ API19 实机` / `⚠️ 仅平板验证` / `必须上机复验`。
-   不允许把“平板能跑”写成“已修复”。
+2. **验证必须在车机上进行**。编译、单测和 lint 只证明代码正确，不证明功能可用；不再有平板台架兜底。
+3. **提交说明必须写清 API 19 路径的验证状态**：`✅ API19 实机` / `必须上机复验`。
+   不允许把“编译通过”写成“已修复”。
 4. 改动 `shared`/`common` 的公开行为时，跑全量单测：
    ```powershell
    .\gradlew.bat :shared:testDebugUnitTest :common:testDebugUnitTest --console=plain --offline --rerun-tasks

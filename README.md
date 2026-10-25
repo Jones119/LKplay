@@ -14,14 +14,14 @@ claims support for the CS11. See [Scope](#scope) before installing it anywhere e
 
 - Package: `com.shihab.diplay` (`com.shihab.diplay.hudtest` for the debug variant)
 - Version: `0.2.21-cs11.1` (`-hud-test`), versionCode 40
-- Engines: `minSdk 19`, `targetSdk 37`, `armeabi-v7a` only, core library desugaring on, multidex
+- Engines: `minSdk 19`, `targetSdk 19`, `armeabi-v7a` only, core library desugaring on, multidex
 
 ## Status (2026-10-12)
 
 | Area | State |
 |---|---|
 | Wireless CarPlay (car's own hotspot + Bluetooth iAP2 hand-off) | **Working** on the CS11 |
-| Wired CarPlay (USB + kernel `cdc_ncm` netdev) | **Working**, first on-screen 2026-10-10 |
+| Wired CarPlay (USB + userspace NCM bridge) | **Working**, first on-screen 2026-10-10 |
 | Cluster navigation card (arrow / street / distance / ETA) | **Working**, verified in the car |
 | Cluster media card (title / artist / album / progress) | **Working**, verified in the car |
 | Cluster album artwork | **Not solved** — the vendor reader never draws our URI (HTTP tier added, verdict experiment pending) |
@@ -65,11 +65,11 @@ at once (they contend on the same build outputs).
 ## Scope
 
 - The **only** supported device is the CS11 described above. Everything here was tuned against its
-  Dalvik runtime, its vendor codecs and its kernel (`cdc_ncm`, MUSB) — behaviour elsewhere is not
-  claimed. A modern Android tablet is used as a smoke-test bench, not as a compatibility target.
-- **Wired** CarPlay needs the head unit's NCM netdev to be brought up before the session
-  (`ip -6 addr show usb1`); on this ROM that requires a root channel that must be re-established
-  after every ignition. Without it, only the wireless path is available.
+  Dalvik runtime, its vendor codecs and its kernel — behaviour elsewhere is not claimed. The APK
+  targets API 19 and cannot be installed on Android 14+ without
+  `adb install --bypass-low-target-sdk-block`; the tablet bench is no longer used.
+- **Wired** CarPlay uses the userspace NCM bridge (raw USB + lwIP) and needs no root. The kernel
+  `cdc_ncm` path and its root fire were removed (docs/_digest/63).
 - The app does not modify `/system`, does not install patched third-party APKs, and does not require
   root for the wireless path.
 

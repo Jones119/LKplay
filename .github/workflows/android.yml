@@ -20,10 +20,10 @@ jobs:
           java-version: '25'
       - uses: android-actions/setup-android@v3
         with:
-          packages: platform-tools platforms;android-37.0 build-tools;36.0.0 ndk;28.2.13676358
+          packages: platform-tools platforms;android-37.0 build-tools;36.0.0 ndk;25.2.9519653
       - uses: gradle/actions/setup-gradle@v4
       - name: Unit tests, lint and source-only debug build
-        run: ./gradlew :shared:testDebugUnitTest :common:testDebugUnitTest :home:testDebugUnitTest :mobile:lintDebug :home:lintDebug :maphost:lintDebug :mobile:assembleDebug :home:assembleDebug :maphost:assembleDebug --stacktrace
+        run: ./gradlew :shared:testDebugUnitTest :common:testDebugUnitTest :shared:lintDebug :common:lintDebug :mobile:lintDebug :mobile:assembleDebug --stacktrace
       - name: Test reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -32,7 +32,6 @@ jobs:
           path: |
             shared/build/reports/tests/
             common/build/reports/tests/
+            shared/build/reports/lint-results-debug.html
+            common/build/reports/lint-results-debug.html
             mobile/build/reports/lint-results-debug.html
-            samples/home/build/reports/tests/
-            samples/home/build/reports/lint-results-debug.html
-            samples/maphost/build/reports/lint-results-debug.html

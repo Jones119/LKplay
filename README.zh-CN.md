@@ -13,14 +13,14 @@
 
 - 包名：`com.shihab.diplay`（debug 变体为 `com.shihab.diplay.hudtest`）
 - 版本：`0.2.15-cs11.1`（`-hud-test`），versionCode 34
-- 引擎参数：`minSdk 19`、`targetSdk 37`、仅 `armeabi-v7a`、开启 core library desugaring、multidex
+- 引擎参数：`minSdk 19`、`targetSdk 19`、仅 `armeabi-v7a`、开启 core library desugaring、multidex
 
 ## 当前状态（2026-10-12）
 
 | 模块 | 状态 |
 |---|---|
 | 无线 CarPlay（车机自开热点 + 蓝牙 iAP2 交接） | **可用**（实车验证） |
-| 有线 CarPlay（USB + 内核 `cdc_ncm` 网卡） | **可用**（2026-10-10 首次上屏） |
+| 有线 CarPlay（USB + userspace NCM 桥） | **可用**（2026-10-10 首次上屏） |
 | 仪表导航卡片（箭头/路名/距离/剩余时间） | **可用**（实车验收） |
 | 仪表媒体卡片（曲名/歌手/专辑/进度） | **可用**（实车验收） |
 | 仪表专辑封面 | **未闭环**：厂商取图方始终不画我们给的 URI（已加回环 HTTP 档，判决实验待做） |
@@ -62,11 +62,11 @@ cd CarPlay-CS11
 
 ## 适用范围
 
-- **唯一支持目标**是上述 CS11。所有取舍都针对它的 Dalvik 运行时、厂商编解码器与内核
-  （`cdc_ncm`、MUSB）做过实测；换车机不承诺可用。现代 Android 平板只作为"没有车机时的冒烟测试台"，
-  **不是兼容目标**。
-- **有线** CarPlay 需要先让车机的 NCM 网卡就绪（`ip -6 addr show usb1`）；在本 ROM 上这一步需要
-  一次 root 通道引导，且**每次点火都要重建**。没有它只能用无线。
+- **唯一支持目标**是上述 CS11。所有取舍都针对它的 Dalvik 运行时、厂商编解码器与内核做过实测；
+  换车机不承诺可用。APK 的 `targetSdk` 是 19，在 Android 14+ 上默认无法安装（只能
+  `adb install --bypass-low-target-sdk-block`），平板台架不再使用。
+- **有线** CarPlay 走 userspace NCM 桥（raw USB + lwIP），不需要 root；内核 `cdc_ncm` 路径与它的
+  root 引导已删除（`docs/_digest/63`）。
 - 本应用**不改 `/system`**、**不安装被篡改的第三方 APK**；无线路径**不需要 root**。
 
 ## 认证
