@@ -47,26 +47,18 @@ object LockdownTlsEngineFactory {
             }.keyManagers
             // CS11: 本车机 ROM 的 SSLEngine 仅支持 TLSv1/SSLv3（现代 iOS 拒绝）——
             // 4.4 上改用打包的 Conscrypt（自带 TLS1.2/1.3 与 armeabi-v7a 原生库）；失败则退回平台实现
-            val tlsContext = if (Build.VERSION.SDK_INT >= 21) {
+            val tlsContext = try {
+                SSLContext.getInstance("TLS", org.conscrypt.Conscrypt.newProvider())
+            } catch (error: Throwable) {
+                Log.w("xcertplay-tls", "conscrypt unavailable; falling back to platform TLS", error)
                 SSLContext.getInstance("TLS")
-            } else {
-                try {
-                    SSLContext.getInstance("TLS", org.conscrypt.Conscrypt.newProvider())
-                } catch (error: Throwable) {
-                    Log.w("xcertplay-tls", "conscrypt unavailable; falling back to platform TLS", error)
-                    SSLContext.getInstance("TLS")
-                }
             }
             val context = tlsContext.apply {
                 init(keyManagers, arrayOf(UsbLockdownTrustManager), null)
             }
             return context.createSSLEngine(PEER_HOST, PEER_PORT).apply {
                 useClientMode = true
-                // CS11: SSLParameters.setEndpointIdentificationAlgorithm 是 API24+；
-                // 4.4 默认即不做主机名校验（正是本处所需），跳过设置
-                sslParameters = sslParameters.apply {
-                    if (Build.VERSION.SDK_INT >= 24) endpointIdentificationAlgorithm = null
-                }
+                // CS11: 4.4 默认即不做主机名校验（正是本处所需）。
             }
         } finally {
             password.fill('\u0000')

@@ -17,8 +17,7 @@ package com.shilapi.xcertplay.transport
  *   `u8`/`u16` little-endian   :1072-1078
  *
  * Why this exists: on API 19 (Android 4.4) `android.hardware.usb.UsbConfiguration`
- * does not exist at all, so a userspace NCM bridge cannot use
- * [NcmFunctionDiscovery] (pure API 21+) and has to parse the raw descriptor bytes
+ * does not exist at all, so the userspace NCM bridge has to parse the raw descriptor bytes
  * returned by `UsbDeviceConnection.getRawDescriptors()` itself. See
  * `docs/_digest/58-用户态NCM桥(lwIP)路线评估与迁移清单.md` §5 row 1 ("API19 NCM 发现 …
  * 照抄级", citing `EP/transport/LegacyUsbConfiguration.java:574-839,1063`).

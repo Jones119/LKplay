@@ -420,11 +420,7 @@ class TlsDuplexChannel private constructor(
                 if (enabled.isEmpty()) {
                     // CS11: KitKat（含本车机 ROM）的 SSLEngine 默认集不含 TLS1.2，但底层 OpenSSL 支持——
                     // 显式启用 TLSv1.2；若运行时确实不支持会抛 IllegalArgumentException（由外层捕获）
-                    if (Build.VERSION.SDK_INT < 21) {
-                        engine.enabledProtocols = arrayOf("TLSv1.2")
-                    } else {
-                        throw IphoneUsbException.Protocol("TLS engine supports neither TLSv1.2 nor TLSv1.3")
-                    }
+                    engine.enabledProtocols = arrayOf("TLSv1.2")
                 } else {
                     engine.enabledProtocols = enabled
                 }

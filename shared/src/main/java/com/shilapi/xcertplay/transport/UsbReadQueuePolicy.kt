@@ -75,20 +75,11 @@ internal class UsbReadQueuePolicy(private val queueCeiling: Int? = null) {
         private const val MIN_COMPATIBILITY_BYTES = 2 * 1024
 
         /**
-         * CS11: cap below API 28 rather than only on Android 8. Our head unit runs Android 4.4,
-         * where the read path uses the deprecated `queue(ByteBuffer, Int)` instead of the
-         * `queue(ByteBuffer)` overload. Upstream commit 764e0ba1 applied the same
-         * `Build.VERSION.SDK_INT < Build.VERSION_CODES.P` condition at both call sites, because a
-         * queue above the usbfs single-URB ceiling is refused there rather than returning false,
-         * which would keep a 64 KiB USBMUX read from ever reaching the halving ladder. Android 9
-         * removed the bound, so API 28+ submits the whole read region and still ladders.
+         * CS11: the read path uses the deprecated `queue(ByteBuffer, Int)` and a queue above the
+         * usbfs single-URB ceiling is refused rather than returning false, which would keep a
+         * 64 KiB USBMUX read from ever reaching the halving ladder.
          */
-        fun forCurrentPlatform(): UsbReadQueuePolicy = UsbReadQueuePolicy(
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
-                USBFS_BULK_URB_CEILING_BYTES
-            } else {
-                null
-            },
-        )
+        fun forCurrentPlatform(): UsbReadQueuePolicy =
+            UsbReadQueuePolicy(USBFS_BULK_URB_CEILING_BYTES)
     }
 }

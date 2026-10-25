@@ -1,22 +1,16 @@
 package com.shilapi.xcertplay.transport
 
-import android.hardware.usb.UsbConfiguration
 import android.hardware.usb.UsbConstants
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbEndpoint
 import android.hardware.usb.UsbInterface
-import android.os.Build
-import android.util.Log
 
 /**
  * Descriptor-based discovery of the iPhone's CarPlay configuration.
  *
- * Configuration ids differ between iPhone models, so the configuration is identified by its
+ * Configuration ids differ between iPhone models, so the active configuration is identified by its
  * interfaces: Apple USB Multiplexor (USBMUX) plus the NCM/Ethernet function CarPlay uses.
- *
- * CS11: `UsbConfiguration` 是 API 21+ 的类，所以按配置枚举的实体代码全在 [Api21Configuration] 里，
- * 本 object 只保留版本守卫与走"活动配置"的 API19 路径。4.4 上 [find] 在触碰任何 `UsbConfiguration`
- * 成员之前就返回 null（调用方 `IphoneUsbHost` 的枚举调用点也都在 `SDK_INT >= 21` 块内）。
+ * API 19 has no `UsbConfiguration`, so discovery only reads the active configuration.
  */
 object IphoneCarPlayConfiguration {
     const val TAG = "xcertplay-usb"
@@ -28,21 +22,6 @@ object IphoneCarPlayConfiguration {
     private const val NCM_CONTROL_SUBCLASS = 0x0d
     private const val PREFERRED_USBMUX_OUT = 0x04
     private const val PREFERRED_USBMUX_IN = 0x85
-
-    fun find(device: UsbDevice): UsbConfiguration? {
-        // CS11: UsbConfiguration 是 API21+；4.4 无法按配置枚举 → 走 activeConfigCarPlayReady 活动配置检查
-        if (Build.VERSION.SDK_INT < 21) {
-            Log.d(TAG, "configuration enumeration skipped (api<21); active-configuration checks are used instead")
-            return null
-        }
-        return Api21Configuration.find(device)
-    }
-
-    /** The USBMUX interface of an enumerated configuration; see [Api21Configuration]. */
-    fun usbMuxInterface(configuration: UsbConfiguration): UsbInterface? {
-        if (Build.VERSION.SDK_INT < 21) return null
-        return Api21Configuration.usbMuxInterfaceOf(configuration)
-    }
 
     /**
      * CS11: API19 没有 UsbConfiguration——直接检查"当前活动配置"是否已含 iPhone 的 USBMUX 接口。

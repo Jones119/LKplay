@@ -110,20 +110,17 @@ internal object NcmLegacyPolicy {
 /**
  * Which transport the wired bring-up should drive.
  *
- * API 21+ already runs the userspace NCM bridge (raw USB + the platform's own network stack through the
- * VpnService TUN), so it is userspace there for the same reason it is preferred here. On API 19 the
- * preference is honoured as soon as [UserspaceNcmTransport.readiness] says READY.
+ * The userspace NCM bridge is the only wired media transport on this build; it is used as soon as
+ * [UserspaceNcmTransport.readiness] says READY.
  *
  * `userspace == false` means **no wired media transport**: the kernel netdev that used to carry this link
  * was deleted (docs/_digest/63), so the caller keeps the iAP2 control channel and logs the reason. It never
  * means "the kernel netdev will take over".
  */
 internal fun wiredTransportDecision(
-    sdkInt: Int,
     mode: NcmLegacyMode,
     readiness: UserspaceNcmReadiness,
 ): WiredTransportDecision = when {
-    sdkInt >= 21 -> WiredTransportDecision(true, "wired opening raw-USB NCM bridge")
     readiness == UserspaceNcmReadiness.READY -> WiredTransportDecision(
         true,
         "wired opening the API-19 userspace NCM bridge",

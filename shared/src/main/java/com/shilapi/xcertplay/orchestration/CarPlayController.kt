@@ -1,6 +1,5 @@
 package com.shilapi.xcertplay.orchestration
 
-import android.Manifest
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothA2dp
 import android.bluetooth.BluetoothDevice
@@ -12,10 +11,8 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
-import android.content.pm.PackageManager
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
-import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
@@ -49,7 +46,6 @@ import com.shilapi.xcertplay.network.LegacySoftApControl
 import com.shilapi.xcertplay.network.ManualHotspotManager
 import com.shilapi.xcertplay.network.ExistingWifiManager
 import com.shilapi.xcertplay.network.WifiP2pGroupManager
-import com.shilapi.xcertplay.network.WifiScanPause
 import com.shilapi.xcertplay.network.WirelessHotspotInfo
 import com.shilapi.xcertplay.network.WirelessHotspotBackend
 import com.shilapi.xcertplay.network.WirelessHotspotManager
@@ -81,7 +77,6 @@ import com.shilapi.xcertplay.transport.IphoneUsbMatcher
 import com.shilapi.xcertplay.transport.LockdownCarKitClient
 import com.shilapi.xcertplay.transport.LockdownPairingClient
 import com.shilapi.xcertplay.transport.LockdownPairRecord
-import com.shilapi.xcertplay.transport.NcmFunctionDiscovery
 import com.shilapi.xcertplay.transport.LegacyNcmDescriptors
 import com.shilapi.xcertplay.transport.LegacyUsbNative
 import com.shilapi.xcertplay.transport.NcmLegacyMode
@@ -176,7 +171,6 @@ class CarPlayController(
         require(!config.locationReportingEnabled || locationProvider != null) {
             "A location provider is required when location reporting is enabled"
         }
-        WifiScanPause.restoreIfNeeded(context.applicationContext)
     }
 
     private enum class Phase { IDLE, MFI, WIRELESS, IPHONE, REENUMERATION, DATAPATHS, CONTROL }
@@ -247,7 +241,6 @@ class CarPlayController(
     private var permissionPollGeneration = 0
     private var reenumerationAttempts = 0
     /** The one startup CarPlay-mode reset runs at most once per attempt (docs/_digest/102 P0-3). */
-    @Volatile private var wiredModeResetAttempted = false
     private var lastReportedStatus: CarPlayStatus? = null
 
     @Volatile private var closed = false
@@ -284,14 +277,13 @@ class CarPlayController(
         activeSession?.sendRemoteControlMessage(streamId, message) ?: false
 
     @Volatile private var hotspot: WirelessHotspotManager? = null
-    @Volatile private var wifiScanPause: WifiScanPause? = null
     @Volatile private var bonjour: CarPlayBonjour? = null
     private val wirelessResourceLock = Any()
     private val wirelessFailureReported = AtomicBoolean(false)
     @Volatile private var firstTcpWatchdog: FirstTcpWatchdog? = null
     private val startupTimer = java.util.concurrent.ScheduledThreadPoolExecutor(1) { task ->
         WorkerThreads.create(task, "diplay-first-tcp-timeout").apply { isDaemon = true }
-    }.apply { if (Build.VERSION.SDK_INT >= 21) removeOnCancelPolicy = true } // CS11: setRemoveOnCancelPolicy 是 API21+
+    }
     @Volatile private var wirelessDiagnostics: WirelessStartupDiagnostics? = null
     @Volatile private var bluetoothSocket: BluetoothSocket? = null
     @Volatile private var bluetoothStream: BluetoothRfcommDuplexStream? = null
@@ -813,8 +805,6 @@ class CarPlayController(
                 try {
                     if (config.transport == CarPlayTransport.WIRELESS) {
                         closeBestEffort("wireless stack") { closeWirelessStack(service) }
-                        closeBestEffort("Wi-Fi scan pause") { wifiScanPause?.close() }
-                        wifiScanPause = null
                     } else {
                         closeBestEffort("CSM") { csm?.close() }
                         csm = null
@@ -1122,7 +1112,6 @@ class CarPlayController(
             if (isStaleWirelessRun(generation)) {
                 return
             }
-            pauseWifiScans(hotspotInfo.backend)
             val startedHotspot = hotspot
             wirelessConnectionProof.begin(generation) {
                 if (!isStaleWirelessRun(generation)) startedHotspot?.onCarPlayConfirmed()
@@ -1639,7 +1628,6 @@ class CarPlayController(
         availabilityPollGeneration.incrementAndGet()
         phase = Phase.IPHONE
         reenumerationAttempts = 0
-        wiredModeResetAttempted = false
         onStatus(CarPlayStatus.DiscoveringIphone)
         checkIphoneAvailability()
     }
@@ -1698,17 +1686,12 @@ class CarPlayController(
                 permissionPollGeneration++
                 when (phase) {
                     Phase.REENUMERATION, Phase.IPHONE -> {
-                        val configuration = IphoneCarPlayConfiguration.find(result.device)
                         // CS11: API19 无配置枚举——检查活动配置是否已含 USBMUX 接口
-                        val configurationReady = configuration != null ||
-                            (Build.VERSION.SDK_INT < 21 &&
-                                IphoneCarPlayConfiguration.activeConfigCarPlayReady(result.device))
-                        // CS11: UsbConfiguration.getId 是 API21+
-                        val configurationId = if (configuration != null && Build.VERSION.SDK_INT >= 21)
-                            configuration.id.toString() else "none"
+                        val configurationReady =
+                            IphoneCarPlayConfiguration.activeConfigCarPlayReady(result.device)
                         connectionDiagnostic(
                             "USB configuration ready=$configurationReady " +
-                                "configurationId=$configurationId " +
+                                "configurationId=none " +
                                 "reenumerationAttempts=$reenumerationAttempts " +
                                 "action=${when {
                                     configurationReady -> "reuse-descriptors"
@@ -1717,34 +1700,6 @@ class CarPlayController(
                                 }}",
                         )
                         if (configurationReady) {
-                            // The previous run started a session on this very node and never released the mode
-                            // (stopped, replaced or crashed while connected). The iPhone then keeps the link but
-                            // opens no AirPlay connection until it resets USB 30-150 s later, so switch it out
-                            // once and let the normal request bring it back fresh; a replug does the same by hand
-                            // (docs/_digest/102 P0-3, upstream 5e8a6f9a).
-                            // API 19 skips it: on the car the switch now succeeds (2026-10-23, with the
-                            // vendor usbmuxd stopped) but the phone re-enumerates under the just-opened
-                            // interfaces and the NCM bridge then fails with "incomplete NTB parameters",
-                            // leaving the control channel only - worse than the stale session it tried to fix.
-                            if (Build.VERSION.SDK_INT >= 21 &&
-                                !wiredModeResetAttempted &&
-                                WiredSessionMemory.startedOn(result.device.deviceName)
-                            ) {
-                                wiredModeResetAttempted = true
-                                val switched = iphoneHost.resetCarPlayConfiguration(result.device)
-                                WiredSessionMemory.clear()
-                                if (switched) {
-                                    debugLog(
-                                        "wired iPhone still holds the CarPlay mode a previous session started on " +
-                                            "this node; switched it out for a fresh request",
-                                    )
-                                    phase = Phase.IPHONE
-                                    onStatus(CarPlayStatus.WaitingForReenumeration)
-                                    scheduleAvailabilityPoll(Phase.IPHONE, ::checkIphoneAvailability)
-                                    return
-                                }
-                                debugLog("wired CarPlay mode reset refused; reusing the mode as before")
-                            }
                             openDataPaths(result.device)
                         } else if (reenumerationAttempts < MAXIMUM_REENUMERATION_ATTEMPTS) {
                             beginReenumeration(result.device)
@@ -1849,12 +1804,9 @@ class CarPlayController(
                         // Both older wired data paths are gone from this fork: the kernel cdc_ncm netdev
                         // needed root+adb to fire (docs/_digest/49) and the VpnService/TUN transport was
                         // deleted in 6620ad61 because the CS11 kernel has no TUN. The userspace lwIP
-                        // bridge is therefore the only transport that can carry media, on API 19 and on
-                        // the tablet bench alike, so it is attempted first on every API level; `openNcm`
-                        // stays only as a last-resort probe on 21+.
+                        // bridge is therefore the only transport that can carry media.
                         val mode = NcmLegacyPolicy.current()
                         val decision = wiredTransportDecision(
-                            Build.VERSION.SDK_INT,
                             mode,
                             UserspaceNcmTransport.readiness(LegacyUsbNative.available),
                         )
@@ -1868,15 +1820,10 @@ class CarPlayController(
                         if (userspaceLink == null && mode == NcmLegacyMode.FORCE && !decision.userspace) {
                             probeUserspaceNcm(device)
                         }
-                        val ncm = if (decision.userspace && userspaceLink == null && Build.VERSION.SDK_INT >= 21) {
-                            openNcm(device)
-                        } else {
-                            null
-                        }
-                        if (userspaceLink == null && ncm == null) {
+                        if (userspaceLink == null) {
                             debugLog(decision.reason)
                         }
-                        runStack(result.session, ncm)
+                        runStack(result.session)
                     } catch (error: Throwable) {
                         result.session.close()
                         fail(error)
@@ -2117,37 +2064,7 @@ class CarPlayController(
         }
     }
 
-    /**
-     * The raw-USB NCM bridge over an enumerated `UsbConfiguration`. CS11: **API 21+ only** — the
-     * `UsbConfiguration` descriptor path needs `configurationCount`/`getConfiguration`, and the
-     * API-19 alternative has no consumer left: on the car the kernel cdc_ncm netdev carries the
-     * AirPlay traffic instead ([attachSystemNetdev]), so its entry point in [openDataPaths] never
-     * calls this on 4.4. The API-19 discovery variant that used to live here
-     * (`NcmFunctionDiscovery.findAllActive`) was removed with it.
-     */
-    private fun openNcm(device: UsbDevice): NcmUsbBridge {
-        val configuration = IphoneCarPlayConfiguration.find(device)
-            ?: throw IphoneUsbException.Protocol(
-                "iPhone exposes no CarPlay configuration for NCM",
-            )
-        val function = NcmFunctionDiscovery.find(configuration)
-            ?: throw IphoneUsbException.Protocol("iPhone configuration does not expose an NCM function")
-        // CS11: UsbConfiguration.getId / UsbInterface.getAlternateSetting 是 API21+ 属性
-        val ncmConfigId = if (Build.VERSION.SDK_INT >= 21) configuration.id else -1
-        val controlAlt = if (Build.VERSION.SDK_INT >= 21) function.control.alternateSetting else -1
-        val dataAlt = if (Build.VERSION.SDK_INT >= 21) function.data.alternateSetting else -1
-        debugLog(
-            "ncm config=$ncmConfigId control=${function.control.id}/$controlAlt" +
-                " data=${function.data.id}/$dataAlt" +
-                " status=${function.statusIn?.address?.let { "0x${it.toString(16)}" } ?: "none"}" +
-                " in=0x${function.bulkIn.address.toString(16)} out=0x${function.bulkOut.address.toString(16)}",
-        )
-        val connection = requireUsbManager().openDevice(device)
-            ?: throw IphoneUsbException.DeviceUnavailable("Could not open the iPhone NCM connection")
-        return NcmUsbBridge.open(connection, function)
-    }
-
-    private fun runStack(usbSession: Iap2UsbSession, ncm: NcmUsbBridge?) {
+    private fun runStack(usbSession: Iap2UsbSession) {
         phase = Phase.CONTROL
         var ncmOwnedLocally = true
         // Set once the userspace link has handed the listener to the service: until then the link is ours to
@@ -2225,32 +2142,20 @@ class CarPlayController(
             this.csm = csm
             debugLog("wired iAP2 CSM channel opened")
 
-            val ncmHostMac = ncm?.hostMac ?: userSpaceLink?.hostMac ?: config.hostMac
+            val ncmHostMac = userSpaceLink?.hostMac ?: config.hostMac
             debugLog("ncm using hostMac=${ncmHostMac.macString()}")
             // CS11: the kernel has no TUN driver, so the classic VpnService/NCM bridge cannot
-            // attach ("Cannot create interface"). Two transports remain (docs/_digest/58 §9): the userspace
-            // bridge that owns lwIP (API 19, no root) and VpnService/NCM (API 21+). The kernel cdc_ncm netdev
-            // and its root fire are deleted - they needed adb and root to fire, so they were never shippable.
+            // attach ("Cannot create interface"). The userspace bridge that owns lwIP is the only
+            // transport; the kernel cdc_ncm netdev and its root fire are deleted (docs/_digest/58 §9).
             val userspace = userSpaceLink
-            if (true) {
-                if (userspace != null) {
-                    if (attachUserspace(userspace)) {
-                        userspaceAttached = true
-                    } else {
-                        debugLog("CS11 degraded mode: userspace NCM listener failed; control channel only")
-                    }
-                } else if (ncm == null) {
-                    if (Build.VERSION.SDK_INT >= 21) {
-                        throw IphoneUsbException.DeviceUnavailable("Could not attach the NCM/VPN AirPlay transport")
-                    }
-                    debugLog("CS11 degraded mode: no NCM bridge; control channel only")
+            if (userspace != null) {
+                if (attachUserspace(userspace)) {
+                    userspaceAttached = true
                 } else {
-                    // The VpnService/NCM transport is gone: the CS11 kernel has no TUN driver (no
-                    // /dev/tun, no tun module, no VPN consent dialog either), so it could never attach
-                    // there, and the userspace lwIP bridge above is the transport that works. Anything
-                    // reaching here is a device with neither, and runs control-channel only.
-                    debugLog("no NCM transport; control channel only")
+                    debugLog("CS11 degraded mode: userspace NCM listener failed; control channel only")
                 }
+            } else {
+                debugLog("CS11 degraded mode: no NCM bridge; control channel only")
             }
             ncmOwnedLocally = false
             debugLog("wired AirPlay transport attached userspaceLwip=${userspace != null}")
@@ -2296,7 +2201,6 @@ class CarPlayController(
             if (!ncmOwnedLocally) vpnService?.detach()
             fail(error)
         } finally {
-            if (ncmOwnedLocally) ncm?.close()
             if (!userspaceAttached) {
                 // Nothing else owns the link yet, so this session has to release the USB claim and the netif.
                 userSpaceLink?.close()
@@ -2425,12 +2329,6 @@ class CarPlayController(
     private fun isStaleWirelessRun(generation: Int): Boolean =
         closed || phase != Phase.WIRELESS || generation != wirelessGeneration.get() || wirelessFailureReported.get()
 
-    // Kept across reconnects within this controller: resuming between attempts would start a scan.
-    private fun pauseWifiScans(backend: WirelessHotspotBackend) = synchronized(this) {
-        if (closed || !WifiScanPause.eligible(backend)) return@synchronized
-        (wifiScanPause ?: WifiScanPause(appContext, ::debugLog).also { wifiScanPause = it }).pause()
-    }
-
     // Attempts to bring Bluetooth up on firmware where it is off at connect time (CS11/4.4);
     // best effort, cancellable, and never blocks longer than the enable timeout.
     @Suppress("DEPRECATION")
@@ -2545,12 +2443,6 @@ class CarPlayController(
     /** Reads cached service metadata only; it does not start/cancel discovery or require SCAN. */
     private fun logBluetoothConnectionSnapshot(device: BluetoothDevice, point: String) {
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
-                appContext.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED
-            ) {
-                connectionDiagnostic("Bluetooth snapshot point=$point unavailable reason=connect-permission")
-                return
-            }
             val uuids = device.uuids
             val service = UUID.fromString(IAP2_IPHONE_UUID)
             connectionDiagnostic(

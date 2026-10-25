@@ -5,7 +5,6 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.hardware.usb.UsbConfiguration
 import android.hardware.usb.UsbConstants
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbDeviceConnection
@@ -229,7 +228,7 @@ class IphoneUsbHost(
      * "not in the CarPlay configuration" and re-select it.
      *
      * Every interface this app holds must already be released when this runs. The target comes from
-     * our own descriptor parse, so API 19 (USBDEVFS_SETCONFIGURATION) and API 21+ both work.
+     * our own descriptor parse and the switch goes through USBDEVFS_SETCONFIGURATION (API 19).
      *
      * Returns false when the phone offers no other configuration or the kernel refused the switch.
      */
@@ -241,7 +240,7 @@ class IphoneUsbHost(
         }
         return try {
             val parsed = connection.rawDescriptors?.let { LegacyNcmDescriptors.parse(it) }.orEmpty()
-            val carPlayId = IphoneCarPlayConfiguration.find(device)?.id ?: CARPLAY_CONFIGURATION_FALLBACK_ID
+            val carPlayId = CARPLAY_CONFIGURATION_FALLBACK_ID
             // Prefer a configuration that still carries NCM (a normal data mode) over the first
             // unrelated one: switching to PTP-only (id 1) was refused on the tablet.
             val targetId = parsed.filter { it.id != carPlayId }.firstOrNull { it.hasNcm }?.id
@@ -255,22 +254,18 @@ class IphoneUsbHost(
             // closes settle and retry briefly before concluding the phone refused it.
             Thread.sleep(RESET_SETTLE_MILLIS)
             for (attempt in 0 until RESET_ATTEMPTS) {
-                val viaPlatform = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                    Api21Configuration.resetTo(connection, device, targetId)
-                } else {
-                    false
-                }
-                // The platform API hides errno; the ioctl is the same call and reports it, which is
-                // what separates EBUSY (someone still holds an interface) from a refusal by the phone.
-                val ioctlErrno = if (!viaPlatform && LegacyUsbNative.available) {
+                // API 19 has no platform configuration switch; the ioctl is the call, and it reports
+                // errno, which is what separates EBUSY (someone still holds an interface) from a
+                // refusal by the phone.
+                val ioctlErrno = if (LegacyUsbNative.available) {
                     LegacyUsbNative.setConfiguration(connection.fileDescriptor, targetId)
                 } else {
                     0
                 }
-                switched = viaPlatform || ioctlErrno == 0
+                switched = ioctlErrno == 0
                 Log.i(
                     tag,
-                    "configuration reset carPlay=$carPlayId target=$targetId platform=$viaPlatform " +
+                    "configuration reset carPlay=$carPlayId target=$targetId " +
                         "ioctl=$ioctlErrno (${LegacyUsbNative.describe(ioctlErrno)}) ok=$switched attempt=$attempt",
                 )
                 if (switched) break
@@ -359,35 +354,15 @@ class IphoneUsbHost(
             ?: throw IphoneUsbException.DeviceUnavailable("UsbManager could not open the iPhone")
         var claimedInterface: UsbInterface? = null
         try {
-            // CS11: API19 无配置枚举/setConfiguration——用活动配置直取接口；API21+ 走原有配置选择
-            var configId = -1
-            val usbMux = if (Build.VERSION.SDK_INT >= 21) {
-                val configuration = IphoneCarPlayConfiguration.find(device)
-                    ?: throw IphoneUsbException.Protocol(
-                        "Re-enumerated iPhone exposes no USBMUX CarPlay configuration",
-                    )
-                configId = configuration.id
-                if (!connection.setConfiguration(configuration)) {
-                    Log.w(
-                        IphoneCarPlayConfiguration.TAG,
-                        "setConfiguration ${configuration.id} reported failure; claiming anyway",
-                    )
-                }
-                IphoneCarPlayConfiguration.usbMuxInterface(configuration)
-                    ?: throw IphoneUsbException.Protocol("CarPlay configuration exposes no USBMUX interface")
-            } else {
-                Log.i(IphoneCarPlayConfiguration.TAG, "config selection skipped (api<21); using active USBMUX interface")
-                IphoneCarPlayConfiguration.activeUsbMuxInterface(device)
-                    ?: throw IphoneUsbException.Protocol("Active iPhone configuration exposes no USBMUX interface")
-            }
+            // CS11: API19 无配置枚举——用活动配置直取接口；iPhone 收到请求后自行切换配置。
+            Log.i(IphoneCarPlayConfiguration.TAG, "using the active USBMUX interface")
+            val usbMux = IphoneCarPlayConfiguration.activeUsbMuxInterface(device)
+                ?: throw IphoneUsbException.Protocol("Active iPhone configuration exposes no USBMUX interface")
             val endpoints = IphoneCarPlayConfiguration.usbMuxEndpoints(usbMux)
                 ?: throw IphoneUsbException.Protocol("USBMUX interface exposes no bulk endpoint pair")
-            // CS11: alternateSetting / UsbInterface.getId 是 API21+ 属性
-            val altSetting = if (Build.VERSION.SDK_INT >= 21) usbMux.alternateSetting else -1
-            val ifaceId = if (Build.VERSION.SDK_INT >= 21) usbMux.id else -1
             Log.i(
                 IphoneCarPlayConfiguration.TAG,
-                "usbmux config=$configId iface=$ifaceId alt=$altSetting " +
+                "usbmux config=active iface=-1 alt=-1 " +
                     "class=${usbMux.interfaceClass}/${usbMux.interfaceSubclass}/${usbMux.interfaceProtocol} " +
                     "endpoints=${usbMux.endpointCount} " +
                     "out=${describeUsbEndpoint(endpoints.first)} " +
@@ -414,34 +389,23 @@ class IphoneUsbHost(
     private fun permissionPendingIntent(): PendingIntent {
         val intent = Intent(permissionAction).setPackage(appContext.packageName)
         // The system answers by filling EXTRA_DEVICE and EXTRA_PERMISSION_GRANTED into this
-        // intent. An immutable PendingIntent silently discards those extras (API 31+), so the
-        // answer never reaches parsePermissionResult and the connection waits forever.
-        val flags = PendingIntent.FLAG_UPDATE_CURRENT or
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0
-        return PendingIntent.getBroadcast(appContext, 0, intent, flags)
+        // intent; API 19 has no PendingIntent mutability flag.
+        return PendingIntent.getBroadcast(appContext, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT)
     }
 
     private fun registerReceiver(filter: IntentFilter, onReceive: (Intent) -> Unit): Closeable {
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent) = onReceive(intent)
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            appContext.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
-        } else {
-            appContext.registerReceiver(receiver, filter)
-        }
+        appContext.registerReceiver(receiver, filter)
         val registered = AtomicBoolean(true)
         return Closeable {
             if (registered.compareAndSet(true, false)) appContext.unregisterReceiver(receiver)
         }
     }
 
-    private fun Intent.usbDevice(): UsbDevice? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        getParcelableExtra(UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
-    } else {
-        @Suppress("DEPRECATION")
-        getParcelableExtra(UsbManager.EXTRA_DEVICE)
-    }
+    @Suppress("DEPRECATION")
+    private fun Intent.usbDevice(): UsbDevice? = getParcelableExtra(UsbManager.EXTRA_DEVICE)
 
     companion object {
         private const val USB_VENDOR_DEVICE_IN = 0xc0
@@ -538,13 +502,8 @@ class Iap2UsbSession internal constructor(
                 if (!readQueued) {
                     readBuffer.clear()
                     val submit: (java.nio.ByteBuffer) -> Boolean = { queuedBuffer ->
-                        // CS11: UsbRequest.queue(ByteBuffer) 是 API26+；4.4 走 queue(buffer, length)
-                        if (Build.VERSION.SDK_INT >= 26) {
-                            current.queue(queuedBuffer)
-                        } else {
-                            @Suppress("DEPRECATION")
-                            current.queue(queuedBuffer, queuedBuffer.remaining())
-                        }
+                        @Suppress("DEPRECATION")
+                        current.queue(queuedBuffer, queuedBuffer.remaining())
                     }
                     var queueResult = readQueuePolicy.queue(readBuffer, ::checkOpenLocked, submit)
                     if (!queueResult.queued) {
@@ -587,13 +546,9 @@ class Iap2UsbSession internal constructor(
         }
         try {
             val completed = try {
-                // CS11: requestWait(long) 是 API26+；4.4 走无参阻塞版（由 close() 的 cancel 唤醒）
-                if (Build.VERSION.SDK_INT >= 26) {
-                    connection.requestWait(timeoutMillis)
-                } else {
-                    @Suppress("DEPRECATION")
-                    connection.requestWait()
-                }
+                // CS11: 4.4 走无参阻塞版（由 close() 的 cancel 唤醒）
+                @Suppress("DEPRECATION")
+                connection.requestWait()
             } catch (_: TimeoutException) {
                 // Nothing arrived; the request stays queued for the next read instead of being
                 // cancelled and drained on every idle period.

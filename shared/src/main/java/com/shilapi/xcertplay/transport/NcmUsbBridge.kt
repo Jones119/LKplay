@@ -361,13 +361,8 @@ class NcmUsbBridge internal constructor(
                 if (!readQueued) {
                     directReadBuffer.clear()
                     val queued = readQueuePolicy.queue(directReadBuffer, ::checkOpenLocked) { queuedBuffer ->
-                        // CS11: UsbRequest.queue(ByteBuffer) 是 API26+；4.4 走 queue(buffer, length)
-                        if (Build.VERSION.SDK_INT >= 26) {
-                            current.queue(queuedBuffer)
-                        } else {
-                            @Suppress("DEPRECATION")
-                            current.queue(queuedBuffer, queuedBuffer.remaining())
-                        }
+                        @Suppress("DEPRECATION")
+                        current.queue(queuedBuffer, queuedBuffer.remaining())
                     }
                     if (!queued.queued) {
                         throw failSession(
@@ -394,13 +389,9 @@ class NcmUsbBridge internal constructor(
         }
         try {
             val completed = try {
-                // CS11: requestWait(long) 是 API26+；4.4 走无参阻塞版
-                if (Build.VERSION.SDK_INT >= 26) {
-                    connection.requestWait(timeoutMillis.coerceAtLeast(1))
-                } else {
-                    @Suppress("DEPRECATION")
-                    connection.requestWait()
-                }
+                // CS11: 4.4 走无参阻塞版
+                @Suppress("DEPRECATION")
+                connection.requestWait()
             } catch (_: TimeoutException) {
                 // Nothing arrived yet; the request stays queued for the next call. USBMUX owns
                 // authoritative detach/failure detection for the same phone.
@@ -483,98 +474,6 @@ class NcmUsbBridge internal constructor(
                 if (attempt < attempts) pause(USB_SETUP_RETRY_MILLIS)
             }
             return result
-        }
-
-        /** Claims and activates the NCM control/data interfaces; owns the connection on success. */
-        fun open(connection: UsbDeviceConnection, function: NcmFunctionDiscovery.NcmFunction): NcmUsbBridge {
-            val claimed = ArrayList<UsbInterface>(2)
-            try {
-                // CS11: UsbInterface.getId 是 API21+；4.4 以 -1 表示"任意 CDC Ethernet 描述符"（读错则回退配置值）
-                val controlInterfaceId = if (Build.VERSION.SDK_INT >= 21) function.control.id else -1
-                val descriptorHostMac = readNcmHostMac(connection, controlInterfaceId)
-                Log.i(
-                    IphoneCarPlayConfiguration.TAG,
-                    "ncm descriptor hostMac=${descriptorHostMac?.macString() ?: "unavailable"} controlId=$controlInterfaceId",
-                )
-                // Apple's Ethernet function exposes control and data as alternate settings of the
-                // same interface id, so it must be claimed once and switched with setInterface.
-                val sameInterface = if (Build.VERSION.SDK_INT >= 21) function.control.id == function.data.id else false
-                val first = if (sameInterface) function.data else function.control
-                val firstAttempts = retryUsbSetup { connection.claimInterface(first, true) }
-                val firstClaimed = firstAttempts != null
-                // CS11: alternateSetting / getId 是 API21+ 属性
-                val altFirst = if (Build.VERSION.SDK_INT >= 21) first.alternateSetting else -1
-                val firstId = if (Build.VERSION.SDK_INT >= 21) first.id else -1
-                Log.i(
-                    IphoneCarPlayConfiguration.TAG,
-                    "claim iface=$firstId/$altFirst class=${first.interfaceClass}" +
-                        " subclass=${first.interfaceSubclass} proto=${first.interfaceProtocol} ok=$firstClaimed" +
-                        " attempts=${firstAttempts ?: USB_SETUP_ATTEMPTS}",
-                )
-                if (!firstClaimed) {
-                    throw IphoneUsbException.DeviceUnavailable(
-                        "Android could not claim the NCM interface $firstId attempts=$USB_SETUP_ATTEMPTS",
-                    )
-                }
-                claimed.add(first)
-                if (!sameInterface) {
-                    val dataAttempts = retryUsbSetup { connection.claimInterface(function.data, true) }
-                    val dataClaimed = dataAttempts != null
-                    val altDataClaim = if (Build.VERSION.SDK_INT >= 21) function.data.alternateSetting else -1
-                    val dataId = if (Build.VERSION.SDK_INT >= 21) function.data.id else -1
-                    Log.i(
-                        IphoneCarPlayConfiguration.TAG,
-                        "claim iface=$dataId/$altDataClaim" +
-                            " class=${function.data.interfaceClass} ok=$dataClaimed" +
-                            " attempts=${dataAttempts ?: USB_SETUP_ATTEMPTS}",
-                    )
-                    if (!dataClaimed) {
-                        throw IphoneUsbException.DeviceUnavailable(
-                            "Android could not claim the NCM data interface $dataId attempts=$USB_SETUP_ATTEMPTS",
-                        )
-                    }
-                    claimed.add(function.data)
-                }
-                // CS11: setInterface 是 API21+；4.4 用 controlTransfer 发标准 SET_INTERFACE(0x0B) 激活 alt1
-                val altDataSel = if (Build.VERSION.SDK_INT >= 21) function.data.alternateSetting else DATA_ALTERNATE_SETTING_HINT
-                val altSelected = if (Build.VERSION.SDK_INT >= 21) {
-                    connection.setInterface(function.data)
-                } else {
-                    selectDataAlternatesViaControlTransfer(connection)
-                }
-                Log.i(
-                    IphoneCarPlayConfiguration.TAG,
-                    "setInterface iface=api${Build.VERSION.SDK_INT} alt=$altDataSel ok=$altSelected",
-                )
-                if (!altSelected) {
-                    throw IphoneUsbException.DeviceUnavailable(
-                        "Android could not select the NCM data alternate setting",
-                    )
-                }
-                Log.i(
-                    IphoneCarPlayConfiguration.TAG,
-                    "ncm status endpoint=${function.statusIn?.address?.let { "0x${it.toString(16)}" } ?: "none"}",
-                )
-                return NcmUsbBridge(
-                    connection,
-                    function.bulkOut,
-                    function.bulkIn,
-                    function.statusIn,
-                    claimed,
-                    descriptorHostMac,
-                )
-            } catch (error: Throwable) {
-                for (usbInterface in claimed.asReversed()) {
-                    try {
-                        connection.releaseInterface(usbInterface)
-                    } catch (_: RuntimeException) {
-                        // The connection close below is authoritative.
-                    }
-                }
-                connection.close()
-                if (error is IphoneUsbException) throw error
-                throw IphoneUsbException.DeviceUnavailable("Android NCM open failed", error)
-            }
         }
 
         /**
@@ -828,7 +727,7 @@ class NcmUsbBridge internal constructor(
                 if (type == USB_INTERFACE_DESCRIPTOR_TYPE && length >= 9) {
                     val ifaceClass = raw[offset + 5].toInt() and 0xff
                     val ifaceNumber = raw[offset + 2].toInt() and 0xff
-                    if (ifaceClass == NcmFunctionDiscovery.DATA_CLASS && !numbers.contains(ifaceNumber)) {
+                    if (ifaceClass == NCM_DATA_INTERFACE_CLASS && !numbers.contains(ifaceNumber)) {
                         numbers.add(ifaceNumber)
                     }
                 }
@@ -837,6 +736,7 @@ class NcmUsbBridge internal constructor(
             return numbers
         }
         private const val USB_STRING_DESCRIPTOR_TYPE = 0x03
+        private const val NCM_DATA_INTERFACE_CLASS = 0x0a
         private const val CDC_FUNCTIONAL_DESCRIPTOR_TYPE = 0x24
         private const val CDC_ETHERNET_SUBTYPE = 0x0f
         private const val USB_ENGLISH_US = 0x0409
