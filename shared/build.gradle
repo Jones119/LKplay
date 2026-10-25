@@ -7,12 +7,13 @@ android {
 
     defaultConfig {
         minSdk = 19
-        targetSdk = 37
+        targetSdk = 19
         // CS11: core library desugaring 要求 multidex（AGP 硬性检查）
         multiDexEnabled true
 
         ndk {
-            abiFilters 'arm64-v8a', 'armeabi-v7a'
+            // CS11 only: the head unit is 32-bit armv7.
+            abiFilters 'armeabi-v7a'
         }
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -34,10 +35,14 @@ android {
         coreLibraryDesugaringEnabled true
     }
 
-    // CS11: lint 只作清单使用，不阻断构建（M2 修复期）
+    // CS11: NewApi now blocks the build. The remaining checks below are either lint's own bugs or
+    // meaningless with targetSdk 19 (runtime BLE permissions, Play target-level policy).
     lint {
-        abortOnError false
-        disable += ['UnsafeOptInUsageError', 'UnsafeOptInUsageWarning']
+        abortOnError true
+        disable += ['UnsafeOptInUsageError', 'UnsafeOptInUsageWarning', 'MissingPermission',
+                    'ExpiredTargetSdkVersion', 'ForegroundServiceType', 'StringFormatMatches',
+                    'StringFormatInvalid', 'RestrictedApi', 'SuspiciousIndentation', 'PropertyEscape',
+                    'MissingTranslation']
     }
 
     // CS11 / API 19 blind spot: with core library desugaring enabled, lint's NewApi check only

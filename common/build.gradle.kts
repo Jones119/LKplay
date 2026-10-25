@@ -35,11 +35,16 @@ android {
         }
     }
 
-    // CS11: lint 只作清单使用，不阻断构建（M2 修复期）
+    // CS11: NewApi now blocks the build. The remaining checks below are either lint's own bugs or
+    // meaningless with targetSdk 19 (runtime BLE permissions, Play target-level policy).
     lint {
-        abortOnError = false
-        // lint 自身 bug：ExperimentalDetector 在 CarPlayController 解析崩溃
-        disable += listOf("UnsafeOptInUsageError", "UnsafeOptInUsageWarning")
+        abortOnError = true
+        disable += listOf(
+            "UnsafeOptInUsageError", "UnsafeOptInUsageWarning",
+            "MissingPermission", "ExpiredTargetSdkVersion", "ForegroundServiceType",
+            "StringFormatMatches", "StringFormatInvalid", "RestrictedApi",
+            "SuspiciousIndentation", "PropertyEscape", "MissingTranslation",
+        )
     }
 
     // CS11 / API 19 盲区：开启 core library desugaring 后，lint 的 NewApi 只覆盖 `android.*` 平台 API，

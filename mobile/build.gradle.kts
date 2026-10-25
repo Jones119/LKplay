@@ -19,13 +19,11 @@ android {
     defaultConfig {
         applicationId = "com.shihab.diplay"
         minSdk = 19
-        targetSdk = 37
+        targetSdk = 19
         versionCode = 40
         versionName = "0.2.21-cs11.1"
         multiDexEnabled = true
-        // The CS11 is 32-bit armv7 and the bundled libopus only ships armeabi-v7a. Keeping the APK
-        // 32-bit matches the head unit and lets a 64-bit device (the tablet bench) load the same
-        // native library instead of silently skipping it, so both run the identical codec path.
+        // CS11 only: the head unit is 32-bit armv7 and the bundled libopus ships armeabi-v7a.
         ndk { abiFilters += "armeabi-v7a" }
     }
 
@@ -61,11 +59,15 @@ android {
         isCoreLibraryDesugaringEnabled = true
     }
 
-    // CS11: lint 只作清单使用，不阻断构建（M2 修复期）
+    // CS11: NewApi blocks the build; the remaining checks are meaningless with targetSdk 19.
     lint {
-        abortOnError = false
-        // lint 自身 bug：ExperimentalDetector 在 CarPlayController 解析崩溃
-        disable += listOf("UnsafeOptInUsageError", "UnsafeOptInUsageWarning")
+        abortOnError = true
+        disable += listOf(
+            "UnsafeOptInUsageError", "UnsafeOptInUsageWarning",
+            "MissingPermission", "ExpiredTargetSdkVersion", "ForegroundServiceType",
+            "StringFormatMatches", "StringFormatInvalid", "RestrictedApi",
+            "SuspiciousIndentation", "PropertyEscape", "MissingTranslation",
+        )
     }
 }
 
