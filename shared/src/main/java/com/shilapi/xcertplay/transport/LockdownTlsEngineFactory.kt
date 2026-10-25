@@ -14,7 +14,6 @@ import javax.net.ssl.KeyManagerFactory
 import javax.net.ssl.SSLContext
 import javax.net.ssl.SSLEngine
 import javax.net.ssl.X509TrustManager
-import android.os.Build
 import android.util.Log
 
 /**

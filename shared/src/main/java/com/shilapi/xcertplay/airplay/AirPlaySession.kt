@@ -1029,8 +1029,12 @@ class AirPlaySession(
         } finally {
             debugLog("airplay event connection closed")
             videoPlaybackAvailability.setEventReady(false)
-            if (eventSocket === socket) eventSocket = null
-            eventCipher = null
+            // Only the connection that owns the field may clear it: a newer event socket may
+            // already have replaced this one.
+            if (eventSocket === socket) {
+                eventSocket = null
+                eventCipher = null
+            }
             safeClose(socket)
             if (!closed.get()) close()
         }

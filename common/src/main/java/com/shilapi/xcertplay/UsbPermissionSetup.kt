@@ -12,13 +12,12 @@ internal object UsbPermissionSetup {
     // Keep wheel-service rebinding and explicit USB setup from overwriting each other's service list.
     internal val accessibilityLock = Any()
     enum class Permission {
-        ACCESSIBILITY, USAGE, OVERLAY;
+        ACCESSIBILITY, OVERLAY;
 
         fun granted(context: Context): Boolean = runCatching {
             when (this) {
                 ACCESSIBILITY -> UsbAutoConfirmService.isEnabled(context) &&
                     Settings.Secure.getInt(context.contentResolver, Settings.Secure.ACCESSIBILITY_ENABLED, 0) == 1
-                USAGE -> HomeScreenMonitor.hasAccess(context)
                 // CS11: 4.4 上 OVERLAY 安装即授予
                 OVERLAY -> true
             }
@@ -110,7 +109,6 @@ internal object UsbPermissionSetup {
         require(Regex("[A-Za-z0-9_]+(?:\\.[A-Za-z0-9_]+)+").matches(packageName))
         val pkg = quote(packageName)
         return when (permission) {
-            Permission.USAGE -> "appops set $pkg GET_USAGE_STATS allow"
             Permission.OVERLAY -> "appops set $pkg SYSTEM_ALERT_WINDOW allow"
             Permission.ACCESSIBILITY -> {
                 val service = quote("$packageName/com.shilapi.xcertplay.UsbAutoConfirmService")

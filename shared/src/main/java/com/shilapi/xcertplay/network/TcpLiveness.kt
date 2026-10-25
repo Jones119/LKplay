@@ -1,8 +1,6 @@
 package com.shilapi.xcertplay.network
 
-import android.os.Build
 import android.os.ParcelFileDescriptor
-import android.system.Os
 import java.io.FileDescriptor
 import java.net.Socket
 

@@ -4,7 +4,6 @@ import java.nio.ByteBuffer
 import java.security.GeneralSecurityException
 import javax.net.ssl.SSLEngine
 import javax.net.ssl.SSLEngineResult
-import android.os.Build
 import android.util.Log
 
 /**

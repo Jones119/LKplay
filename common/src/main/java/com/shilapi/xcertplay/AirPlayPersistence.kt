@@ -262,7 +262,9 @@ object AirPlayPersistence {
     fun loadWirelessHotspotMode(context: Context): WirelessHotspotMode {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val stored = prefs.getString(KEY_WIRELESS_HOTSPOT_MODE, null)
+        // A stored EXISTING_WIFI predates this API 19 build (no such backend); fall back to MANUAL.
         val mode = WirelessHotspotMode.entries.firstOrNull { it.name == stored }
+            ?.takeUnless { it == WirelessHotspotMode.EXISTING_WIFI }
             ?: WirelessHotspotMode.MANUAL
         if (stored != mode.name) saveWirelessHotspotMode(context, mode)
         return mode

@@ -250,7 +250,9 @@ class CarPlayVpnService : VpnService() {
                 }
                 session.start()
             }
-        } catch (error: IOException) {
+        } catch (error: Exception) {
+            // A RuntimeException from accept()/start() must be reported, not silently end the
+            // thread while the service still looks attached.
             if (active.get()) {
                 attachment?.listener?.let { onTransportError(generation, it, error) }
             }

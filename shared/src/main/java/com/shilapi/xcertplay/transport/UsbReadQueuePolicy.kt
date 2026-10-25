@@ -1,6 +1,5 @@
 package com.shilapi.xcertplay.transport
 
-import android.os.Build
 import java.nio.ByteBuffer
 
 internal data class UsbReadQueueResult(val queued: Boolean, val firstBytes: Int, val fallbackBytes: Int? = null)

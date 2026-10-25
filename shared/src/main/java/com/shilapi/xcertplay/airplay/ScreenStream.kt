@@ -27,6 +27,8 @@ class ScreenStream(
     private val onDiagnostic: (String) -> Unit = {},
     /** The listener comes from here so the wired path can run on a userspace stack. */
     private val network: StreamNetwork = KernelSessionNetwork,
+    /** Only this peer may deliver frames; null keeps the previous accept-any behaviour. */
+    private val expectedPeer: InetAddress? = null,
 ) : Closeable {
     interface Listener {
         fun onCodec(codec: VideoCodec) {}
@@ -84,6 +86,13 @@ class ScreenStream(
     private fun accept(bound: DuplexServer) {
         try {
             val accepted = bound.accept()
+            val peer = accepted.remoteSocketAddress?.address
+            if (expectedPeer != null && peer != expectedPeer) {
+                // The data port is reachable before pairing; only the paired phone may stream.
+                onDiagnostic("video socket rejected peer=$peer expected=$expectedPeer")
+                accepted.close()
+                return
+            }
             socket = accepted
             // CS11: TCP flow control is our only throttle on the phone's video sender. A big
             // receive window lets it dump multi-megabit bursts into the NCM link, and those

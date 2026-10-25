@@ -494,7 +494,6 @@ class CarPlayController(
         synchronized(this) {
             if (closed) return
         }
-        WiredSessionMemory.install(appContext)
         connectionDiagnostic("start transport=${config.transport}")
         if (!hasRequiredUsbService()) return
         videoListener?.let { listener ->
@@ -819,8 +818,6 @@ class CarPlayController(
                         closeBestEffort("CarPlay configuration reset") {
                             iphoneHost.resetCarPlayConfiguration(detachDevice)
                         }
-                        // A clean exit released the mode, so the next start has nothing to recover.
-                        WiredSessionMemory.clear()
                     }
                     if (config.transport == CarPlayTransport.WIRED) {
                         closeBestEffort("airplay-listener") { service?.detach() }
@@ -1791,9 +1788,6 @@ class CarPlayController(
     private fun openDataPaths(device: UsbDevice) {
         phase = Phase.DATAPATHS
         wiredDevice = device
-        // Remember the node: if this process dies before releasing the mode, the next start has to move the
-        // phone out of it or the iPhone opens no AirPlay connection for 30-150 s (docs/_digest/102 P0-3).
-        WiredSessionMemory.started(device.deviceName)
         debugLog("wired opening iPhone USB data paths")
         onStatus(CarPlayStatus.SelectingConfiguration)
         onStatus(CarPlayStatus.OpeningDataPaths)
@@ -1874,7 +1868,10 @@ class CarPlayController(
             val started = link.start()
             if (started != 0) {
                 debugLog("userspace NCM: lwIP refused the netif (result=$started)")
+                // The pump never started, so UserSpaceNcmLink.close() cannot release the USB claim;
+                // close the bridge explicitly or the next attempt sees EBUSY.
                 link.close()
+                runCatching { bridge?.close() }
                 return null
             }
             link.startPump()

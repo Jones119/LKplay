@@ -43,7 +43,10 @@ class NtpClock(
     private var synced = false
 
     fun listen(): Int {
-        check(!running.getAndSet(true)) { "NtpClock is already running" }
+        // A repeated SETUP reuses the existing clock; failing here would reject the whole session.
+        if (!running.compareAndSet(false, true)) {
+            synchronized(socketLock) { return socket?.localPort ?: 0 }
+        }
         // This ROM rejects unscoped IPv6 binds entirely; bind the netdev link-local instead.
         val bound = network.open(serverBindAddress())
         synchronized(socketLock) { socket = bound }

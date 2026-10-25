@@ -108,11 +108,13 @@ internal class AudioFocusCoordinator(
         }
         // CS11: 遗留调用携带车机音量键应跟随的 stream：导航走 stream 12（vendor
         // STREAM_NAVI_TTS），其余走 STREAM_MUSIC。
-        val result = manager?.requestAudioFocus(listener, primary.streamType, gain)
-        held = true
-        requestedChannel = primary.channel
+        val granted = manager?.requestAudioFocus(listener, primary.streamType, gain) ==
+            AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+        held = granted
+        // A refused request must be retried, so do not remember it as the held channel/stream.
+        requestedChannel = if (granted) primary.channel else null
         val line = "Audio: focus requested channel=${primary.channel} stream=${primary.streamType} " +
-            "gain=$gain granted=$result activeTracks=${active.size}"
+            "gain=$gain granted=$granted activeTracks=${active.size}"
         Log.i(TAG, line)
         runCatching { report(line) }
     }
@@ -477,8 +479,13 @@ class AndroidMediaSink(
     @Synchronized
     private fun audioRenderer(id: AudioStreamId, format: AudioFormat): AudioRenderer {
         val existing = audioRenderers[id]
-        if (existing?.format == format) return existing
-        existing?.close()
+        // A worker that exited (decoder/track failure) released its resources; returning it would
+        // keep the stream silent forever, so rebuild instead.
+        if (existing != null && existing.format == format && existing.isRunning) return existing
+        if (existing != null) {
+            existing.close()
+            audioRenderers.remove(id, existing)
+        }
         return AudioRenderer(
             format,
             advancedAudioChannelMapping,
@@ -759,6 +766,9 @@ private class VideoDecoder(
             inputsSinceConfigure = 0
             receivedSinceConfigure = 0
             lastConfigureAtNs = System.nanoTime()
+            // A new configuration starts a new no-output window; keeping the old rebuild timestamp
+            // would let the cooldown swallow the first recovery attempt after a surface switch.
+            lastRebuildAtNs = 0L
         }
     }
 
@@ -1169,6 +1179,9 @@ private class AudioRenderer(
         run()
     }, "carplay-audio").apply { isDaemon = true }
 
+    /** False once the worker exited; it releases its resources in `finally`. */
+    val isRunning: Boolean get() = running && thread.isAlive
+
     fun start() {
         if (started) return
         started = true
@@ -1217,6 +1230,8 @@ private class AudioRenderer(
 
     override fun close() {
         running = false
+        // A three-argument write blocks until the track drains; stop() is what releases it.
+        runCatching { track?.stop() }
         thread.interrupt()
     }
 
@@ -1375,7 +1390,11 @@ private class AudioRenderer(
             runCatching { report("Audio: track unavailable api=19 stage=$diagnosticStage " +
                 "audioType=${format.audioType} codec=${format.codec} rate=${format.sampleRate} " +
                 "channels=${format.channels} minBufferResult=$minBuffer") }
-            return
+            // Failing the worker lets the next packet rebuild the renderer; returning would keep
+            // dropping every sample while the session looked healthy.
+            throw IllegalStateException(
+                "AudioTrack buffer size unavailable rate=${format.sampleRate} channels=${format.channels}",
+            )
         }
         val selection = mappedSelection()
         mappedChannel = selection.channel
@@ -2019,6 +2038,8 @@ private class AudioRenderer(
         abandonAudioFocus()
         softwareOpus?.close()
         softwareOpus = null
+        freescaleAac?.close()
+        freescaleAac = null
         val codec = codec
         this.codec = null
         if (codec != null) {

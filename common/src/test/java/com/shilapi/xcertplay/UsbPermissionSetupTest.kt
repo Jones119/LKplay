@@ -65,13 +65,12 @@ class UsbPermissionSetupTest {
         assertFalse(result.complete)
     }
 
-    @Test fun preexistingUsagePermissionDoesNotHideOtherFailures() {
+    @Test fun preexistingOverlayPermissionDoesNotHideOtherFailures() {
         val client = FakeClient().apply { output = null }
-        val result = operation(client) { it == UsbPermissionSetup.Permission.USAGE }.run()
-        assertTrue(result.verified.getValue(UsbPermissionSetup.Permission.USAGE))
+        val result = operation(client) { it == UsbPermissionSetup.Permission.OVERLAY }.run()
+        assertTrue(result.verified.getValue(UsbPermissionSetup.Permission.OVERLAY))
         assertFalse(result.verified.getValue(UsbPermissionSetup.Permission.ACCESSIBILITY))
-        assertFalse(result.verified.getValue(UsbPermissionSetup.Permission.OVERLAY))
-        assertEquals(2, client.commands.size)
+        assertEquals(1, client.commands.size)
         assertFalse(result.complete)
     }
 
@@ -82,7 +81,7 @@ class UsbPermissionSetupTest {
         }
         val result = operation(client) { it in allowed }.run()
         assertTrue(result.complete)
-        assertEquals(3, client.commands.size)
+        assertEquals(2, client.commands.size)
     }
 
     @Test fun cancelBeforeClientCreationDoesNoWork() {
@@ -131,7 +130,6 @@ class UsbPermissionSetupTest {
     @Test fun manualCommandUsesTheSamePreservingGrantAndIncludesOverlay() {
         val command = UsbPermissionSetup.manualCommand(context.packageName)
         assertTrue(command.contains("settings get secure enabled_accessibility_services"))
-        assertTrue(command.contains("GET_USAGE_STATS allow"))
         assertTrue(command.contains("SYSTEM_ALERT_WINDOW allow"))
         // Execute the exact copied command using an adb shell fixture, including its outer quoting.
         val target = "${context.packageName}/com.shilapi.xcertplay.UsbAutoConfirmService"

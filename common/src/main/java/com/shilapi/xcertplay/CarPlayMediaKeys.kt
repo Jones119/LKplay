@@ -47,12 +47,19 @@ internal object CarPlayMediaKeys {
         publish = ::onArtworkDecoded,
         discard = Bitmap::recycle,
     )
+    /**
+     * Serial hand-over to the vendor cluster. `VendorClusterBridge.setArtwork` encodes a JPEG,
+     * writes a file and may touch a loopback HTTP server; on a 1 GHz head unit that must not run on
+     * the main thread, and one worker keeps covers in order.
+     */
+    private val clusterPublishWorker = Executors.newSingleThreadExecutor { task ->
+        WorkerThreads.create(task, "diplay-cluster-artwork").apply { isDaemon = true }
+    }
     private var artworkOwner: Any? = null
     private var controller: CarPlayController? = null
 
     private var focusHeld = false
     private var appContext: Context? = null
-    private var mediaAudioActive = false
     private var nowPlaying = CarPlayNowPlaying()
     private var artwork: Bitmap? = null
     private val artworkCache = LinkedHashMap<Int, Bitmap?>()
@@ -141,6 +148,7 @@ internal object CarPlayMediaKeys {
                 // QQ Music streams lyric lines through the title field and the iPhone corrects a title just after
                 // the cover arrived. Neither is a new track: artist, album, duration and the artwork transfer
                 // all stay, so the cover must not be re-associated (it flashes and disappears otherwise).
+                val previousTransferId = nowPlaying.artworkTransferId
                 val titleOnlyChurn = clusterTitleOnlyChurn(nowPlaying, update)
                 nowPlaying = update
                 // The cluster's cover follows the *identity*, not the transfer id. The picture offered
@@ -153,7 +161,7 @@ internal object CarPlayMediaKeys {
                 // wrote track A bitmap under track B name, and the cluster showed a one-track lag
                 // (A to A, B to A, D showed C; car 2026-10-23). Only the bitmap the phone paired with
                 // this transfer id may be published; until it arrives the cluster keeps the old one.
-                if (update.artworkTransferId != nowPlaying.artworkTransferId) {
+                if (update.artworkTransferId != previousTransferId) {
                     pendingCover = null
                     pendingCoverId = null
                 }
@@ -227,7 +235,7 @@ internal object CarPlayMediaKeys {
                 return
             }
             clusterCover = null
-            runCatching { com.shilapi.xcertplay.media.VendorClusterBridge.setArtwork(null) }
+            publishClusterArtwork(null)
             return
         }
         val repeated = offered === clusterCover
@@ -238,7 +246,13 @@ internal object CarPlayMediaKeys {
             "cluster cover id=${nowPlaying.artworkTransferId} title=${nowPlaying.title} " +
                 "rehand=${repeated && !com.shilapi.xcertplay.media.VendorClusterBridge.artworkMatches(nowPlaying)}",
         )
-        runCatching { com.shilapi.xcertplay.media.VendorClusterBridge.setArtwork(offered) }
+        publishClusterArtwork(offered)
+    }
+
+    private fun publishClusterArtwork(bitmap: Bitmap?) {
+        clusterPublishWorker.execute {
+            runCatching { com.shilapi.xcertplay.media.VendorClusterBridge.setArtwork(bitmap) }
+        }
     }
 
     // Another car app (its own Spotify, the radio) took audio focus and with it the steering-wheel
@@ -255,7 +269,6 @@ internal object CarPlayMediaKeys {
     private fun updateLocked(active: Boolean) {
         val context = appContext ?: return
         if (controller == null) return
-        mediaAudioActive = active
         if (active && !legacyKeysRegistered) start(context) else if (active) regainFocusLocked()
     }
 
@@ -337,9 +350,16 @@ internal object CarPlayMediaKeys {
         artworkOwner = null
         artworkQueue.clear()
         MediaKeyEchoGate.reset()
-        runCatching { com.shilapi.xcertplay.media.VendorClusterBridge.setArtwork(null) }
-        mediaAudioActive = false
+        publishClusterArtwork(null)
         nowPlaying = CarPlayNowPlaying()
+        // On 4.4 a Bitmap's pixels live in native memory; dropping the references alone leaves them
+        // there until the finalizer runs, which is too late for a 128 MB head unit.
+        val cleared = ArrayList<Bitmap>(artworkCache.size + 3)
+        artwork?.let { cleared += it }
+        clusterCover?.let { cleared += it }
+        pendingCover?.let { cleared += it }
+        cleared += artworkCache.values.filterNotNull()
+        cleared.distinct().forEach { runCatching { it.recycle() } }
         artwork = null
         artworkCache.clear()
         // The next session starts with no cover of its own; the cluster clears with it.

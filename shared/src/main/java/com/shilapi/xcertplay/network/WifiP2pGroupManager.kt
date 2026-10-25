@@ -54,7 +54,6 @@ class WifiP2pGroupManager(
     private val random = SecureRandom()
     private val configurationMemory = P2pConfigurationMemory(appContext)
     private var rememberedAttempt: P2pConfigurationMemory.Record? = null
-    private var pendingSuccess: (() -> Boolean)? = null
     private var carPlayConfirmed = false
     private val ownership = appContext.getSharedPreferences("carplay_wifi_p2p", Context.MODE_PRIVATE)
     private val ssidPrefix by lazy {
@@ -145,7 +144,7 @@ class WifiP2pGroupManager(
                 appContext,
                 thread.looper,
                 createChannelListener(attempt),
-            )
+            ) ?: throw IOException("Wi-Fi Direct is unavailable on this head unit")
             attempt.channel = p2pChannel
             synchronized(stateLock) {
                 ensureStartActiveLocked(attempt)
@@ -197,13 +196,6 @@ class WifiP2pGroupManager(
                     if (config != null && !ownership.edit().putString("owned_ssid", credentials.ssid).commit()) {
                         throw IOException("Could not record Wi-Fi P2P group ownership")
                     }
-                    // The legacy two-argument createGroup lets the framework name the group, so the
-                    // record above cannot name it. Mark the request instead: this firmware keeps the
-                    // group after the app dies, and without the marker the next start would refuse to
-                    // reclaim a group we made (P2pOwnership.canReclaim).
-                    if (!ownership.edit().putBoolean("owned_legacy_request", true).commit()) {
-                        throw IOException("Could not record the legacy Wi-Fi P2P group request")
-                    }
                     val request = CreateRequest()
                     // Keep the requested SSID from the value we supplied. Some Android 10
                     // vendor frameworks omit WifiP2pConfig.getNetworkName(), even though they
@@ -223,8 +215,12 @@ class WifiP2pGroupManager(
                         p2pManager.createGroup(p2pChannel, createActionListener(attempt, request))
                         awaitGroupCreated(attempt, request, deadlineNanos, timeoutMillis)
                     } catch (failure: P2pCreateRejected) {
-                        if (usingRemembered && failure.reason == WifiP2pManager.ERROR && preferred != null) {
-                            if (configurationMemory.forget(preferred)) diagnostic("Wi-Fi P2P remembered cleared=create_rejected")
+                        if (usingRemembered && failure.reason == WifiP2pManager.ERROR) {
+                            preferred?.let { remembered ->
+                                if (configurationMemory.forget(remembered)) {
+                                    diagnostic("Wi-Fi P2P remembered cleared=create_rejected")
+                                }
+                            }
                         }
                         throw failure
                     }
@@ -243,7 +239,6 @@ class WifiP2pGroupManager(
                 ensureStartActiveLocked(attempt)
                 created = true
                 startAttempt = null
-                pendingSuccess = null
             }
             return group
         } catch (failure: Exception) {
@@ -253,14 +248,11 @@ class WifiP2pGroupManager(
         }
     }
 
-    override fun onCarPlayConfirmed() = synchronized(stateLock) {
-        if (closed || !created || carPlayConfirmed) return@synchronized
-        val save = pendingSuccess ?: return@synchronized
-        // Storage failure must not interrupt a working CarPlay session.
-        carPlayConfirmed = true
-        val saved = runCatching { save() }.getOrDefault(false)
-        diagnostic("Wi-Fi P2P remembered saved=$saved proof=authenticated_first_frame")
-    }
+    /**
+     * CS11: the remembered-configuration writer was removed with the API 21+ path; a legacy group
+     * gets its channel from the framework, so there is nothing to remember.
+     */
+    override fun onCarPlayConfirmed() = Unit
 
     override fun close() {
         val attempt: StartAttempt?
@@ -273,7 +265,6 @@ class WifiP2pGroupManager(
             if (!carPlayConfirmed) rememberedAttempt?.let {
                 if (configurationMemory.forget(it)) diagnostic("Wi-Fi P2P remembered cleared=session_unconfirmed")
             }
-            pendingSuccess = null
             attempt = startAttempt
             attempt?.stopped = true
             stateLock.notifyAll()
@@ -286,7 +277,7 @@ class WifiP2pGroupManager(
         }
 
         if (removeGroup && activeChannel != null) {
-            removeGroupBlocking(activeChannel)
+            removeGroupBlocking(activeChannel, allowWhenNameUnknown = removeGroup)
         }
         synchronized(legacyChannelLock) {
             if (activeChannel != null) releaseLegacyChannelRestriction(activeChannel)
@@ -318,8 +309,16 @@ class WifiP2pGroupManager(
                     false
                 } else true
             }
+            if (!removeDetachedGroup) {
+                // The legacy two-argument createGroup names the group itself, so the SSID cannot be
+                // recorded yet. Mark it only after the framework accepted the request: a marker left
+                // by a rejected attempt would let the next start delete another app's group.
+                if (!ownership.edit().putBoolean("owned_legacy_request", true).commit()) {
+                    diagnostic("Wi-Fi P2P ownership marker could not be written")
+                }
+            }
             if (removeDetachedGroup && activeChannel != null) {
-                removeGroup(activeChannel, waitForCallback = false)
+                removeGroup(activeChannel, waitForCallback = false, allowWhenNameUnknown = true)
             }
         }
 
@@ -684,12 +683,18 @@ class WifiP2pGroupManager(
         failedThread?.quitSafely()
     }
 
-    private fun removeGroupBlocking(channel: WifiP2pManager.Channel, expectedName: String? = observedCreatedName ?: requestedName) {
-        removeGroup(channel, waitForCallback = true, expectedName = expectedName)
+    private fun removeGroupBlocking(
+        channel: WifiP2pManager.Channel,
+        expectedName: String? = observedCreatedName ?: requestedName,
+        allowWhenNameUnknown: Boolean = false,
+    ) {
+        removeGroup(channel, waitForCallback = true, expectedName = expectedName,
+            allowWhenNameUnknown = allowWhenNameUnknown)
     }
 
     private fun removeGroup(channel: WifiP2pManager.Channel, waitForCallback: Boolean,
-        expectedName: String? = observedCreatedName ?: requestedName) {
+        expectedName: String? = observedCreatedName ?: requestedName,
+        allowWhenNameUnknown: Boolean = false) {
         val latch = CountDownLatch(1)
         try {
             p2pManager.requestGroupInfo(channel) { current ->
@@ -699,8 +704,10 @@ class WifiP2pGroupManager(
                 }
                 // Cleanup needs this attempt's exact identity. The reinstall namespace used at
                 // startup is broader and could also match a newer DiPlay session.
-                val ours = current.isGroupOwner && !expectedName.isNullOrBlank() &&
-                    current.networkName == expectedName
+                // When this manager created the group but the legacy framework has not reported
+                // its generated name yet, "owner" is the only identity available.
+                val nameMatches = expectedName?.let { current.networkName == it } ?: allowWhenNameUnknown
+                val ours = current.isGroupOwner && nameMatches
                 if (!ours) {
                     diagnostic("Wi-Fi P2P cleanup skipped=another_app_owns_group")
                     latch.countDown()
@@ -757,7 +764,6 @@ class WifiP2pGroupManager(
         else -> "reason $reason"
     }
 
-    private fun is5Ghz(frequencyMHz: Int): Boolean = frequencyMHz in 5150..5895
 
     private class StartAttempt {
         var channel: WifiP2pManager.Channel? = null

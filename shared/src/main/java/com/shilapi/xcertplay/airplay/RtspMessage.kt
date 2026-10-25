@@ -26,6 +26,14 @@ object RtspMessage {
 
     data class Parsed(val messages: List<Request>, val rest: ByteArray)
 
+    /**
+     * Bounds for a peer-controlled length field. The control port accepts connections before
+     * pair-verify, so without these a malformed `Content-Length` could grow the buffer until the
+     * process is killed.
+     */
+    private const val MAX_BODY_BYTES = 8 * 1024 * 1024
+    private const val MAX_BUFFER_BYTES = 16 * 1024 * 1024
+
     private val headerEnd = "\r\n\r\n".toByteArray(Charsets.US_ASCII)
     private val statusText = mapOf(
         200 to "OK",
@@ -36,6 +44,9 @@ object RtspMessage {
 
     /** Parses as many complete messages as are buffered, retaining any partial remainder. */
     fun parseMessages(buffer: ByteArray): Parsed {
+        require(buffer.size <= MAX_BUFFER_BYTES) {
+            "RTSP buffer exceeds $MAX_BUFFER_BYTES bytes with no complete message"
+        }
         val messages = ArrayList<Request>()
         var offset = 0
         while (offset < buffer.size) {
@@ -56,6 +67,9 @@ object RtspMessage {
             }
             val bodyStart = headerEndIndex + headerEnd.size
             val contentLength = headers["content-length"]?.toIntOrNull()?.coerceAtLeast(0) ?: 0
+            require(contentLength <= MAX_BODY_BYTES) {
+                "RTSP body exceeds $MAX_BODY_BYTES bytes: $contentLength"
+            }
             val bodyEnd = bodyStart + contentLength
             if (bodyEnd > buffer.size) break
             messages.add(

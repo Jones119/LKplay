@@ -696,8 +696,11 @@ class DiPlayActivity : ComponentActivity() {
             adbToggle(card, R.string.open_after_the_car_starts,
                 R.string.availability_depends_on_your_head_unit_s_startup_settings,
                 read = { AirPlayPersistence.loadAutoStartOnBoot(this) },
+                // API 19 grants the boot-launch permission at install time, so this preference
+                // only needs ADB when the permission is actually missing.
                 needsAdb = { CarHotspotSettings.enabled(this) &&
-                    AirPlayPersistence.loadWirelessHotspotMode(this) == WirelessHotspotMode.MANUAL },
+                    AirPlayPersistence.loadWirelessHotspotMode(this) == WirelessHotspotMode.MANUAL &&
+                    !CarHotspotSetup.Permission.BOOT_LAUNCH.granted(this) },
                 permissions = { listOf(CarHotspotSetup.Permission.BOOT_LAUNCH) }) {
                 AirPlayPersistence.saveAutoStartOnBoot(this, it)
             }
@@ -1155,12 +1158,12 @@ class DiPlayActivity : ComponentActivity() {
 
     private fun wirelessLinkControls(parent: LinearLayout) {
         val mode = AirPlayPersistence.loadWirelessHotspotMode(this)
-        val modes = listOf(WirelessHotspotMode.MANUAL, WirelessHotspotMode.WIFI_P2P, WirelessHotspotMode.EXISTING_WIFI)
-        val titles = listOf(getString(R.string.built_in_car_hotspot), getString(R.string.wifi_direct), getString(R.string.existing_wifi_title))
+        // API 19 has no "attach to an existing Wi-Fi" backend, and Wi-Fi Direct has a legacy path.
+        val modes = listOf(WirelessHotspotMode.MANUAL, WirelessHotspotMode.WIFI_P2P)
+        val titles = listOf(getString(R.string.built_in_car_hotspot), getString(R.string.wifi_direct))
         val descriptions = listOf(
             getString(R.string.hotspot_mode_manual_desc),
-            getString(R.string.hotspot_mode_p2p_desc),
-            getString(R.string.existing_wifi_description)
+            getString(R.string.hotspot_mode_p2p_desc)
         )
         val wide = resources.configuration.screenWidthDp >= 850
         val choices = if (wide) row().apply { gravity = Gravity.TOP } else column()
@@ -1550,7 +1553,6 @@ class DiPlayActivity : ComponentActivity() {
         UsbPermissionSetup.snapshot(this).forEach { (permission, granted) ->
             val title = getString(when (permission) {
                 UsbPermissionSetup.Permission.ACCESSIBILITY -> R.string.usb_auto_confirm_title
-                UsbPermissionSetup.Permission.USAGE -> R.string.center_map_auto_hide
                 UsbPermissionSetup.Permission.OVERLAY -> R.string.btn_open_overlay_setting
             })
             body.addView(label("$title: ${getString(if (granted) R.string.permission_enabled_ready else R.string.permission_not_enabled)}", 14, if (granted) MUTED else WARNING))

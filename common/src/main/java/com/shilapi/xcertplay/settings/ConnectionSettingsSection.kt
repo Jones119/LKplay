@@ -47,7 +47,7 @@ object ConnectionSettingsSection {
     ): SettingsWidgets.ChoiceRowResult<WirelessHotspotMode> {
         val modes = buildList {
             add(WirelessHotspotMode.MANUAL to context.getString(R.string.built_in_car_hotspot))
-            add(WirelessHotspotMode.EXISTING_WIFI to context.getString(R.string.existing_wifi_title))
+            add(WirelessHotspotMode.WIFI_P2P to context.getString(R.string.wifi_direct))
         }
         return SettingsWidgets.createChoiceRow(
             context = context,

@@ -23,12 +23,6 @@ internal class P2pConfigurationMemory(context: Context) {
         Record(encoded, request, fields[3].toInt().takeIf { it > 0 })
     }.getOrNull()
 
-    fun remember(request: P2pCreationRequest, actualMHz: Int, stationMHz: Int?): Boolean {
-        val kind = if (request.mode == P2pCreationMode.SYSTEM_DEFAULT) "system" else "frequency"
-        val encoded = "$kind|${request.frequencyMHz ?: 0}|$actualMHz|${stationMHz ?: 0}|${UUID.randomUUID()}"
-        return synchronized(prefs) { prefs.edit().putString("confirmed", encoded).commit() }
-    }
-
     /** A late close from an older manager must not erase a newer successful session. */
     fun forget(record: Record): Boolean = runCatching { synchronized(prefs) {
         if (prefs.getString("confirmed", null) != record.encoded) false

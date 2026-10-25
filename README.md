@@ -28,7 +28,7 @@ claims support for the CS11. See [Scope](#scope) before installing it anywhere e
 | Touch latency / video smoothness | Tuned: receive window, aging threshold, allocation cuts, `TCP_NODELAY`, thread priority |
 | API-19 hardening | Compat sweep + source-scanning guard tests |
 | Wired/wireless stability gaps | Known, not fixed yet (first-frame watchdog, USB detach broadcast, visible failures, mode convergence) |
-| Unit tests | `:shared` **940 / 0 failures**, `:common` **590 / 0**, nothing skipped |
+| Unit tests | `:shared` **1072 / 0 failures**, `:common` **395 / 0**, nothing skipped |
 
 Detailed engineering notes (measurements, rejection lists, car-session evidence) are kept **outside**
 this repository by project convention — this README is the code-level entry point only.
@@ -95,9 +95,8 @@ shared/   protocol + core: AirPlay (RTSP, H.264, AAC/LPCM, HID, NTP, crypto), iA
 common/   Android host: activities, settings UI, persistence, notifications, permissions,
           corner-mask overlay, artwork provider
 mobile/   the packaged application + the committed accessory identity
-vpndialogs-stub/  tiny stub module the VPN dialog dependency needs
 docs/     upstream documentation kept as-is (build, install, compatibility, release notes, licenses)
-site/ asset/ samples/ automotive/  upstream leftovers, unused on the CS11
+site/ asset/  upstream leftovers, unused on the CS11
 ```
 
 ## Documentation

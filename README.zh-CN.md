@@ -27,7 +27,7 @@
 | 触控延迟 / 视频流畅度 | 已调优：视频接收窗、迟到丢帧老化阈值、降分配、`TCP_NODELAY`、线程优先级 |
 | API-19 兼容加固 | 兼容层清扫 + 源码扫描守卫测试 |
 | 有线/无线稳定性缺口 | 已定位未修（首帧看门狗、USB 拔出广播、失败可见性、模式收敛） |
-| 单元测试 | `:shared` **940 / 0 失败**、`:common` **590 / 0**，0 skipped |
+| 单元测试 | `:shared` **1072 / 0 失败**、`:common` **395 / 0**，0 skipped |
 
 详细的工程笔记（实测数据、被否证的方案、实车日志证据）按项目约定**放在仓库之外**；本 README 只作为
 代码层的入口。
@@ -54,7 +54,7 @@ cd CarPlay-CS11
 
 ```powershell
 .\gradlew.bat :shared:testDebugUnitTest :common:testDebugUnitTest --continue --offline
-# 期望：:shared 940 / 0 失败、:common 590 / 0 失败、0 skipped
+# 期望：:shared 1072 / 0 失败、:common 395 / 0 失败、0 skipped
 ```
 
 **失败集必须保持为空**（新增用例让数字变大是允许的）。任何时候不要同时跑两个 Gradle（会争抢同一份
@@ -92,7 +92,7 @@ common/   Android 宿主：Activity、设置界面、持久化、通知、权限
 mobile/   打包成 APK 的 application 模块 + 随仓库提供的认证身份
 vpndialogs-stub/  VPN 对话框依赖所需的小桩模块
 docs/     上游文档原样保留（构建、安装、兼容性、版本说明、许可证）
-site/ asset/ samples/ automotive/  上游遗留内容，在 CS11 上不用
+site/ asset/  上游遗留内容，在 CS11 上不用
 ```
 
 ## 文档

@@ -133,7 +133,12 @@ class CarPlayMediaEngine(
         val key = outputKey(session, stream) ?: return null
         val streamKey = StreamKey(session, type)
         Log.i(TAG, "airplay screen key connectionID=${unsignedPlistDecimal(stream["streamConnectionID"])}")
-        val screen = ScreenStream(key, session::logDebug, network = network)
+        val screen = ScreenStream(
+            key,
+            session::logDebug,
+            network = network,
+            expectedPeer = session.remoteAddress,
+        )
         sink.setVideoDiagnosticHandler(type) {
             if (it == "first frame rendered") session.videoFrameRendered()
             session.logDebug("Video: $it")
@@ -399,7 +404,9 @@ class CarPlayMediaEngine(
             bridge.close()
             throw error
         }
-        streams[StreamKey(session, STREAM_TYPE_DATA)] = if (handler != null) bridge else tunnel
+        val previous = streams.put(StreamKey(session, STREAM_TYPE_DATA), if (handler != null) bridge else tunnel)
+        // A repeated SETUP replaces the tunnel; leaving the old one open leaks its port and receiver.
+        previous?.let { runCatching { it.close() } }
         return linkedMapOf<String, Any?>("type" to STREAM_TYPE_DATA, "streamID" to 1L, "dataPort" to port)
             .apply {
                 stream["streamConnectionID"]?.let { connectionId ->
@@ -452,7 +459,9 @@ class CarPlayMediaEngine(
     }
 
     override fun onFeedback(session: AirPlaySession): Map<String, Any?>? {
-        val active = audioMeta.values.toList()
+        // Only this session's streams: a closed session can still be reporting while the next
+        // one is already setting up.
+        val active = audioMeta.entries.filter { it.key.session === session }.map { it.value }
         val buffered = bufferedStreams[session]
         if (active.isEmpty() && buffered == null) return null
         val streams = active.map { meta ->
@@ -513,10 +522,13 @@ class CarPlayMediaEngine(
             .filter { isScreenStreamType(it.type) }
             .forEach { sink.onScreenStreamActive(it.type, false) }
         sessionStreams.forEach { streams.remove(it)?.close() }
-        audioMeta.clear()
-        pendingMicrophone.clear()
-        audioCaptures.values.forEach(AudioPacketCapture::close)
-        audioCaptures.clear()
+        val sessionKeys = (audioMeta.keys.asSequence() + pendingMicrophone.keys.asSequence() +
+            audioCaptures.keys.asSequence()).distinct().filter { it.session === session }
+        sessionKeys.forEach { key ->
+            audioMeta.remove(key)
+            pendingMicrophone.remove(key)
+            audioCaptures.remove(key)?.close()
+        }
     }
 
     /** Removes ownership before a close that may block on delivery or invoke the sink. */

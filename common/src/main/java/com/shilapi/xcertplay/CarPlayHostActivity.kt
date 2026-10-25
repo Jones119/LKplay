@@ -4,9 +4,7 @@ import android.Manifest
 import com.shilapi.xcertplay.mfi.LocalMfiAuthenticationClient
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.content.res.Configuration
-import android.content.res.ColorStateList
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import android.graphics.Bitmap
@@ -19,7 +17,6 @@ import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.media.MediaCodecList
 import android.media.MediaFormat
-import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -409,8 +406,6 @@ class CarPlayHostActivity : ComponentActivity() {
     private var settingsGestureHint: TextView? = null
     private var gestureSequenceActive = false
     private var gestureTracking = false
-    private var gestureStartX = 0f
-    private var gestureStartY = 0f
     // Platform pointer ids the tracked gesture was established with. The finger count alone is not
     // enough: a device can report the configured pointerCount while repeating one pointer id, which
     // is not a multi-finger gesture at all (EasyPlay v71 keys its swipe by id and rejects such a
@@ -2806,7 +2801,7 @@ class CarPlayHostActivity : ComponentActivity() {
         }
         val modes = buildList {
             add(WirelessHotspotMode.MANUAL to getString(R.string.built_in_car_hotspot))
-            add(WirelessHotspotMode.EXISTING_WIFI to getString(R.string.existing_wifi_title))
+            add(WirelessHotspotMode.WIFI_P2P to getString(R.string.wifi_direct))
         }
         var selectedId = View.NO_ID
         for ((mode, label) in modes) {
