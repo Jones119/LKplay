@@ -75,11 +75,13 @@ class ClusterMediaTrackMatchTest {
     }
 
     @Test
-    fun aNewArtworkTransferIsANewTrack() {
+    fun aChangedArtworkIdInsideTheSameTrackIsNotANewTrack() {
+        // Measured on the car: QQ Music hands out a new artwork id per lyric line, so treating that as
+        // a track boundary let a lyric line overwrite the stable title (docs/_digest/116 V2-4).
         val previous = now("晴天", "周杰伦", "叶惠美", artworkTransferId = 7)
         val nextTrack = now("晴天", "周杰伦", "叶惠美", artworkTransferId = 8)
 
-        assertTrue(isNewTrack(previous, nextTrack))
+        assertFalse(isNewTrack(previous, nextTrack))
     }
 
     @Test
@@ -88,6 +90,15 @@ class ClusterMediaTrackMatchTest {
         val later = now("晴天", "周杰伦", "叶惠美", artworkTransferId = 7)
 
         assertFalse(isNewTrack(previous, later))
+    }
+
+    @Test
+    fun anArtistThatGoesMissingIsNotANewTrack() {
+        // QQ Music drops artist/album while it streams a lyric line (car 2026-10-26).
+        val previous = now("晴天", "周杰伦", "叶惠美", artworkTransferId = 7)
+        val lyricLine = now("刮风这天", null, null, artworkTransferId = 8)
+
+        assertFalse(isNewTrack(previous, lyricLine))
     }
 
     @Test

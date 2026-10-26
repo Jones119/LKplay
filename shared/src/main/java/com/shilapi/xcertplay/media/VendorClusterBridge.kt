@@ -64,12 +64,39 @@ object VendorClusterBridge {
     private const val PLAYBACK_STATUS_PAUSED = 0
     private const val PLAYBACK_STATUS_PLAYING = 1
 
+    /** The vendor's call-key callback; it has no implementation in the jar, so a proxy supplies it. */
+    private const val PHONE_CALL_CALLBACK =
+        "com.ecarx.xui.adaptapi.diminteraction.IPhoneCallInteraction\$IPhoneCallInteractionCallback"
+
+    /**
+     * How long a cluster answer/hang-up press is ignored after the previous one.
+     *
+     * The vendor does not reset its call status after a hang-up, so the same confirm key can fire
+     * `onEndCall` again (docs/_digest/86 D2); this keeps one press from becoming two actions.
+     */
+    private const val CALL_ACTION_DEBOUNCE_MILLIS = 800L
+
+    /** DIM binds asynchronously; the phone callback is retried at these steps until it registers. */
+    private const val PHONE_CALLBACK_RETRY_MILLIS = 1_500L
+
     /** `debug.diplay.cover_refresh=0` disables the post-cover refresh (bench A/B). */
     private const val COVER_REFRESH_PROPERTY = "debug.diplay.cover_refresh"
     private const val COVER_REFRESH_DELAY_MILLIS = 1500L
 
     @Volatile
     private var appContext: Context? = null
+
+    /** What the cluster's answer/hang-up buttons do; supplied by the host activity. */
+    @Volatile
+    private var answerCallAction: (() -> Unit)? = null
+    @Volatile
+    private var endCallAction: (() -> Unit)? = null
+
+    /** The vendor keeps a single listener slot, so the proxy is registered once per process. */
+    @Volatile
+    private var phoneCallbackRegistered = false
+
+    private val lastCallActionAt = java.util.concurrent.atomic.AtomicLong(0L)
 
     /** The vendor objects resolved so far; [ClusterInteractionCache] documents the invalidation rule. */
     private val interactions = ClusterInteractionCache()
@@ -210,6 +237,32 @@ object VendorClusterBridge {
             "cluster push setting=$enabledFromSettings " +
                 "property=${clusterSwitchProperty() ?: "unset"} enabled=$enabled",
         )
+        // Resolve the phone interaction now, so the cluster's answer/hang-up keys have a listener long
+        // before the first call arrives. DIM binds asynchronously (`create()` returns before the
+        // service is up), so a miss is retried a few times instead of waiting for a call to arrive.
+        runCatching { phoneInteraction(context) }
+        if (!phoneCallbackRegistered) {
+            val ctx = appContext ?: return
+            for (attempt in 1..3) {
+                coverRefreshHandler.postDelayed(
+                    {
+                        if (!phoneCallbackRegistered) runCatching { phoneInteraction(ctx) }
+                    },
+                    PHONE_CALLBACK_RETRY_MILLIS * attempt,
+                )
+            }
+        }
+    }
+
+    /**
+     * Supplies what the cluster's answer/hang-up buttons do.
+     *
+     * The activity owns the controller, so it hands the two actions in; without them the buttons stay
+     * inert (registered but harmless) instead of reaching into another layer.
+     */
+    fun attachTelephonyActions(onAnswer: (() -> Unit)?, onEnd: (() -> Unit)?) {
+        answerCallAction = onAnswer
+        endCallAction = onEnd
     }
 
     /**
@@ -400,7 +453,15 @@ object VendorClusterBridge {
             // The cover is named after the track, the way the car media centre names its own, so the
             // handover speaks the convention the cluster's working case uses (see
             // [carMediaArtworkFileName]); a track whose metadata never arrived keeps the unique name.
-            val baseName = carMediaArtworkFileName(lastMedia?.title, lastMedia?.album, lastMedia?.artist)
+            // Name the cover after the fixed title, not the frame's: with `cluster_lyrics=0` the raw
+            // title may be a lyric line, and a name that changes per line means a new URI per line -
+            // exactly what keeps the cluster from settling on a cover (docs/_digest/116 V2-4).
+            val coverTitle = if (!clusterLyricsEnabled()) {
+                stableTitle ?: lastMedia?.title
+            } else {
+                lastMedia?.title
+            }
+            val baseName = carMediaArtworkFileName(coverTitle, lastMedia?.album, lastMedia?.artist)
             val existingName = artworkUri?.lastPathSegment
             if (baseName != null && baseName == existingName &&
                 bitmap === lastStoredBitmap &&
@@ -753,7 +814,67 @@ object VendorClusterBridge {
         return interactions.phone {
             read(owner, "getPhoneCallInteraction")?.also { value ->
                 Log.i(TAG, "cluster phone interaction=${value.javaClass.name}")
+                registerPhoneCallback(value)
             }
+        }
+    }
+
+    /**
+     * Registers the proxy that turns the cluster's answer/hang-up keys into CarPlay telephony.
+     *
+     * The vendor keeps one listener slot per process and its unregister is a no-op, so this runs once
+     * and never replaces the listener (docs/_digest/86 D3).
+     */
+    private fun registerPhoneCallback(interaction: Any) {
+        if (phoneCallbackRegistered) return
+        val type = runCatching { Class.forName(PHONE_CALL_CALLBACK) }.getOrNull() ?: run {
+            Log.w(TAG, "cluster phone callback type is missing")
+            return
+        }
+        val proxy = runCatching {
+            Proxy.newProxyInstance(type.classLoader, arrayOf(type), PhoneCallCallbackHandler())
+        }.getOrNull() ?: return
+        val registered = runCatching {
+            interaction.javaClass.getMethod("registerPhoneCallback", type).invoke(interaction, proxy)
+        }.onFailure {
+            Log.w(TAG, "cluster phone callback registration failed", it)
+        }.isSuccess
+        phoneCallbackRegistered = registered
+        Log.i(TAG, "cluster phone callback registered=$registered")
+    }
+
+    /**
+     * Runs one cluster key action, coalescing repeats.
+     *
+     * The vendor's callback arrives on a binder thread, so the work here is two short steps. The
+     * debounce covers the vendor's own defect: its call status is not reset after a hang-up, so the
+     * same confirm key can report `onEndCall` a second time (docs/_digest/86 D2).
+     */
+    private fun performTelephonyAction(name: String, action: (() -> Unit)?) {
+        if (action == null) {
+            Log.i(TAG, "cluster call $name ignored: no controller yet")
+            return
+        }
+        val now = elapsedNow()
+        val last = lastCallActionAt.get()
+        if (last != 0L && now - last < CALL_ACTION_DEBOUNCE_MILLIS) {
+            Log.i(TAG, "cluster call $name ignored: debounce")
+            return
+        }
+        lastCallActionAt.set(now)
+        Log.i(TAG, "cluster call $name -> CarPlay telephony")
+        runCatching { action() }.onFailure { Log.w(TAG, "cluster call $name failed", it) }
+    }
+
+    /** The vendor's call-key callback; every method not named here is a deliberate no-op. */
+    private class PhoneCallCallbackHandler : InvocationHandler {
+        override fun invoke(proxy: Any?, method: Method, args: Array<out Any?>?): Any? {
+            when (method.name) {
+                "onAnswerCall", "onAnswerAndHoldCall", "onAnswerAndEndCall" ->
+                    performTelephonyAction(method.name, answerCallAction)
+                "onEndCall" -> performTelephonyAction(method.name, endCallAction)
+            }
+            return null
         }
     }
 
@@ -1001,17 +1122,26 @@ private fun sameOrMissing(previous: String?, next: String?): Boolean =
 private fun comparableTitle(title: String?): String? = title?.replace("\u200B", "")
 
 /**
- * Whether [next] is a different track from [previous]: a new artist/album, a materially different
- * duration, or a new artwork transfer. Missing fields are compatible because they can arrive later,
- * the same rule [sameTrack] uses.
+ * Whether [next] is a different track from [previous]: a new artist/album or a materially different
+ * duration. Missing fields are compatible because they can arrive later, the same rule [sameTrack]
+ * uses. The artwork transfer id is deliberately not a boundary: measured on the car, QQ Music hands
+ * out a new one per lyric line (docs/_digest/116 V2-4).
  */
 internal fun isNewTrack(previous: CarPlayNowPlaying?, next: CarPlayNowPlaying): Boolean =
     previous == null ||
-        !sameOrMissing(previous.artist, next.artist) ||
-        !sameOrMissing(previous.album, next.album) ||
-        durationChanged(previous.durationMillis, next.durationMillis) ||
-        (previous.artworkTransferId != null && next.artworkTransferId != null &&
-            previous.artworkTransferId != next.artworkTransferId)
+        definitelyDifferent(previous.artist, next.artist) ||
+        definitelyDifferent(previous.album, next.album) ||
+        durationChanged(previous.durationMillis, next.durationMillis)
+
+/**
+ * True only when both sides carry a value and they differ.
+ *
+ * A field that goes missing must not look like a new track: QQ Music drops artist/album while it
+ * streams a lyric line, and treating that as a boundary let the lyric line overwrite the fixed title
+ * (docs/_digest/116 V2-4).
+ */
+private fun definitelyDifferent(previous: String?, next: String?): Boolean =
+    !previous.isNullOrBlank() && !next.isNullOrBlank() && previous != next
 
 private fun durationChanged(previous: Long?, next: Long?): Boolean =
     previous != null && next != null && previous > 0 && next > 0 &&

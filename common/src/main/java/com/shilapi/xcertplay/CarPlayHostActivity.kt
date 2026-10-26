@@ -908,6 +908,12 @@ class CarPlayHostActivity : ComponentActivity() {
     private fun attachClusterBridge() {
         runCatching {
             com.shilapi.xcertplay.media.VendorClusterBridge.attach(this, clusterBridgeEnabled)
+            // The cluster's answer/hang-up keys call back into the vendor, which forwards them here;
+            // the controller is read per press, so a session that starts later still answers.
+            com.shilapi.xcertplay.media.VendorClusterBridge.attachTelephonyActions(
+                onAnswer = { controller?.answerCall() },
+                onEnd = { controller?.endCall() },
+            )
         }
     }
 
