@@ -7,22 +7,21 @@
 DiPlay 的 CS11 分支：把 CarPlay 接收端跑在领克 CS11 车机上。
 
 - 车机：`cs11_19a_h`，**Android 4.4.3 / API 19 / Dalvik / 32 位 ARM**，是**唯一交付目标**。
-- 本分支的 `minSdk` 与 `targetSdk` 都是 **19**；`targetSdk 19` 的 APK 在 Android 14+ 默认无法安装
-  （只能 `adb install --bypass-low-target-sdk-block`），因此平板不再是验证目标。
+- 本分支的 `minSdk` 与 `targetSdk` 都是 **19**，**只面向 Android 4.4.3，不向上兼容**；不为高版本的安装或运行预留路径。
 - 分支 `cs11-api19`；环境事实见 `docs/DEV-ENVIRONMENT-CS11.md`；历史结论见 `docs/_digest/`。
 
-## 1. API 19 兼容性规则（**硬性**）
+## 1. API 19 规则（**硬性**）
 
-> 所做的**任何修改、新增**，都必须保证**兼容 API 19**；没有高版本回退分支可以依赖。
+> 所做的**任何修改、新增**，都只面向 **API 19（Android 4.4.3）**：只允许 API ≤ 19 的符号，**不向上兼容**。
 
 具体含义，缺一不可：
 
-1. **不许裸用 API > 19 的符号**。`Build.VERSION.SDK_INT` 常量、类、方法、字段、清单属性，凡是 API 19 没有的，
-   必须有版本分支或兼容封装（本仓库已有 `androidx`/`compat`/`Workers` 等封装可复用）。
+1. **不许使用 API > 19 的符号**。类、方法、字段、清单属性，凡是 API 19 没有的一律不能用；也不要写 `Build.VERSION.SDK_INT` 版本分支。
+   需要的能力用 `compat`/`androidx`/`Workers` 里的等价实现，**或直接放弃该功能**；不要为高版本预留回退路径。
    典型反例：`finishAndRemoveTask()`（API 21）、`UsbDeviceConnection.setInterface()`（API 21）、
    `Context.RECEIVER_NOT_EXPORTED`（API 33）、`PendingIntent.FLAG_MUTABLE`（API 31）——
-   这些在车机上都必须走回退分支。
-2. **验证必须在车机上进行**。编译、单测和 lint 只证明代码正确，不证明功能可用；不再有平板台架兜底。
+   这些在 API 19 上不存在，只能换实现或不使用。
+2. **验证必须在车机上进行**。编译、单测和 lint 只证明代码正确，不证明功能可用；没有其它 Android 版本或平板台架可以作为替代验证环境。
 3. **提交说明必须写清 API 19 路径的验证状态**：`✅ API19 实机` / `必须上机复验`。
    不允许把“编译通过”写成“已修复”。
 4. 改动 `shared`/`common` 的公开行为时，跑全量单测：
