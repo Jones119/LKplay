@@ -29,10 +29,12 @@ import android.os.Build
 import com.shilapi.xcertplay.compat.WorkerThreads
 
 /**
- * Hosts the AirPlay TCP listener for both NCM/VPN and local-only Wi-Fi transports.
+ * Hosts the AirPlay TCP listener for both wired (userspace lwIP) and wireless (car hotspot) transports.
  *
- * The wired path also owns the Android VPN tunnel and NCM IPv6 bridge. VPN consent is requested
- * with [prepare] before binding.
+ * Despite the historical name and the `VpnService` base class, this service never establishes a
+ * tunnel and never calls `prepare`: the CS11 kernel has no TUN driver. It is bound with
+ * `BIND_AUTO_CREATE` and only serves the listener's lifecycle, `boundPort()` and the accepted
+ * sessions.
  */
 class CarPlayVpnService : VpnService() {
     inner class LocalBinder : Binder() {
