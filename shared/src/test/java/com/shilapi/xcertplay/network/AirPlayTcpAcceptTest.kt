@@ -16,13 +16,13 @@ import java.util.concurrent.TimeUnit
 @Config(sdk = [29], manifest = Config.NONE)
 class AirPlayTcpAcceptTest {
     @Test fun bothAddressFamiliesReportOwnerAndOldCleanupPreservesNewListener() {
-        val service = Robolectric.buildService(CarPlayVpnService::class.java).create().get()
+        val service = Robolectric.buildService(CarPlayListenerService::class.java).create().get()
         val received = LinkedBlockingQueue<AirPlayTcpAccepted>()
         val address = InetAddress.getByName("127.0.0.1")
         val addresses = listOf(address, InetAddress.getByName("::1"))
         val config = AirPlayConfig("test", "test", "", "1", AirPlayDisplayConfig(800, 480), port = 0)
         fun attach(owner: AirPlayListenerIdentity) {
-            assertEquals(CarPlayVpnService.AttachResult.Started, service.attachWireless(address, config,
+            assertEquals(CarPlayListenerService.AttachResult.Started, service.attachWireless(address, config,
                 AirPlayIdentity(ByteArray(32), ByteArray(32), "test"), PairingStore(), null,
                 object : AirPlaySessionListener {
                     override fun onTcpAccepted(event: AirPlayTcpAccepted) { received.add(event) }

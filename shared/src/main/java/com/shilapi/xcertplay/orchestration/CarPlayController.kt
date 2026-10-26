@@ -41,7 +41,7 @@ import com.shilapi.xcertplay.mfi.RemoteMfiAuthenticationClient
 import com.shilapi.xcertplay.mfi.LocalMfiAuthenticationClient
 import com.shilapi.xcertplay.network.CarPlayBonjour
 import com.shilapi.xcertplay.network.diagnosticSummary
-import com.shilapi.xcertplay.network.CarPlayVpnService
+import com.shilapi.xcertplay.network.CarPlayListenerService
 import com.shilapi.xcertplay.network.LegacySoftApControl
 import com.shilapi.xcertplay.network.ManualHotspotManager
 import com.shilapi.xcertplay.network.ExistingWifiManager
@@ -290,7 +290,7 @@ class CarPlayController(
     @Volatile private var wirelessTunnelChannel: Iap2Session? = null
     @Volatile private var wirelessRuntimeIdentification: Iap2IdentificationConfig? = null
     @Volatile private var wirelessAirPlayEndpoint: Iap2WirelessCarPlayEndpoint? = null
-    @Volatile private var vpnService: CarPlayVpnService? = null
+    @Volatile private var listenerService: CarPlayListenerService? = null
 
     /**
      * The userspace NCM link when this wired session runs on lwIP instead of the kernel netdev. It owns the
@@ -311,7 +311,7 @@ class CarPlayController(
      * phone see a detach (see [requestWiredReenumeration]). Null while no wired session owns one.
      */
     @Volatile private var wiredDevice: UsbDevice? = null
-    @Volatile private var vpnBound = false
+    @Volatile private var listenerBound = false
     private val wirelessHandoffRequested = AtomicBoolean(false)
     private val wirelessTunnelReady = AtomicBoolean(false)
     private val wirelessActiveReported = AtomicBoolean(false)
@@ -320,17 +320,17 @@ class CarPlayController(
 
     private var permissionCloseable: Closeable? = null
     private var attachCloseable: Closeable? = null
-    private var vpnLatch = CountDownLatch(1)
+    private var listenerLatch = CountDownLatch(1)
     private val teardownComplete = CountDownLatch(1)
 
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName, binder: IBinder) {
-            vpnService = (binder as CarPlayVpnService.LocalBinder).service
-            vpnLatch.countDown()
+            listenerService = (binder as CarPlayListenerService.LocalBinder).service
+            listenerLatch.countDown()
         }
 
         override fun onServiceDisconnected(name: ComponentName) {
-            vpnService = null
+            listenerService = null
             fail(IphoneUsbException.DeviceUnavailable("CarPlay VPN service disconnected"))
         }
     }
@@ -487,7 +487,7 @@ class CarPlayController(
     }
 
     fun hasActiveAirPlayAttachment(): Boolean = synchronized(lifecycleLock) {
-        !closed && vpnService?.isAttached() == true
+        !closed && listenerService?.isAttached() == true
     }
 
     fun start() {
@@ -797,8 +797,8 @@ class CarPlayController(
         touchExecutor.shutdownNow()
         commandExecutor.shutdownNow()
         tunnelExecutor.shutdownNow()
-        val service = vpnService
-        unbindVpn()
+        val service = listenerService
+        unbindListenerService()
         WorkerThreads.create(
             {
                 try {
@@ -1179,7 +1179,7 @@ class CarPlayController(
             )
 
             onStatus(CarPlayStatus.AttachingNetwork)
-            val service = awaitVpnService()
+            val service = awaitListenerService()
                 ?: throw IOException("Could not bind the CarPlay AirPlay service")
             synchronized(wirelessResourceLock) {
                 if (isStaleWirelessRun(generation)) return
@@ -1197,10 +1197,10 @@ class CarPlayController(
                         additionalBindAddresses = hotspotInfo.hostAddresses.filter { it != hostAddress },
                     )
                 ) {
-                    CarPlayVpnService.AttachResult.Started -> Unit
-                    CarPlayVpnService.AttachResult.AlreadyStarted ->
+                    CarPlayListenerService.AttachResult.Started -> Unit
+                    CarPlayListenerService.AttachResult.AlreadyStarted ->
                         throw IOException("Wireless AirPlay transport is already attached")
-                    is CarPlayVpnService.AttachResult.Failed ->
+                    is CarPlayListenerService.AttachResult.Failed ->
                         throw IOException(result.message)
                 }
             }
@@ -1896,7 +1896,7 @@ class CarPlayController(
      */
     private fun attachUserspace(link: UserSpaceNcmLink): Boolean {
         onStatus(CarPlayStatus.AttachingNetwork)
-        val service = awaitVpnService() ?: run {
+        val service = awaitListenerService() ?: run {
             debugLog("userspace NCM: VPN service bind failed")
             return false
         }
@@ -1929,7 +1929,7 @@ class CarPlayController(
             return false
         }
         return when (result) {
-            CarPlayVpnService.AttachResult.Started -> {
+            CarPlayListenerService.AttachResult.Started -> {
                 debugLog("userspace NCM AirPlay listener attached on lwIP address=${bindAddress.hostAddress}")
                 // Nothing else tells the phone this link carries an AirPlay receiver: the Bonjour side is
                 // JmDNS on the platform stack, and this address exists only inside lwIP (docs/_digest/64).
@@ -2001,11 +2001,11 @@ class CarPlayController(
                 }
                 true
             }
-            CarPlayVpnService.AttachResult.AlreadyStarted -> {
+            CarPlayListenerService.AttachResult.AlreadyStarted -> {
                 debugLog("userspace NCM listener was already started")
                 true
             }
-            is CarPlayVpnService.AttachResult.Failed -> {
+            is CarPlayListenerService.AttachResult.Failed -> {
                 debugLog("userspace NCM listener attach failed: ${result.message}")
                 onStatus(CarPlayStatus.Failed(result.message))
                 false
@@ -2157,7 +2157,7 @@ class CarPlayController(
             ncmOwnedLocally = false
             debugLog("wired AirPlay transport attached userspaceLwip=${userspace != null}")
             if (closed) {
-                vpnService?.detach()
+                listenerService?.detach()
                 return
             }
 
@@ -2165,7 +2165,7 @@ class CarPlayController(
                 ?: throw IphoneUsbException.DeviceUnavailable("MFi coprocessor client is unavailable")
             val endpoint = Iap2WiredCarPlayEndpoint(
                 ipv6Addresses = listOf(LinkLocalAddress.fromMacOrNull(ncmHostMac) ?: config.linkLocal),
-                airPlayPort = vpnService?.boundPort() ?: airPlayConfig.port,
+                airPlayPort = listenerService?.boundPort() ?: airPlayConfig.port,
                 publicKey = identity.publicKeyHex,
                 sourceVersion = airPlayConfig.sourceVersion,
                 deviceIdentifier = ncmHostMac.macString(),
@@ -2195,7 +2195,7 @@ class CarPlayController(
             )
         } catch (error: Throwable) {
             debugLog("wired bring-up failed", error)
-            if (!ncmOwnedLocally) vpnService?.detach()
+            if (!ncmOwnedLocally) listenerService?.detach()
             fail(error)
         } finally {
             if (!userspaceAttached) {
@@ -2452,7 +2452,7 @@ class CarPlayController(
         }
     }
 
-    private fun closeWirelessStack(service: CarPlayVpnService? = vpnService, generation: Int? = null) =
+    private fun closeWirelessStack(service: CarPlayListenerService? = listenerService, generation: Int? = null) =
         synchronized(wirelessResourceLock) {
             if (generation != null && generation != wirelessGeneration.get()) return@synchronized
             val owner = firstTcpWatchdog?.listener
@@ -2583,41 +2583,41 @@ class CarPlayController(
     private fun ByteArray.macString(): String =
         joinToString(":") { byte -> "%02x".format(byte.toInt() and 0xff) }
 
-    private fun awaitVpnService(): CarPlayVpnService? {
-        vpnService?.let { return it }
-        bindVpn()
+    private fun awaitListenerService(): CarPlayListenerService? {
+        listenerService?.let { return it }
+        bindListenerService()
         return try {
-            if (vpnLatch.await(VPN_CONNECT_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)) vpnService else null
+            if (listenerLatch.await(LISTENER_CONNECT_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)) listenerService else null
         } catch (_: InterruptedException) {
             Thread.currentThread().interrupt()
             null
         }
     }
 
-    private fun bindVpn() {
-        if (vpnBound) return
-        vpnBound = true
+    private fun bindListenerService() {
+        if (listenerBound) return
+        listenerBound = true
         try {
-            val intent = Intent(appContext, CarPlayVpnService::class.java)
+            val intent = Intent(appContext, CarPlayListenerService::class.java)
             if (!appContext.bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)) {
-                vpnBound = false
-                vpnLatch.countDown()
+                listenerBound = false
+                listenerLatch.countDown()
             }
         } catch (_: Throwable) {
-            vpnBound = false
-            vpnLatch.countDown()
+            listenerBound = false
+            listenerLatch.countDown()
         }
     }
 
-    private fun unbindVpn() {
-        if (!vpnBound) return
-        vpnBound = false
+    private fun unbindListenerService() {
+        if (!listenerBound) return
+        listenerBound = false
         try {
             appContext.unbindService(serviceConnection)
         } catch (_: Exception) {
             // The service may have already been unbound.
         }
-        vpnService = null
+        listenerService = null
     }
 
     private fun closeReceivers() {
@@ -2803,7 +2803,7 @@ class CarPlayController(
         private const val HOTSPOT_START_TIMEOUT_MILLIS = 60_000L
         private const val WIFI_P2P_START_TIMEOUT_MILLIS = 20_000L
         private const val PAIR_TIMEOUT_MILLIS = 5 * 60_000L
-        private const val VPN_CONNECT_TIMEOUT_MILLIS = 10_000L
+        private const val LISTENER_CONNECT_TIMEOUT_MILLIS = 10_000L
         private const val CONTROL_LOOP_TIMEOUT_MILLIS = 5 * 60_000L
         private const val LOCATION_CONTROL_LOOP_TIMEOUT_MILLIS = 24 * 60 * 60 * 1_000L
         /** Same reasoning as the availability poll: the grant arrives within milliseconds. */

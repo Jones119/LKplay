@@ -1,8 +1,8 @@
 package com.shilapi.xcertplay.network
 
+import android.app.Service
 import android.content.Context
 import android.content.Intent
-import android.net.VpnService
 import android.os.Binder
 import android.os.IBinder
 import android.os.ParcelFileDescriptor
@@ -31,14 +31,14 @@ import com.shilapi.xcertplay.compat.WorkerThreads
 /**
  * Hosts the AirPlay TCP listener for both wired (userspace lwIP) and wireless (car hotspot) transports.
  *
- * Despite the historical name and the `VpnService` base class, this service never establishes a
- * tunnel and never calls `prepare`: the CS11 kernel has no TUN driver. It is bound with
- * `BIND_AUTO_CREATE` and only serves the listener's lifecycle, `boundPort()` and the accepted
- * sessions.
+ * The service used to be a `VpnService` and is still named after the old VPN transport. It never
+ * establishes a tunnel and never calls `prepare`: the CS11 kernel has no TUN driver. It is a plain
+ * bound `Service` (BIND_AUTO_CREATE) that only owns the listener's lifecycle, `boundPort()` and the
+ * accepted sessions.
  */
-class CarPlayVpnService : VpnService() {
+class CarPlayListenerService : Service() {
     inner class LocalBinder : Binder() {
-        val service: CarPlayVpnService get() = this@CarPlayVpnService
+        val service: CarPlayListenerService get() = this@CarPlayListenerService
     }
 
     sealed class AttachResult {
@@ -85,8 +85,8 @@ class CarPlayVpnService : VpnService() {
 
 
     /**
-     * Starts the AirPlay listener on the local-only Wi-Fi AP address without establishing a VPN or
-     * NCM bridge.
+     * Starts the AirPlay listener on the local-only Wi-Fi AP address without establishing a tunnel
+     * or NCM bridge.
      */
     @Synchronized
     fun attachWireless(
@@ -120,7 +120,7 @@ class CarPlayVpnService : VpnService() {
     }
 
 
-    /** Releases the active AirPlay listener and whichever VPN/NCM transport resources are active. */
+    /** Releases the active AirPlay listener and whichever transport resources are active. */
     @Synchronized
     fun detach() {
         releaseLocked()
