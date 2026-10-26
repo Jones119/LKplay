@@ -253,6 +253,10 @@ class IphoneUsbHost(
             // closes settle and retry briefly before concluding the phone refused it.
             Thread.sleep(RESET_SETTLE_MILLIS)
             for (attempt in 0 until RESET_ATTEMPTS) {
+                // EBUSY comes from a driver still holding an interface - the car's cdc_ncm keeps the
+                // NCM function bound even with the vendor usbmuxd stopped. Force-claiming every
+                // interface and releasing it detaches those drivers before the switch.
+                forceClaimForConfiguration(connection, device)
                 // API 19 has no platform configuration switch; the ioctl is the call, and it reports
                 // errno, which is what separates EBUSY (someone still holds an interface) from a
                 // refusal by the phone.
@@ -280,6 +284,25 @@ class IphoneUsbHost(
     }
 
     /**
+     * Force-claims every interface once and releases it, so kernel drivers let go before the switch.
+     *
+     * The configuration switch answers EBUSY (errno 16) while any interface still has a driver
+     * bound: on this ROM the kernel cdc_ncm keeps the NCM function even with the vendor usbmuxd
+     * stopped. Release is immediate because a held claim would itself block SET_CONFIGURATION.
+     */
+    private fun forceClaimForConfiguration(connection: UsbDeviceConnection, device: UsbDevice) {
+        val claimed = ArrayList<UsbInterface>()
+        for (index in 0 until device.interfaceCount) {
+            val usbInterface = runCatching { device.getInterface(index) }.getOrNull() ?: continue
+            if (claimed.contains(usbInterface)) continue
+            if (runCatching { connection.claimInterface(usbInterface, true) }.getOrDefault(false)) {
+                claimed.add(usbInterface)
+            }
+        }
+        for (usbInterface in claimed) runCatching { connection.releaseInterface(usbInterface) }
+    }
+
+    /**
      * Opens LIVI's USBMUX bulk pipe on the re-enumerated iPhone.
      *
      * This repeats CarPlay configuration selection on the newly opened Android connection and
@@ -290,11 +313,17 @@ class IphoneUsbHost(
     fun openIap2UsbSessionAsync(
         device: UsbDevice,
         executor: Executor,
+        softReplug: Boolean = false,
         callback: (Iap2SessionResult) -> Unit,
     ) {
         executor.execute {
+            // The phone keeps its CarPlay session across an app restart, and only a re-enumeration
+            // clears it. Without one the next 0x4301 is ignored and the control channel merely times
+            // out (docs/_digest/117 §4quater). The vendor request is the software replug; switching
+            // the configuration is not usable here (EBUSY while the vendor usbmuxd holds interfaces).
+            val target = if (softReplug) softReplugAndAwait(device) ?: device else device
             val result = try {
-                Iap2SessionResult.Connected(openIap2UsbSession(device))
+                Iap2SessionResult.Connected(openIap2UsbSession(target))
             } catch (error: IphoneUsbException) {
                 Iap2SessionResult.Failed(error)
             } catch (error: SecurityException) {
@@ -319,6 +348,43 @@ class IphoneUsbHost(
                 throw error
             }
         }
+    }
+
+    /**
+     * Asks the phone to re-enumerate (the software replug) and returns the device that came back.
+     *
+     * Returns null when the request was refused - the usual reason is a missing USB permission on
+     * the object handed over by a previous session - or the phone did not return in time. The caller
+     * then tries the original device, which is no worse than not asking at all.
+     */
+    private fun softReplugAndAwait(
+        device: UsbDevice,
+        timeoutMillis: Long = SOFT_REPLUG_TIMEOUT_MILLIS,
+    ): UsbDevice? {
+        val transition = runCatching { requestCarPlayReenumeration(device) }.getOrNull()
+        if (transition !is TransitionResult.ReenumerationRequested) {
+            Log.i(IphoneCarPlayConfiguration.TAG, "soft replug: request refused ($transition)")
+            return null
+        }
+        Log.i(IphoneCarPlayConfiguration.TAG, "soft replug: requested; waiting for the phone")
+        val deadline = System.nanoTime() + timeoutMillis * 1_000_000L
+        var oldGone = false
+        while (System.nanoTime() < deadline) {
+            val devices = runCatching { usbManager.deviceList }.getOrDefault(emptyMap())
+            if (!oldGone && !devices.containsKey(device.deviceName)) oldGone = true
+            if (oldGone) {
+                devices.values.firstOrNull { matcher.matches(it.vendorId, it.productId) }?.let {
+                    Log.i(IphoneCarPlayConfiguration.TAG, "soft replug: phone back as ${it.deviceName}")
+                    return it
+                }
+            }
+            Thread.sleep(SOFT_REPLUG_POLL_MILLIS)
+        }
+        Log.i(
+            IphoneCarPlayConfiguration.TAG,
+            "soft replug: phone did not come back in ${timeoutMillis}ms",
+        )
+        return null
     }
 
     private fun runTransition(
@@ -626,3 +692,7 @@ sealed class IphoneUsbException(message: String, cause: Throwable? = null) : IOE
     class TimedOut(message: String, cause: Throwable? = null) : IphoneUsbException(message, cause)
     class Protocol(message: String) : IphoneUsbException(message)
 }
+
+/** How long the pre-connect software replug waits for the phone to leave and come back. */
+private const val SOFT_REPLUG_TIMEOUT_MILLIS = 2_500L
+private const val SOFT_REPLUG_POLL_MILLIS = 50L

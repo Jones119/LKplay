@@ -12,6 +12,8 @@ import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
 import android.hardware.usb.UsbDevice
+import android.hardware.usb.UsbDeviceConnection
+import android.hardware.usb.UsbInterface
 import android.hardware.usb.UsbManager
 import android.os.Handler
 import android.os.IBinder
@@ -240,6 +242,9 @@ class CarPlayController(
     private val availabilityPollGeneration = AtomicInteger(0)
     private var permissionPollGeneration = 0
     private var reenumerationAttempts = 0
+
+    /** Set once this controller has done the pre-connect software replug. */
+    private var softReplugAttempted = false
     /** The one startup CarPlay-mode reset runs at most once per attempt (docs/_digest/102 P0-3). */
     private var lastReportedStatus: CarPlayStatus? = null
 
@@ -708,6 +713,10 @@ class CarPlayController(
             when (val result = iphoneHost.requestCarPlayReenumeration(device)) {
                 IphoneUsbHost.TransitionResult.ReenumerationRequested -> {
                     debugLog("wired teardown: iPhone asked to re-enumerate")
+                    // The vendor request is the software replug. Wait for the phone to actually leave
+                    // the bus before the caller tears the process down, or the next connect finds the
+                    // old node and the phone keeps its CarPlay session (doc 117 §4quater).
+                    awaitDeviceReenumeration(device)
                     true
                 }
                 is IphoneUsbHost.TransitionResult.Failed -> {
@@ -759,7 +768,35 @@ class CarPlayController(
             .getOrDefault(false)
         // Logcat on purpose: the app log buffers and loses its tail when the process dies right after.
         Log.i("xcertplay-usb", "wired detach: configuration reset ok=$reset")
+        if (reset) awaitDeviceReenumeration(device)
         return reset
+    }
+
+    /**
+     * Waits until the phone has actually left the bus after the teardown's re-enumeration request
+     * (or the configuration switch when that one succeeded).
+     *
+     * The request alone is not the software replug: the phone has to be seen going away before the
+     * caller tears the process down, or the next connect finds the same node and the phone keeps its
+     * CarPlay session - 0x4301 is sent and nothing comes back (docs/_digest/117 §4quater).
+     */
+    private fun awaitDeviceReenumeration(device: UsbDevice) {
+        val deadline = System.nanoTime() + RESET_REENUMERATION_WAIT_MILLIS * 1_000_000L
+        val original = device.deviceName
+        var waited = 0L
+        while (System.nanoTime() < deadline) {
+            val devices = runCatching { requireUsbManager().deviceList }.getOrDefault(emptyMap())
+            if (!devices.containsKey(original)) {
+                debugLog("wired teardown: phone re-enumerated waitedMs=$waited")
+                return
+            }
+            Thread.sleep(RESET_REENUMERATION_POLL_MILLIS)
+            waited += RESET_REENUMERATION_POLL_MILLIS
+        }
+        debugLog(
+            "wired teardown: phone still on $original after ${RESET_REENUMERATION_WAIT_MILLIS}ms " +
+                "(the vendor usbmuxd may still be holding it)",
+        )
     }
 
     override fun close() {
@@ -1697,7 +1734,7 @@ class CarPlayController(
                                 }}",
                         )
                         if (configurationReady) {
-                            openDataPaths(result.device)
+                            softReplugThenOpenDataPaths(result.device)
                         } else if (reenumerationAttempts < MAXIMUM_REENUMERATION_ATTEMPTS) {
                             beginReenumeration(result.device)
                         } else {
@@ -1785,6 +1822,125 @@ class CarPlayController(
         )
     }
 
+    /**
+     * Runs the software replug once per controller, then opens the data paths.
+     *
+     * The phone keeps its CarPlay session across an app restart, and only a real USB re-enumeration
+     * clears it. The switch blocks on claim/release and enumeration, so it stays on the USB worker;
+     * the connect is posted back after it, never overlapping it (docs/_digest/117 §4quater).
+     */
+    private fun softReplugThenOpenDataPaths(device: UsbDevice) {
+        if (!softReplugBeforeConnect() || softReplugAttempted) {
+            openDataPaths(device)
+            return
+        }
+        softReplugAttempted = true
+        executor.execute {
+            val target = softReplugWithConfigurationRoundTrip(device) ?: device
+            mainHandler.post { if (!closed) openDataPaths(target) }
+        }
+    }
+
+    /**
+     * Switches the phone off its CarPlay configuration and back, waiting for a re-enumeration each leg.
+     *
+     * Force-claiming every interface makes SET_CONFIGURATION possible (it answers EBUSY while a driver
+     * holds one), so this is the software equivalent of unplugging and replugging the cable - the only
+     * thing that clears the phone's old CarPlay session. Returns the device that came back.
+     */
+    private fun softReplugWithConfigurationRoundTrip(device: UsbDevice): UsbDevice? {
+        val manager = requireUsbManager()
+        val carPlayId: Int
+        val otherId: Int
+        val first = manager.openDevice(device) ?: run {
+            debugLog("soft replug: could not open the iPhone")
+            return null
+        }
+        try {
+            val raw = first.rawDescriptors ?: run {
+                debugLog("soft replug: no raw descriptors")
+                return null
+            }
+            carPlayId = carPlayConfigurationId(raw) ?: run {
+                debugLog("soft replug: descriptors carry no USBMUX+NCM configuration")
+                return null
+            }
+            otherId = otherConfigurationId(raw, carPlayId) ?: run {
+                debugLog("soft replug: no other NCM configuration to switch to")
+                return null
+            }
+            debugLog("soft replug: switching ${device.deviceName} to $otherId, then back to $carPlayId")
+            if (!switchConfiguration(first, device, otherId)) {
+                debugLog("soft replug: switch to $otherId failed")
+                return null
+            }
+        } finally {
+            runCatching { first.close() }
+        }
+        val afterOther = awaitReenumeratedDevice(SOFT_REPLUG_SETTLE_MILLIS) ?: run {
+            debugLog("soft replug: the phone did not come back on $otherId")
+            return null
+        }
+        val second = manager.openDevice(afterOther) ?: run {
+            debugLog("soft replug: could not reopen the phone")
+            return null
+        }
+        try {
+            if (!switchConfiguration(second, afterOther, carPlayId)) {
+                debugLog("soft replug: switch back to $carPlayId failed")
+                return null
+            }
+        } finally {
+            runCatching { second.close() }
+        }
+        val afterCarPlay = awaitReenumeratedDevice(SOFT_REPLUG_SETTLE_MILLIS)
+        debugLog("soft replug: done device=${afterCarPlay?.deviceName ?: "not re-enumerated"}")
+        return afterCarPlay ?: afterOther
+    }
+
+    /** A configuration other than the CarPlay one that still carries NCM (id 5 on this car). */
+    private fun otherConfigurationId(raw: ByteArray, carPlayId: Int): Int? =
+        LegacyNcmDescriptors.parse(raw)
+            .firstOrNull { it.id != carPlayId && it.hasNcm }
+            ?.id
+
+    /** Force-claims the interfaces, then switches the configuration, retrying while a driver rebinds. */
+    private fun switchConfiguration(
+        connection: UsbDeviceConnection,
+        device: UsbDevice,
+        id: Int,
+    ): Boolean {
+        for (attempt in 0 until CONFIGURATION_SWITCH_ATTEMPTS) {
+            val claimed = claimAllForConfigurationSwitch(connection, device)
+            releaseClaimed(connection, claimed)
+            Thread.sleep(CONFIGURATION_SWITCH_SETTLE_MILLIS)
+            val errno = LegacyUsbNative.setConfiguration(connection.fileDescriptor, id)
+            debugLog(
+                "soft replug: set id=$id attempt=$attempt claimed=${claimed.size} " +
+                    "ioctl=$errno (${LegacyUsbNative.describe(errno)})",
+            )
+            if (errno == 0) return true
+        }
+        return false
+    }
+
+    /**
+     * Waits a bounded time for a configuration switch to settle, then returns the Apple device listed now.
+     *
+     * A re-enumeration is not reliably observable from here: the online usbmuxd switches the phone
+     * straight back to the CarPlay configuration, and the node often keeps its deviceName. Looking for
+     * "the old node left" therefore reports a false negative, so the wait is time-boxed and the caller
+     * continues with whatever the manager lists afterwards.
+     */
+    private fun awaitReenumeratedDevice(settleMillis: Long): UsbDevice? {
+        Thread.sleep(settleMillis)
+        return runCatching {
+            requireUsbManager().deviceList.values.firstOrNull {
+                it.vendorId == IphoneUsbMatcher.APPLE_VENDOR_ID
+            }
+        }.getOrNull()
+    }
+
     private fun openDataPaths(device: UsbDevice) {
         phase = Phase.DATAPATHS
         wiredDevice = device
@@ -1794,7 +1950,16 @@ class CarPlayController(
         iphoneHost.openIap2UsbSessionAsync(device, executor) { result ->
             when (result) {
                 is IphoneUsbHost.Iap2SessionResult.Connected -> {
+                    var earlyMux: Iap2UsbMuxHost? = null
                     try {
+                        // Experiment E-1 (docs/_digest/117): the car's usbmuxd opens the USBMUX session the
+                        // instant the iPhone attaches, and the NCM function only returns complete parameters
+                        // while a mux session already exists. Opening ours before the NCM negotiation
+                        // reproduces that condition; `debug.diplay.ncm_after_mux=0` restores the old order.
+                        if (openMuxBeforeNcm()) {
+                            earlyMux = Iap2UsbMuxHost.open(result.session, onDiagnostic = ::connectionDiagnostic)
+                            debugLog("wired USBMUX host opened before NCM (ncm_after_mux default)")
+                        }
                         // Both older wired data paths are gone from this fork: the kernel cdc_ncm netdev
                         // needed root+adb to fire (docs/_digest/49) and the VpnService/TUN transport was
                         // deleted in 6620ad61 because the CS11 kernel has no TUN. The userspace lwIP
@@ -1816,9 +1981,22 @@ class CarPlayController(
                         }
                         if (userspaceLink == null) {
                             debugLog(decision.reason)
+                            // A short GET_NTB_PARAMETERS answer is what a phone left on its non-CarPlay
+                            // configuration returns. Ask it to re-enumerate into the CarPlay one and try
+                            // again; the vendor request is the software equivalent of a replug (117 §4ter).
+                            if (decision.userspace && ncmConfigurationRetry() &&
+                                reenumerationAttempts < MAXIMUM_REENUMERATION_ATTEMPTS
+                            ) {
+                                debugLog("userspace NCM failed; re-enumerating into the CarPlay configuration")
+                                runCatching { earlyMux?.close() }
+                                result.session.close()
+                                beginReenumeration(device)
+                                return@openIap2UsbSessionAsync
+                            }
                         }
-                        runStack(result.session)
+                        runStack(result.session, earlyMux)
                     } catch (error: Throwable) {
+                        runCatching { earlyMux?.close() }
                         result.session.close()
                         fail(error)
                     }
@@ -1827,6 +2005,65 @@ class CarPlayController(
             }
         }
     }
+
+
+    /**
+     * Force-claims every interface so the kernel drivers let go of the device.
+     *
+     * Without this the switch answers EBUSY (errno 16) even with the vendor usbmuxd stopped: on this
+     * ROM the kernel cdc_ncm keeps the NCM function bound. The caller releases exactly what was claimed.
+     */
+    private fun claimAllForConfigurationSwitch(
+        connection: UsbDeviceConnection,
+        device: UsbDevice,
+    ): List<UsbInterface> {
+        val claimed = ArrayList<UsbInterface>()
+        for (index in 0 until device.interfaceCount) {
+            val usbInterface = runCatching { device.getInterface(index) }.getOrNull() ?: continue
+            if (claimed.contains(usbInterface)) continue
+            if (runCatching { connection.claimInterface(usbInterface, true) }.getOrDefault(false)) {
+                claimed.add(usbInterface)
+            }
+        }
+        return claimed
+    }
+
+    private fun releaseClaimed(connection: UsbDeviceConnection, claimed: List<UsbInterface>) {
+        for (usbInterface in claimed) runCatching { connection.releaseInterface(usbInterface) }
+    }
+
+    /** The configuration that carries USBMUX and NCM, preferring Apple Ethernet. */
+    private fun carPlayConfigurationId(raw: ByteArray): Int? {
+        val candidates = LegacyNcmDescriptors.parse(raw).filter { it.hasUsbMux && it.hasNcm }
+        return (candidates.firstOrNull { configuration ->
+            configuration.interfaces.any { it.isAppleEthernet }
+        } ?: candidates.firstOrNull())?.id
+    }
+
+
+    /** `debug.diplay.soft_replug=0` disables the pre-connect software replug (on by default). */
+    private fun softReplugBeforeConnect(): Boolean =
+        systemProperty("debug.diplay.soft_replug")?.trim() != "0"
+
+    /** `debug.diplay.ncm_config_retry=0` disables the re-enumeration after a short NCM answer. */
+    private fun ncmConfigurationRetry(): Boolean =
+        systemProperty("debug.diplay.ncm_config_retry")?.trim() != "0"
+
+    /**
+     * Experiment E-1's switch: `debug.diplay.ncm_after_mux=0` restores the old order (NCM first).
+     *
+     * Default is the new order because the car's usbmuxd opens a mux session the moment the iPhone
+     * attaches, and NCM only answers with complete parameters while one exists (docs/_digest/117).
+     */
+    private fun openMuxBeforeNcm(): Boolean =
+        systemProperty("debug.diplay.ncm_after_mux")?.trim() != "0"
+
+    /** `debug.diplay.*` reads; API 19 exposes no public SystemProperties. */
+    private fun systemProperty(name: String): String? = runCatching {
+        Class.forName("android.os.SystemProperties")
+            .getMethod("get", String::class.java)
+            .invoke(null, name) as? String
+    }.getOrNull()
 
     /**
      * Opens the API-19 userspace NCM bridge and starts lwIP on it (docs/_digest/58 §7).
@@ -2061,17 +2298,23 @@ class CarPlayController(
         }
     }
 
-    private fun runStack(usbSession: Iap2UsbSession) {
+    private fun runStack(usbSession: Iap2UsbSession, preopenedMux: Iap2UsbMuxHost? = null) {
         phase = Phase.CONTROL
         var ncmOwnedLocally = true
         // Set once the userspace link has handed the listener to the service: until then the link is ours to
         // release, exactly like `ncmOwnedLocally` above.
         var userspaceAttached = false
         try {
-            if (closed) return
-            val mux = Iap2UsbMuxHost.open(usbSession, onDiagnostic = ::connectionDiagnostic)
+            if (closed) {
+                runCatching { preopenedMux?.close() }
+                return
+            }
+            val mux = preopenedMux ?: Iap2UsbMuxHost.open(usbSession, onDiagnostic = ::connectionDiagnostic)
             this.mux = mux
-            debugLog("wired USBMUX host opened")
+            debugLog(
+                if (preopenedMux == null) "wired USBMUX host opened"
+                else "wired USBMUX host reused (opened before NCM)",
+            )
             onStatus(CarPlayStatus.Pairing)
             val pairingClient = LockdownPairingClient(mux)
             val savedPairRecord = loadPairRecord()
@@ -2822,6 +3065,17 @@ class CarPlayController(
         private const val RFCOMM_CONNECT_TIMEOUT_MILLIS = 15_000L
         private const val BLUETOOTH_ENABLE_TIMEOUT_MILLIS = 6_000L
         private const val MAXIMUM_REENUMERATION_ATTEMPTS = 2
+
+        /** How long teardown waits for the phone to re-enumerate after the configuration switch. */
+        private const val RESET_REENUMERATION_WAIT_MILLIS = 1_500L
+        private const val RESET_REENUMERATION_POLL_MILLIS = 50L
+
+        /** SET_CONFIGURATION is retried after force-claiming the interfaces (EBUSY while one is bound). */
+        private const val CONFIGURATION_SWITCH_ATTEMPTS = 2
+        private const val CONFIGURATION_SWITCH_SETTLE_MILLIS = 150L
+
+        /** Each leg of the pre-connect replug waits this long for the switch to settle. */
+        private const val SOFT_REPLUG_SETTLE_MILLIS = 1_200L
         private const val EXECUTOR_CLOSE_TIMEOUT_MILLIS = 2_000L
         private const val ADAPTER_ADDRESS_PLACEHOLDER = "02:00:00:00:00:00"
         private val BLUETOOTH_ADDRESS = Regex("^[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){5}$")
