@@ -630,5 +630,8 @@
 
     <string name="experimental_surface_view">使用 SurfaceView（实验）</string>
     <string name="experimental_surface_view_description">改用 SurfaceView 承载 CarPlay 画面，CPU 占用明显更低；但可能丢帧，且「画面调节」和圆角遮罩不可用。下次启动 CarPlay 生效。</string>
+    <string name="call_banner_incoming">来电</string>
+    <string name="call_banner_active">通话中</string>
+    <string name="call_banner_answer">接听</string>
+    <string name="call_banner_end">挂断</string>
 </resources>
-

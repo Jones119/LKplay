@@ -308,6 +308,8 @@ class CarPlayHostActivity : ComponentActivity() {
     private var externalActivityInProgress = false
     private var sink: AndroidMediaSink? = null
     private var controller: CarPlayController? = null
+    /** The app-drawn answer / hang-up banner; null until this activity has shown CarPlay once. */
+    private var callBanner: CallBannerOverlay? = null
     private var currentSurface: Surface? = null
     private var currentSurfaceTexture: SurfaceTexture? = null
     /** Set when the video surface is destroyed; a fresh activity is the only working recovery. */
@@ -915,6 +917,40 @@ class CarPlayHostActivity : ComponentActivity() {
                 onEnd = { controller?.endCall() },
             )
         }
+        attachCallBanner()
+    }
+
+    /**
+     * Draws the answer / hang-up banner over whatever screen the driver is on.
+     *
+     * With a CarPlay box the head unit's own phone UI drew it, because HFP carried the call; this project
+     * releases HFP so calls stay inside CarPlay, so the banner is ours (docs/_digest/121 §8). It is a
+     * window rather than a view: the launcher and the task page are exactly where the box's banner was
+     * seen, and this app is not visible there. Its keys are the same CarPlay telephony HID the cluster
+     * card's keys use, read from the controller per press.
+     *
+     * Deliberately independent of the cluster switch: a driver who turned the instrument card off still
+     * wants to be able to answer.
+     */
+    private fun attachCallBanner() {
+        val banner = callBanner ?: runCatching {
+            CallBannerOverlay(this) { line -> appendLog(line) }
+        }.onFailure {
+            Log.w(TAG, "call banner unavailable", it)
+        }.getOrNull()?.also { callBanner = it } ?: return
+        com.shilapi.xcertplay.glance.CarPlayGlance.callListener = { notice ->
+            mainHandler.post {
+                banner.update(notice, { controller?.answerCall() }, { controller?.endCall() })
+            }
+        }
+        // A call that was already up when this activity attached still gets its banner.
+        mainHandler.post {
+            banner.update(
+                com.shilapi.xcertplay.glance.CarPlayGlance.currentBanner(),
+                { controller?.answerCall() },
+                { controller?.endCall() },
+            )
+        }
     }
 
     // Hardware navigation belongs to the iPhone-rendered CarPlay UI, not Android View focus.
@@ -1002,6 +1038,11 @@ class CarPlayHostActivity : ComponentActivity() {
         // the covers it serves must stay up until the session really ends. That teardown lives in the
         // host's own `shutdown`, which calls `VendorClusterBridge.release`; see `detach`.
         runCatching { com.shilapi.xcertplay.media.VendorClusterBridge.detach() }
+        // The banner is a window of its own: it would outlive this activity's window if it were left
+        // behind, and no card can be answered once the session's UI is gone.
+        com.shilapi.xcertplay.glance.CarPlayGlance.callListener = null
+        callBanner?.release()
+        callBanner = null
         nightModeController.pause()
         pictureBinding?.close()
         pictureBinding = null

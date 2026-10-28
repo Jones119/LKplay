@@ -82,6 +82,15 @@ object CarPlayGlance {
     @Volatile var listener: ((Snapshot) -> Unit)? = null
 
     /**
+     * What the head unit's own call banner should show -- or null for "nothing" -- on the cluster worker.
+     *
+     * A separate hand-off from [callSubmit] because the banner is drawn by this app rather than by the
+     * vendor's service: the caller, and whether there is anything to answer, are the same facts either
+     * way, but the banner has to disappear the moment the card does (docs/_digest/121).
+     */
+    @Volatile var callListener: ((CallBanner?) -> Unit)? = null
+
+    /**
      * The single thread every cluster push runs on, created on first use.
      *
      * One snapshot becomes up to six *synchronous* binder transactions into the vendor's DIM service,
@@ -223,11 +232,18 @@ object CarPlayGlance {
      * pushed again -- the same rule the guidance card follows.
      */
     private fun publishCallLocked() {
-        val next = call.current() ?: voiceCall
+        val reported = call.current()
+        val next = reported ?: voiceCall
         if (callSubmitted && next == lastCall) return
         lastCall = next
         callSubmitted = true
-        submitCall(next)
+        submitCall(next, inferred = reported == null && voiceCall != null)
+    }
+
+    /** The banner [callListener] would be handed right now; the host reads it when it re-attaches. */
+    fun currentBanner(): CallBanner? = synchronized(this) {
+        val reported = call.current()
+        callBannerFor(reported ?: voiceCall, reported == null && voiceCall != null, VOICE_CALL_NAME)
     }
 
     private fun publishLocked(): Snapshot? {
@@ -273,10 +289,19 @@ object CarPlayGlance {
     /**
      * Hands one call change to [clusterWorker] without waiting for it; the same rule as
      * [submitToCluster], and for the same reason: it is called with this object's monitor held.
+     *
+     * The banner is built here, while the monitor is held and the call is known, and only handed over on
+     * the worker: the vendor push and the host's window update then happen on the same serialised thread,
+     * so the two surfaces of one call can never be applied out of order.
      */
-    private fun submitCall(call: ClusterCall?) {
+    private fun submitCall(call: ClusterCall?, inferred: Boolean = false) {
         val submit = callSubmit
-        clusterWorker.execute { runCatching { submit(call) } }
+        val listener = callListener
+        val banner = callBannerFor(call, inferred, VOICE_CALL_NAME)
+        clusterWorker.execute {
+            runCatching { submit(call) }
+            if (listener != null) runCatching { listener(banner) }
+        }
     }
 
     private const val TAG = "DiPlay-Cluster"

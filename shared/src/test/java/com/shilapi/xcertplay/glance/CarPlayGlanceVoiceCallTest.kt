@@ -41,6 +41,7 @@ class CarPlayGlanceVoiceCallTest {
         originalCallSubmit = CarPlayGlance.callSubmit
         originalClusterSubmit = CarPlayGlance.clusterSubmit
         CarPlayGlance.listener = null
+        CarPlayGlance.callListener = null
         // Neither reset may reach the real bridge from a unit test.
         CarPlayGlance.clusterSubmit = {}
         CarPlayGlance.callSubmit = {}
@@ -53,6 +54,7 @@ class CarPlayGlanceVoiceCallTest {
         CarPlayGlance.callSubmit = originalCallSubmit
         CarPlayGlance.clusterSubmit = originalClusterSubmit
         CarPlayGlance.listener = null
+        CarPlayGlance.callListener = null
         CarPlayGlance.setConnected(true)
         CarPlayGlance.setConnected(false)
     }
@@ -155,4 +157,39 @@ class CarPlayGlanceVoiceCallTest {
 
     private fun await(pushed: BlockingQueue<Push>): Push =
         pushed.poll(5, TimeUnit.SECONDS) ?: throw AssertionError("no call reached the cluster push thread")
+
+    @Test
+    fun theBannerFollowsTheInferredCallAndGoesAwayWithIt() {
+        val banners = LinkedBlockingQueue<Notice>()
+        CarPlayGlance.callListener = { banner -> banners += Notice(banner) }
+        CarPlayGlance.setConnected(true)
+
+        CarPlayGlance.onVoiceCall(true, 1_000L)
+
+        val shown = awaitNotice(banners).banner!!
+        assertEquals(CarPlayGlance.VOICE_CALL_NAME, shown.title)
+        // Known only from its audio: there is no ringing phase to answer.
+        assertFalse(shown.ringing)
+        assertTrue(shown.inferred)
+
+        CarPlayGlance.onVoiceCall(false, 2_000L)
+        assertNull("the banner must go when the call does", awaitNotice(banners).banner)
+    }
+
+    @Test
+    fun aTelephoneCallLeavesTheBannerAlone() {
+        val banners = LinkedBlockingQueue<Notice>()
+        CarPlayGlance.callListener = { banner -> banners += Notice(banner) }
+        CarPlayGlance.setConnected(true)
+
+        // A number is what distinguishes a call CarPlay already draws from a VOIP one.
+        CarPlayGlance.onFrame(callState(status = 2))
+
+        assertNull(awaitNotice(banners).banner)
+    }
+
+    private data class Notice(val banner: CallBanner?)
+
+    private fun awaitNotice(banners: BlockingQueue<Notice>): Notice =
+        banners.poll(5, TimeUnit.SECONDS) ?: throw AssertionError("the banner was never handed over")
 }
