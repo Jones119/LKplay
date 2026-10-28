@@ -77,8 +77,8 @@ class ClusterCallStateTest {
 
     @Test
     fun aFrameThatNamesNoCallIsIgnored() {
-        // Nothing to attribute this to: the reference keys it under the empty string, which would let an
-        // unattributable update take the card. It must not, and it must not change the card either.
+        // An unattributable update is accepted on its own (a VOIP call has no number, docs/_digest/121),
+        // but it may never take the card from a call the iPhone can name.
         state.accept(callState(status = 2))
         assertFalse(state.accept(frame(ClusterCallState.CALL_STATE_UPDATE) { u8(2, 4) }))
         assertEquals(ClusterCall.Phase.RINGING, state.current()!!.phase)
@@ -168,5 +168,53 @@ class ClusterCallStateTest {
         // Nothing is left to resurrect: the same ringing call is a fresh card, not a remembered one.
         assertTrue(state.accept(callState(status = 2, uuid = "uuid-a")))
         assertEquals(ClusterCall.Phase.RINGING, state.current()!!.phase)
+    }
+
+    /**
+     * A VOIP call has no telephone number, so its frames can carry only a display name and a status.
+     * Dropping those frames is why the cluster stayed empty through a WeChat call while the same car
+     * showed an ordinary telephone call (docs/_digest/121).
+     */
+    @Test
+    fun aCallWithNeitherANumberNorAUuidStillBecomesTheCard() {
+        assertTrue(state.accept(callState(status = 2, remote = null, uuid = null)))
+
+        val card = state.current()!!
+        assertEquals(ClusterCall.Phase.RINGING, card.phase)
+        assertEquals("张三", card.name)
+        assertEquals("", card.number)
+    }
+
+    @Test
+    fun theAnonymousCallIsTrackedThroughItsStatesAndEnds() {
+        state.accept(callState(status = 2, remote = null, uuid = null))
+        now = 4_000L
+        assertTrue(state.accept(callState(status = 4, remote = null, display = null, uuid = null)))
+        assertEquals(ClusterCall.Phase.ACTIVE, state.current()!!.phase)
+        assertEquals("the name carries over a status-only frame", "张三", state.current()!!.name)
+        assertEquals(4_000L, state.current()!!.activeSinceMillis)
+
+        assertTrue(state.accept(callState(status = 0, remote = null, display = null, uuid = null)))
+        assertNull(state.current())
+    }
+
+    @Test
+    fun anAnonymousFrameCannotTakeTheCardFromANamedCall() {
+        state.accept(callState(status = 4))
+
+        assertFalse("an unattributable ringing must not shadow a real call", state.accept(callState(status = 2, remote = null, uuid = null)))
+        assertEquals(ClusterCall.Phase.ACTIVE, state.current()!!.phase)
+        assertEquals("张三", state.current()!!.name)
+    }
+
+    @Test
+    fun aNamedCallEvictsTheAnonymousOne() {
+        // The anonymous frame was either that same call before it was identified, or noise; either way it
+        // must not be left behind ringing after the named call ends.
+        state.accept(callState(status = 2, remote = null, uuid = null))
+        assertTrue(state.accept(callState(status = 4)))
+
+        assertTrue(state.accept(callState(status = 0)))
+        assertNull(state.current())
     }
 }

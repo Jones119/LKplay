@@ -184,8 +184,12 @@ object CarPlayGlance {
         synchronized(this) {
             if (active) {
                 if (voiceCall != null) return
-                if (call.current() != null) {
-                    Log.i(TAG, "voice call stream belongs to the call state; no second card")
+                val reported = call.current()
+                if (reported != null) {
+                    // The phase is in the line because a ringing card that never turns into an established
+                    // one while the audio is two-way means the iPhone stopped reporting the call mid-way,
+                    // which is a different fault from "nothing was ever reported".
+                    Log.i(TAG, "voice call stream belongs to the call state (${reported.phase}); no second card")
                     return
                 }
                 voiceCall = ClusterCall(ClusterCall.Phase.ACTIVE, VOICE_CALL_NAME, "", confirmedAtMillis)
@@ -201,6 +205,14 @@ object CarPlayGlance {
 
     /** True while a VOIP call is being shown; the cluster key handler logs it with the key it relays. */
     fun voiceCallActive(): Boolean = synchronized(this) { voiceCall != null }
+
+    /**
+     * The card the cluster should be showing right now, or null when there is none.
+     *
+     * The bridge's keep-alive re-sends this; it is read from the same place [publishCallLocked] reads, so
+     * a repeated card can never disagree with the last one submitted.
+     */
+    internal fun currentCallCard(): ClusterCall? = synchronized(this) { call.current() ?: voiceCall }
 
     /**
      * Hands the cluster the card it should be showing: the iPhone's own call state when there is one,

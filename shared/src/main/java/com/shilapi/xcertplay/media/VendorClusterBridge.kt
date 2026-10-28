@@ -131,6 +131,16 @@ object VendorClusterBridge {
     @Volatile
     private var pendingCall: ClusterCallUpdate? = null
 
+    /**
+     * When the card that is on the cluster was last repeated, for the call keep-alive.
+     *
+     * A call card is pushed only when it changes, and the vendor's phone card never re-sends itself
+     * (`PhoneDimInteraction.onDimScreenResend` is an empty body, docs/_digest/86 §2.4 S2), so a push lost
+     * to the template-negotiation window or to a DIM restart stays lost for the rest of the call. The
+     * media card has the same exposure and is repeated every 10 s; this is the same rule for calls.
+     */
+    private val callKeepalive = ClusterCallKeepalive()
+
     /** When the next while-playing re-push or post-failure retry is due (G7). */
     private val pushSchedule = ClusterPushSchedule()
 
@@ -474,6 +484,7 @@ object VendorClusterBridge {
     internal fun repushTick() {
         if (!enabled) return
         flushPendingCall()
+        keepCallAlive()
         val now = lastMedia ?: return
         if (!pushSchedule.isDue(elapsedNow(), now.playing)) return
         // Logged before the dispatch, and worded as "due": whether anything actually reached the vendor
@@ -766,7 +777,7 @@ object VendorClusterBridge {
      *
      * Internal because [ClusterCall] is: the only caller is `CarPlayGlance`, in this module.
      */
-    internal fun pushCall(call: ClusterCall?) {
+    internal fun pushCall(call: ClusterCall?, force: Boolean = false) {
         if (!enabled) return
         val context = appContext ?: return
         val update = clusterCallUpdate(call, elapsedNow())
@@ -775,7 +786,7 @@ object VendorClusterBridge {
         startRepushLoop()
         synchronized(pushLock) {
             pendingCall = update
-            dispatchCall(context, update)
+            dispatchCall(context, update, force)
         }
     }
 
@@ -785,10 +796,15 @@ object VendorClusterBridge {
      * A push that the gate coalesces stays pending; a push that *fails* also stays pending, because the
      * vendor can hand back an interaction whose internal DI is null or a binder left dead by a service
      * restart, and both look exactly like success from here.
+     *
+     * [force] skips the gate for the keep-alive: an identical card is refused there, and the vendor's own
+     * de-duplication makes repeating one cost a binder call and nothing else while its service is alive --
+     * while a service that restarted has forgotten the card, and that is exactly the case worth repeating
+     * for (the media path paid for this lesson, docs/_digest/119).
      */
-    private fun dispatchCall(context: Context, update: ClusterCallUpdate): Boolean {
+    private fun dispatchCall(context: Context, update: ClusterCallUpdate, force: Boolean = false): Boolean {
         val now = elapsedNow()
-        if (!callPushGate.shouldPush(update, now)) return false
+        if (!force && !callPushGate.shouldPush(update, now)) return false
         val target = phoneInteraction(context) ?: return false
         val info = callInfo(update) ?: return false
         if (!call(target, "updateCallInfo", info)) {
@@ -798,6 +814,7 @@ object VendorClusterBridge {
             return false
         }
         callPushGate.notePushed(update, now)
+        callKeepalive.notePushed(now)
         pendingCall = null
         // One line per change: this is what the on-car check greps to tell "we sent it" from "the card
         // never appeared" -- the second is the vendor's template-negotiation window (docs/_digest/66 §7).
@@ -810,6 +827,24 @@ object VendorClusterBridge {
         val update = pendingCall ?: return
         val context = appContext ?: return
         synchronized(pushLock) { dispatchCall(context, update) }
+    }
+
+    /**
+     * Repeats the call card that is on the cluster, or does nothing.
+     *
+     * Runs on the 2 s tick and is gated to [CLUSTER_CALL_KEEPALIVE_MILLIS], so a call costs one extra
+     * binder call every ten seconds. The first tick after a card exists is deliberately immediate: the
+     * window a push is most likely to be lost in is the one right after it (the vendor's template
+     * negotiation, docs/_digest/66 §7), and a repeated card is free while its service is alive.
+     */
+    private fun keepCallAlive() {
+        // A payload that is still owed is the tick's business, and it may be mid-dispatch right now.
+        if (pendingCall != null) return
+        val call = CarPlayGlance.currentCallCard() ?: return
+        val now = elapsedNow()
+        if (!callKeepalive.isDue(now)) return
+        Log.i(TAG, "cluster call keepalive")
+        pushCall(call, force = true)
     }
 
     /**
@@ -1364,6 +1399,31 @@ internal class ClusterCallPushGate(private val minIntervalMillis: Long = CLUSTER
     /** Drops the record, so the next change is dispatched even if it repeats the last payload. */
     fun forget() {
         last = null
+    }
+}
+
+/** How long the call card on the cluster is trusted before it is repeated. */
+internal const val CLUSTER_CALL_KEEPALIVE_MILLIS = 10_000L
+
+/**
+ * When the call card is due to be repeated, as a pure rule over an injected clock.
+ *
+ * Never pushed yet means due: the first repeat is the one that repairs a card lost to the vendor's
+ * template-negotiation window right after it was submitted, and the media card's equivalent re-push
+ * exists for exactly that reason.
+ */
+internal class ClusterCallKeepalive(private val intervalMillis: Long = CLUSTER_CALL_KEEPALIVE_MILLIS) {
+    private var lastAt: Long? = null
+
+    /** True when a card pushed at [lastAt] is old enough to repeat. */
+    fun isDue(nowMillis: Long): Boolean {
+        val last = lastAt ?: return true
+        return nowMillis - last >= intervalMillis
+    }
+
+    /** A call payload reached the vendor at [nowMillis]. */
+    fun notePushed(nowMillis: Long) {
+        lastAt = nowMillis
     }
 }
 

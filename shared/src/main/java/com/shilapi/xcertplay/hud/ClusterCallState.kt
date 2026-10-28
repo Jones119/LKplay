@@ -1,5 +1,6 @@
 package com.shilapi.xcertplay.hud
 
+import android.util.Log
 import com.shilapi.xcertplay.iap2.body.Iap2BodyReader
 import com.shilapi.xcertplay.iap2.wire.Iap2Frame
 
@@ -45,6 +46,14 @@ internal data class ClusterCall(
  * `CarPlayCallState`, which is covered by tests there); only the BYD-specific display half was dropped.
  * The card's own layout, its buttons and their labels belong to the vendor service and are not ours to
  * choose (docs/_digest/86 §2).
+ *
+ * **A third-party call is not absent from these frames.** On 2026-10-28 the driver reported that a WeChat
+ * voice call *does* reach the cluster sometimes -- and that the same car showed it with a CarPlay box
+ * before -- so the iPhone does send 0x4155 for it, at least sometimes, and a missing card is our fault
+ * rather than the phone's. The one rule that could drop such a call wholesale was the identity rule: a
+ * VOIP call has no telephone number, so its frames can carry only a display name and a status. They are
+ * accepted now (see [ANONYMOUS]), and every frame leaves one trace line so the next car run can say
+ * whether the phone stayed silent or the frame arrived and was applied.
  */
 internal class ClusterCallState(private val clock: () -> Long = System::currentTimeMillis) {
     private data class Call(val status: Int, val name: String, val number: String, val activeSince: Long?)
@@ -59,23 +68,46 @@ internal class ClusterCallState(private val clock: () -> Long = System::currentT
      */
     fun accept(frame: Iap2Frame): Boolean {
         if (frame.messageId != CALL_STATE_UPDATE) return false
-        val body = runCatching { Iap2BodyReader.of(frame) }.getOrNull() ?: return false
-        val status = runCatching { body.optionalU8(STATUS) }.getOrNull() ?: return false
+        val body = runCatching { Iap2BodyReader.of(frame) }.getOrNull()
+        if (body == null) {
+            // Deliberately without the payload: `Iap2Frame.payload` hands out a copy, and a trace line is
+            // not worth copying a frame for.
+            Log.i(TAG, "call state frame unreadable")
+            return false
+        }
+        val status = runCatching { body.optionalU8(STATUS) }.getOrNull()
+        if (status == null) {
+            Log.i(TAG, "call state frame without a status")
+            return false
+        }
         val remote = runCatching { body.optionalString(REMOTE_ID) }.getOrNull()?.trim().orEmpty()
         val display = runCatching { body.optionalString(DISPLAY_NAME) }.getOrNull()?.trim().orEmpty()
-        val id = runCatching { body.optionalString(CALL_UUID) }.getOrNull()?.takeIf { it.isNotBlank() } ?: remote
-        // A frame that names no call at all cannot be applied to one. The reference implementation keys
-        // it under the empty string, which lets an unattributable "ringing" take the card over -- and a
-        // card is exactly what this class exists to hand to the dashboard. Ignoring it is the safe half
-        // of that behaviour, and it costs nothing: several calls can be live at once, so the frames that
-        // matter have to name their call anyway.
-        if (id.isEmpty()) return false
+        val uuid = runCatching { body.optionalString(CALL_UUID) }.getOrNull()?.trim()?.takeIf { it.isNotEmpty() }
+        val id = uuid ?: remote
+        // One line per frame, always on. Frames are rare (a handful per call) and this is the only place
+        // that can answer why a call that the car does show sometimes never reached the cluster: what the
+        // iPhone actually put in the frame, and whether it was applied (docs/_digest/121).
+        Log.i(
+            TAG,
+            "call state status=$status nameChars=${display.length} remoteChars=${remote.length}" +
+                " uuid=${uuid != null} key=${if (id.isEmpty()) "anonymous" else "named"}" +
+                " calls=${calls.size}",
+        )
+        if (id.isNotEmpty()) {
+            // A call the iPhone can name takes the card from an unattributable one: the anonymous frame
+            // was either that same call before it was identified, or noise.
+            if (calls.remove(ANONYMOUS) != null) Log.i(TAG, "anonymous call dropped: a named call is in play")
+        } else if (calls.keys.any { it.isNotEmpty() }) {
+            Log.i(TAG, "anonymous call state ignored: a named call owns the card")
+            return false
+        }
+        val key = id.ifEmpty { ANONYMOUS }
         if (status == DISCONNECTED || status == DISCONNECTING) {
-            calls.remove(id)
+            calls.remove(key)
         } else {
-            val previous = calls[id]
+            val previous = calls[key]
             val connected = status == ACTIVE || status == HELD
-            calls[id] = Call(
+            calls[key] = Call(
                 status = status,
                 // A later frame may carry only the status (the iPhone sends what changed), so the
                 // caller's identity is carried over rather than replaced by an empty string.
@@ -115,6 +147,20 @@ internal class ClusterCallState(private val clock: () -> Long = System::currentT
     companion object {
         /** iAP2 CallStateUpdate, the frame this class exists for. */
         const val CALL_STATE_UPDATE = 0x4155
+
+        private const val TAG = "DiPlay-Call"
+
+        /**
+         * The key a call is tracked under when the iPhone names neither a number nor a call UUID.
+         *
+         * A VOIP call has no telephone number, so a frame carrying only the caller's display name and a
+         * status is exactly what one looks like; dropping those frames is why the cluster could stay empty
+         * through a WeChat call while the same car showed an ordinary telephone call. The reference
+         * implementation keys them under the empty string, which is what this restores -- bounded by the
+         * rule in [accept]: an anonymous frame is applied only while no named call holds the card, and any
+         * named frame evicts it, so an unattributable "ringing" can never shadow a real call.
+         */
+        private const val ANONYMOUS = ""
 
         private const val REMOTE_ID = 0
         private const val DISPLAY_NAME = 1
