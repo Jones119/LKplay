@@ -19,6 +19,7 @@ import com.shilapi.xcertplay.airplay.MicrophoneConfig
 import com.shilapi.xcertplay.airplay.OwnedVideoFrame
 import com.shilapi.xcertplay.airplay.VideoCodec
 import com.shilapi.xcertplay.airplay.toHexString
+import com.shilapi.xcertplay.glance.CarPlayGlance
 import com.shilapi.xcertplay.transport.DatagramNetwork
 import com.shilapi.xcertplay.transport.KernelDatagramNetwork
 import java.io.Closeable
@@ -199,6 +200,16 @@ class AndroidMediaSink(
     private val mediaAudioTypes = mutableSetOf<AudioStreamId>()
     private val audioRenderers = ConcurrentHashMap<AudioStreamId, AudioRenderer>()
     private val microphoneUplinks = ConcurrentHashMap<AudioStreamId, MicrophoneUplink>()
+
+    /**
+     * The VOIP-call inference: a two-way CarPlay audio stream on a type that can carry a call is a call
+     * the iPhone never announced (docs/_digest/121). Feeding it here, from the events the engine already
+     * delivers, keeps the audio path unchanged: this only reads stream lifecycle.
+     */
+    private val voiceCallWatch = VoiceCallWatch(
+        report = { line -> runCatching { onAudioDiagnostic(line) } },
+        publish = { active, since -> runCatching { CarPlayGlance.onVoiceCall(active, since) } },
+    )
     private val audioModeLock = Any()
     private var communicationModeStream: AudioStreamId? = null
     private val pendingVideoCodec = ConcurrentHashMap<Int, VideoCodec>()
@@ -338,6 +349,8 @@ class AndroidMediaSink(
     override fun onAudioStarted(id: AudioStreamId, format: AudioFormat, firstSample: Int) {
         audioRenderer(id, format).start()
         if (format.audioType == "media") updateMediaAudio(id, true)
+        // Downlink audio is the half of a VOIP call the iPhone cannot hide: see [VoiceCallWatch].
+        voiceCallWatch.downlinkStarted(id)
     }
 
     override fun onAudioRtp(id: AudioStreamId, format: AudioFormat, rtp: ByteArray, sample: Int) {
@@ -345,6 +358,7 @@ class AndroidMediaSink(
     }
 
     override fun onAudioStopped(id: AudioStreamId) {
+        voiceCallWatch.downlinkStopped(id)
         audioRenderers.remove(id)?.close()
         updateMediaAudio(id, false)
     }
@@ -372,6 +386,10 @@ class AndroidMediaSink(
             if (!uplink.start()) {
                 microphoneUplinks.remove(id, uplink)
                 restoreAudioMode(id)
+            } else {
+                // Only a microphone that is really running counts: a refused capture would otherwise be
+                // half of a "two-way" call the driver is not on (see [VoiceCallWatch]).
+                voiceCallWatch.microphoneStarted(id)
             }
         } catch (error: Exception) {
             Log.e("xcertplay-usb", "microphone start failed stream=$id", error)
@@ -381,6 +399,8 @@ class AndroidMediaSink(
     }
 
     override fun onMicrophoneStopped(id: AudioStreamId) {
+        // Before the close: the card must go even if the uplink's own teardown throws.
+        voiceCallWatch.microphoneStopped(id)
         try {
             microphoneUplinks.remove(id)?.close()
         } finally {
@@ -451,6 +471,9 @@ class AndroidMediaSink(
         videoRecoveryHandlers.clear()
         videoDiagnosticHandlers.clear()
         recoveryExecutor.shutdownNow()
+        // The session is going away: a voice call inferred from its audio must not leave a card on the
+        // cluster, and this is the one teardown that does not go through the per-stream stop callbacks.
+        voiceCallWatch.reset()
         audioRenderers.values.forEach(AudioRenderer::close)
         audioRenderers.clear()
         val hadMedia = synchronized(mediaAudioTypes) { mediaAudioTypes.isNotEmpty().also { mediaAudioTypes.clear() } }

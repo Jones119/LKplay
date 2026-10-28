@@ -1,5 +1,6 @@
 package com.shilapi.xcertplay.glance
 
+import android.util.Log
 import com.shilapi.xcertplay.hud.ClusterCall
 import com.shilapi.xcertplay.hud.ClusterCallState
 import com.shilapi.xcertplay.hud.ClusterSongState
@@ -56,6 +57,24 @@ object CarPlayGlance {
      * card on the cluster with its own submit path ([callSubmit]).
      */
     private val call = ClusterCallState()
+
+    /**
+     * A voice call the iPhone never announced, inferred from its audio stream by
+     * `com.shilapi.xcertplay.media.VoiceCallWatch`; null when there is none.
+     *
+     * It is kept beside [call] rather than inside it because the two disagree on purpose: the iAP2 state
+     * names the caller and disappears when the phone says the call is over, while this one only knows
+     * that a two-way audio stream is up. [publishCallLocked] hands over whichever one the cluster should
+     * show, and the iPhone's own state always wins -- it is the only one that can say who is calling.
+     */
+    private var voiceCall: ClusterCall? = null
+
+    /** Whatever [publishCallLocked] last handed to the cluster, so a repeated card costs no push. */
+    private var lastCall: ClusterCall? = null
+
+    /** True once [lastCall] -- including its null -- has actually been submitted. */
+    private var callSubmitted = false
+
     private var connected = false
     private var last = Snapshot()
 
@@ -116,7 +135,7 @@ object CarPlayGlance {
                 ClusterCallState.CALL_STATE_UPDATE -> {
                     // Enqueued under the monitor, executed on the worker: the vendor push is a binder
                     // transaction and this is the iAP2 control thread (docs/_digest/46 G9).
-                    if (runCatching { call.accept(frame) }.getOrDefault(false)) submitCall(call.current())
+                    if (runCatching { call.accept(frame) }.getOrDefault(false)) publishCallLocked()
                     return
                 }
                 else -> return
@@ -135,13 +154,68 @@ object CarPlayGlance {
                 song.clear()
                 // A call cannot outlive the session: submit the idle status so the cluster's phone card
                 // is cleared rather than left showing a call nobody can answer any more.
-                val hadCall = call.current() != null
+                val hadCall = lastCall != null
                 call.clear()
+                voiceCall = null
+                lastCall = null
+                callSubmitted = false
                 if (hadCall) submitCall(null)
             }
             publishLocked()
         }
         changed?.let { listener?.invoke(it) }
+    }
+
+    /**
+     * A voice call became audible -- or stopped being -- according to
+     * `com.shilapi.xcertplay.media.VoiceCallWatch`, which infers it from the CarPlay audio stream
+     * because the iPhone never reports a third-party VOIP call over iAP2.
+     *
+     * Called from the session's audio threads. [confirmedAtMillis] is when the call was confirmed (the
+     * two-way stream first existed), not when this call was made; it becomes the card's call timer, which
+     * the vendor ticks itself.
+     *
+     * A stream that starts while the iPhone is *already* reporting a call is that call's audio, not a
+     * second call: the iPhone keeps the stream up for a moment after the call ends, and synthesizing a
+     * card for it would rename the caller to [VOICE_CALL_NAME] for that moment, right in front of the
+     * driver.
+     */
+    fun onVoiceCall(active: Boolean, confirmedAtMillis: Long) {
+        synchronized(this) {
+            if (active) {
+                if (voiceCall != null) return
+                if (call.current() != null) {
+                    Log.i(TAG, "voice call stream belongs to the call state; no second card")
+                    return
+                }
+                voiceCall = ClusterCall(ClusterCall.Phase.ACTIVE, VOICE_CALL_NAME, "", confirmedAtMillis)
+                Log.i(TAG, "voice call card on: $VOICE_CALL_NAME")
+            } else {
+                if (voiceCall == null) return
+                voiceCall = null
+                Log.i(TAG, "voice call card off")
+            }
+            publishCallLocked()
+        }
+    }
+
+    /** True while a VOIP call is being shown; the cluster key handler logs it with the key it relays. */
+    fun voiceCallActive(): Boolean = synchronized(this) { voiceCall != null }
+
+    /**
+     * Hands the cluster the card it should be showing: the iPhone's own call state when there is one,
+     * otherwise the inferred voice call.
+     *
+     * The comparison is what keeps the two sources from fighting. iAP2 repeats its call state on its own
+     * schedule and the vendor push costs a binder transaction each time, so an unchanged card is not
+     * pushed again -- the same rule the guidance card follows.
+     */
+    private fun publishCallLocked() {
+        val next = call.current() ?: voiceCall
+        if (callSubmitted && next == lastCall) return
+        lastCall = next
+        callSubmitted = true
+        submitCall(next)
     }
 
     private fun publishLocked(): Snapshot? {
@@ -192,4 +266,16 @@ object CarPlayGlance {
         val submit = callSubmit
         clusterWorker.execute { runCatching { submit(call) } }
     }
+
+    private const val TAG = "DiPlay-Cluster"
+
+    /**
+     * What the cluster calls a caller it cannot name: the iPhone tells us a third-party VOIP call exists
+     * only through its audio, so the app and the person on the other end are both unknown.
+     *
+     * The card's own state label ("Ongoing Call") and its hang-up button belong to the vendor service and
+     * are not ours to choose (docs/_digest/86 §2), which is why this is the name and not a replacement
+     * for them.
+     */
+    internal const val VOICE_CALL_NAME = "语音通话"
 }

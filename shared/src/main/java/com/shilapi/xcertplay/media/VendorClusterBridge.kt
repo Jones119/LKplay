@@ -931,7 +931,7 @@ object VendorClusterBridge {
             return
         }
         lastCallActionAt.set(now)
-        Log.i(TAG, "cluster call $name -> CarPlay telephony")
+        Log.i(TAG, "cluster call $name -> CarPlay telephony voip=${CarPlayGlance.voiceCallActive()}")
         runCatching { action() }.onFailure { Log.w(TAG, "cluster call $name failed", it) }
     }
 
