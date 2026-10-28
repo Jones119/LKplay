@@ -79,9 +79,8 @@ object VendorClusterBridge {
     /** DIM binds asynchronously; the phone callback is retried at these steps until it registers. */
     private const val PHONE_CALLBACK_RETRY_MILLIS = 1_500L
 
-    /** `debug.diplay.cover_refresh=0` disables the post-cover refresh (bench A/B). */
-    private const val COVER_REFRESH_PROPERTY = "debug.diplay.cover_refresh"
-    private const val COVER_REFRESH_DELAY_MILLIS = 1500L
+    /** How long the bench probe waits for the DIM facade before asking for the projection switch. */
+    private const val DIM_PROBE_DELAY_MILLIS = 3_000L
 
     @Volatile
     private var appContext: Context? = null
@@ -107,8 +106,13 @@ object VendorClusterBridge {
     /** Serialises the media push: it now runs from the iAP2 thread, the main thread and the timer. */
     private val pushLock = Any()
 
-    /** One pending cover refresh; a new cover cancels the previous refresh. */
-    private val coverRefreshHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    /**
+     * Main-thread timers: the phone-callback retries and the bench probe.
+     *
+     * It used to fire a post-cover refresh as well; that frame is gone because it aborted the
+     * vendor's background transfer (see [setArtwork]).
+     */
+    private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
 
     /** The last payload the vendor was handed, so an unchanged one is not dispatched again (G9). */
     private val mediaPushGate = ClusterMediaPushGate()
@@ -244,7 +248,7 @@ object VendorClusterBridge {
         if (!phoneCallbackRegistered) {
             val ctx = appContext ?: return
             for (attempt in 1..3) {
-                coverRefreshHandler.postDelayed(
+                mainHandler.postDelayed(
                     {
                         if (!phoneCallbackRegistered) runCatching { phoneInteraction(ctx) }
                     },
@@ -252,6 +256,49 @@ object VendorClusterBridge {
                 )
             }
         }
+        if (dimPresentationProbeEnabled()) {
+            mainHandler.postDelayed(
+                { appContext?.let { probeDimPresentation(it) } },
+                DIM_PROBE_DELAY_MILLIS,
+            )
+        }
+    }
+
+    /**
+     * Bench probe for the vendor's cluster projection switch (docs/_digest/118).
+     *
+     * The ECARX reference app calls `setPresentationToDimSwitch(1, "", "", show)`; the two strings are
+     * discarded by the platform and the call is `void`, so a successful reflection call proves only
+     * that the method exists. `getShowPresentationOption()` is the only read-back.
+     */
+    private fun probeDimPresentation(context: Context) {
+        val owner = dimInstance(context) ?: run {
+            Log.i(TAG, "DIM presentation probe: no DIM instance")
+            return
+        }
+        Log.i(TAG, "DIM showPresentationOption before=${read(owner, "getShowPresentationOption")}")
+        val method = owner.javaClass.methods.firstOrNull {
+            it.name == "setPresentationToDimSwitch" && it.parameterTypes.size == 4
+        }
+        if (method == null) {
+            val candidates = owner.javaClass.methods.filter { it.name.contains("Presentation") }
+                .map { it.name + "(" + it.parameterTypes.joinToString { p -> p.simpleName } + ")" }
+            Log.i(TAG, "DIM setPresentationToDimSwitch absent; candidates=$candidates")
+            return
+        }
+        Log.i(
+            TAG,
+            "DIM setPresentationToDimSwitch declared=" +
+                method.parameterTypes.joinToString { it.simpleName },
+        )
+        val result = runCatching { method.invoke(owner, 1, "", "", true) }
+        Log.i(
+            TAG,
+            "DIM setPresentationToDimSwitch(1,\"\",\"\",true) ok=${result.isSuccess} " +
+                "error=${result.exceptionOrNull()?.javaClass?.simpleName}:" +
+                "${result.exceptionOrNull()?.message}",
+        )
+        Log.i(TAG, "DIM showPresentationOption after=${read(owner, "getShowPresentationOption")}")
     }
 
     /**
@@ -264,6 +311,10 @@ object VendorClusterBridge {
         answerCallAction = onAnswer
         endCallAction = onEnd
     }
+
+    /** `debug.diplay.dim_presentation=1` runs the vendor projection-switch probe (bench only). */
+    private fun dimPresentationProbeEnabled(): Boolean =
+        debugProperty("debug.diplay.dim_presentation")?.trim() == "1"
 
     /**
      * Whether the push runs at all.
@@ -326,11 +377,21 @@ object VendorClusterBridge {
      * retried on the next update and by the shorter post-failure timer, instead of being remembered
      * as "sent" forever.
      */
-    private fun dispatchMedia(now: CarPlayNowPlaying, force: Boolean, coverOverride: android.net.Uri? = null, useCoverOverride: Boolean = false) {
+    private fun dispatchMedia(now: CarPlayNowPlaying, force: Boolean) {
         val context = appContext ?: return
+        val target = mediaInteraction(context) ?: return
+        // The source list and the selected source are screens of their own on this DIM service --
+        // template 4, the media source menu (`MediaDimInteraction.getAppScreenId()`), not items of the
+        // card -- and the order decides what the driver sees: sent after a card frame the menu replaces
+        // that card, and the next card frame is the next track. The vendor's own client and the
+        // reference implementation both register the source before the first track (docs/_digest/107
+        // §5.1, docs/_digest/119 §3), so this goes first and only once per session.
+        if (!sourceListSent || !sourceTypeSent) {
+            if (!registerSource(target)) return
+        }
         // A cover is only offered for the track it was named for: between a track change and the new
         // artwork decode `artworkUri` still points at the previous track (car 2026-10-23).
-        val cover = if (useCoverOverride) coverOverride else artworkUri.takeIf { sameTrack(artworkMedia, now) }
+        val cover = artworkUri.takeIf { sameTrack(artworkMedia, now) }
         val update = clusterMediaUpdate(now, cover)
         // The vendor re-sends its media frame for every changed payload, position included; at ~2 Hz
         // that kept the background (cover) screen from ever being sent, while the car own player
@@ -338,35 +399,66 @@ object VendorClusterBridge {
         // `FrameSenderBackground`). Gate on metadata and send the position separately (E1 2026-10-23).
         val metadata = update.copy(elapsedMillis = null)
         if (!force && !mediaPushGate.shouldPush(metadata)) {
-            val target = mediaInteraction(context) ?: return
             now.elapsedMillis?.let { call(target, "updateCurrentProgress", it) }
             return
         }
-        val target = mediaInteraction(context) ?: return
         // The iPhone sometimes leaves the playback-status field at paused while audio and position
         // keep going; DIM refuses a cover frame for basePlayState=0 (car 2026-10-23).
         val playing = now.playing || positionAdvancing
         val status = if (playing) PLAYBACK_STATUS_PLAYING else PLAYBACK_STATUS_PAUSED
         val info = playbackInfo(context, now, status, cover) ?: return
         var sent = call(target, "updatePlaybackInfo", info)
-        if (!sourceListSent) {
-            sent = call(target, "updateMediaSourceTypeList", intArrayOf(SOURCE_TYPE_ONLINE)) && sent
-            if (sent) sourceListSent = true
-        }
-        if (!sourceTypeSent) {
-            sent = call(target, "updateCurrentSourceType", SOURCE_TYPE_ONLINE) && sent
-            if (sent) sourceTypeSent = true
-        }
         now.elapsedMillis?.let { sent = call(target, "updateCurrentProgress", it) && sent }
         if (sent) {
             mediaPushGate.notePushed(metadata)
             pushSchedule.notePushed(elapsedNow())
         } else {
-            mediaPushGate.forget()
-            interactions.invalidateMedia()
-            pushSchedule.noteFailed(elapsedNow())
-            Log.w(TAG, "cluster media push failed; cached vendor interaction dropped for re-resolution")
+            reportMediaFailure("push")
         }
+    }
+
+    /**
+     * Declares the online-music source on the cluster and selects it, once per session.
+     *
+     * Returns whether the card may be sent at all: both calls draw a foreground frame of their own
+     * (template 4, the media source menu), so the registration belongs before the first card frame and
+     * a refusal defers the card instead of letting the menu outlive it. `updateMediaSourceTypeList`
+     * also *replaces* the vendor's cached menu (`MediaDimInteraction.updateMenu` keeps exactly the
+     * announced types), which is why it runs once per session and not per track. The newer ECARX
+     * generation shows why registering before the track matters in the first place: there the card is
+     * drawn from the announced sources, and without it every track is accepted while the card still
+     * reads "无媒体" (docs/_digest/119 §1).
+     */
+    private fun registerSource(target: Any): Boolean {
+        if (!sourceListSent) {
+            if (!call(target, "updateMediaSourceTypeList", intArrayOf(SOURCE_TYPE_ONLINE))) {
+                reportMediaFailure("source list")
+                return false
+            }
+            sourceListSent = true
+            Log.i(TAG, "cluster source list -> [$SOURCE_TYPE_ONLINE]")
+        }
+        if (!sourceTypeSent) {
+            if (!call(target, "updateCurrentSourceType", SOURCE_TYPE_ONLINE)) {
+                reportMediaFailure("current source")
+                return false
+            }
+            sourceTypeSent = true
+            Log.i(TAG, "cluster current source -> $SOURCE_TYPE_ONLINE")
+        }
+        return true
+    }
+
+    /** Drops the vendor handle and schedules a retry; a failed call is a state problem, not a frame. */
+    private fun reportMediaFailure(what: String) {
+        mediaPushGate.forget()
+        interactions.invalidateMedia()
+        // A new handle can be a service that restarted with an empty source menu, so the registration
+        // is owed again. It is sent before the card, so the retry cannot leave the menu on screen.
+        sourceListSent = false
+        sourceTypeSent = false
+        pushSchedule.noteFailed(elapsedNow())
+        Log.w(TAG, "cluster media $what failed; cached vendor interaction dropped for re-resolution")
     }
 
     /**
@@ -386,9 +478,13 @@ object VendorClusterBridge {
         if (!pushSchedule.isDue(elapsedNow(), now.playing)) return
         // Logged before the dispatch, and worded as "due": whether anything actually reached the vendor
         // is what `dispatchMedia` reports, and the two must not be conflated in a log that the on-car
-        // check greps.
+        // check greps. Forced on purpose: the vendor drops an identical (cover, title) pair as "totally
+        // same", so repeating one costs a binder call and nothing else while the service is alive --
+        // and it is the only way the card comes back after that service restarted, because the new
+        // instance's de-duplication state starts empty. An unforced re-push was a no-op: the push gate
+        // had just been told this exact payload.
         Log.i(TAG, "cluster repush due title=${now.title} playing=${now.playing} artwork=$artworkUri")
-        synchronized(pushLock) { dispatchMedia(now, force = false) }
+        synchronized(pushLock) { dispatchMedia(now, force = true) }
     }
 
     private fun startRepushLoop() {
@@ -407,6 +503,9 @@ object VendorClusterBridge {
             repush = service
         }
     }
+
+    /** Whether the published cover belongs to [now] and can be reused as-is. */
+    fun artworkMatches(now: CarPlayNowPlaying): Boolean = artworkUri != null && sameTrack(artworkMedia, now)
 
     /**
      * The album art arrives from the iPhone as a Bitmap, and the cluster takes it as a Uri
@@ -431,10 +530,17 @@ object VendorClusterBridge {
      *
      * A null cover is a real answer, not a failure: it clears the slot, so the head unit paints its
      * own default instead of our placeholder being submitted as if it were the album's art (G6).
+     *
+     * **Every handover owns a ~5 s cluster-side window in which nothing else may be sent.** The
+     * vendor turns the image into a 70x70 TGA and ships it as 39-41 background frames, one per
+     * acknowledged 246-byte signal frame (~120 ms each, measured on the car 2026-10-26), and
+     * `MediaDimInteraction.updatePlayStatus` calls `AppScreenManager.abortSendingProgress()` on any
+     * foreground frame whose (cover, title) pair differs from the last one it built. An aborted
+     * transfer never resumes -- the next identical frame is dropped as "totally same" -- so a cover
+     * pushed over by *any* later metadata frame is lost until the track changes. There used to be a
+     * "cover refresh" timer here that fired such a frame 1.5 s after every handover; it is gone for
+     * exactly this reason (docs/_digest/119 §4).
      */
-    /** Whether the published cover belongs to [now] and can be reused as-is. */
-    fun artworkMatches(now: CarPlayNowPlaying): Boolean = artworkUri != null && sameTrack(artworkMedia, now)
-
     fun setArtwork(bitmap: android.graphics.Bitmap?) {
         val context = appContext ?: return
         // Read once per handover, so a `setprop` between the decision and the log cannot make the two
@@ -469,7 +575,6 @@ object VendorClusterBridge {
             ) {
                 artworkMedia = lastMedia
                 if (enabled) lastMedia?.let { pushMedia(it) }
-                scheduleCoverRefresh()
                 return
             }
             lastStoredBitmap = bitmap
@@ -484,51 +589,15 @@ object VendorClusterBridge {
         if (artworkChangeGate().shouldLog(artworkUri?.toString(), source)) {
             Log.i(TAG, "cluster artwork uri=$artworkUri source=$source")
         }
-        // Re-send so the cluster picks the new cover up with the current track.
+        // Re-send so the cluster picks the new cover up with the current track. This is the only
+        // frame that may follow a handover: anything else aborts the background transfer.
         if (enabled) lastMedia?.let { pushMedia(it) }
-        scheduleCoverRefresh()
     }
 
 
     /** `debug.diplay.cluster_lyrics=0` keeps the title stable so the cover can be shown. */
     private fun clusterLyricsEnabled(): Boolean =
         debugProperty("debug.diplay.cluster_lyrics")?.trim() != "0"
-
-    /**
-     * Re-sends the current media about 1.5 s after a cover lands, with an invisible title change.
-     *
-     * DIM dedupes an unchanged (cover,title) pair, and the cluster refreshes a card with the
-     * background it already holds: the frame that carries a new background is the one whose refresh
-     * still shows the previous picture (car 2026-10-23). A later foreground gives the card a refresh
-     * that can use the background already received. `debug.diplay.cover_refresh=0` disables it.
-     */
-    private fun scheduleCoverRefresh() {
-        if (debugProperty(COVER_REFRESH_PROPERTY)?.trim() == "0") return
-        val media = lastMedia ?: return
-        val title = media.title ?: return
-            coverRefreshHandler.removeCallbacksAndMessages(null)
-        coverRefreshHandler.postDelayed({
-            val current = lastMedia ?: return@postDelayed
-            if (current.title != media.title ||
-                current.album != media.album ||
-                current.artist != media.artist
-            ) {
-                return@postDelayed
-            }
-            val refreshed = current.copy(title = title + "\u200B")
-            synchronized(pushLock) {
-                dispatchMedia(
-                    refreshed,
-                    force = true,
-                    coverOverride = android.net.Uri.parse("http://127.0.0.1/refresh"),
-                    useCoverOverride = true,
-                )
-            }
-            Log.i(TAG, "cluster cover refresh title=$title")
-            mediaPushGate.notePushed(clusterMediaUpdate(current, artworkUri).copy(elapsedMillis = null))
-        }, COVER_REFRESH_DELAY_MILLIS)
-    }
-
 
     /**
      * The Uri for this handover: the usable bench override when one is set, the computed one otherwise.
@@ -604,7 +673,7 @@ object VendorClusterBridge {
      */
     fun release() {
         val store = synchronized(pushLock) {
-            coverRefreshHandler.removeCallbacksAndMessages(null)
+            mainHandler.removeCallbacksAndMessages(null)
             artworkStore.also { artworkStore = null }
         }
         artworkUri = null
@@ -1125,9 +1194,11 @@ private fun comparableTitle(title: String?): String? = title?.replace("\u200B", 
  * Whether [next] is a different track from [previous]: a new artist/album or a materially different
  * duration. Missing fields are compatible because they can arrive later, the same rule [sameTrack]
  * uses. The artwork transfer id is deliberately not a boundary: measured on the car, QQ Music hands
- * out a new one per lyric line (docs/_digest/116 V2-4).
+ * out a new one per lyric line (docs/_digest/116 V2-4). Public because the cover association in
+ * `:common` needs the same identity rule -- a first metadata frame can carry the *previous* transfer
+ * id, and only this rule can tell that apart from a lyric line (docs/_digest/119 §9).
  */
-internal fun isNewTrack(previous: CarPlayNowPlaying?, next: CarPlayNowPlaying): Boolean =
+fun isNewTrack(previous: CarPlayNowPlaying?, next: CarPlayNowPlaying): Boolean =
     previous == null ||
         definitelyDifferent(previous.artist, next.artist) ||
         definitelyDifferent(previous.album, next.album) ||

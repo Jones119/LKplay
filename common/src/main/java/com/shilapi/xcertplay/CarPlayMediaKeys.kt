@@ -13,6 +13,7 @@ import androidx.core.graphics.drawable.toBitmap
 import com.shilapi.xcertplay.airplay.CarPlayMediaButton
 import com.shilapi.xcertplay.host.R
 import com.shilapi.xcertplay.media.CarPlayNowPlaying
+import com.shilapi.xcertplay.media.isNewTrack
 import com.shilapi.xcertplay.orchestration.CarPlayController
 import java.util.concurrent.Executors
 import java.util.concurrent.Executor
@@ -78,6 +79,19 @@ internal object CarPlayMediaKeys {
 
     /** What was last handed to the cluster, so a cover that did not change is not re-encoded. */
     private var clusterCover: Bitmap? = null
+
+    /**
+     * The track [clusterCover] was published for: artist, album and duration -- the fields
+     * [com.shilapi.xcertplay.media.isNewTrack] calls identity, without the title, which QQ Music
+     * rewrites per lyric line.
+     *
+     * A cached bitmap is only ever reused for the track it was published for. Without this, the second
+     * metadata frame of a new song (the same song, one frame later) still finds the *previous* cover in
+     * [artworkCache] under the unchanged transfer id and republishes it under the new file name; the
+     * real cover then resolves to the same Uri and the vendor drops it as a repeat (car 2026-10-28,
+     * docs/_digest/119 §9).
+     */
+    private var publishedCoverTrack: CoverTrack? = null
 
     /**
      * The newest decoded cover whose transfer id was not the current one when it finished.
@@ -149,23 +163,37 @@ internal object CarPlayMediaKeys {
                 // the cover arrived. Neither is a new track: artist, album, duration and the artwork transfer
                 // all stay, so the cover must not be re-associated (it flashes and disappears otherwise).
                 val previousTransferId = nowPlaying.artworkTransferId
-                val titleOnlyChurn = clusterTitleOnlyChurn(nowPlaying, update)
+                val previousTrack = nowPlaying
+                val titleOnlyChurn = clusterTitleOnlyChurn(previousTrack, update)
+                val newTrack = isNewTrack(previousTrack, update)
                 nowPlaying = update
                 // The cluster's cover follows the *identity*, not the transfer id. The picture offered
                 // is the one decoded for the announced transfer, else the candidate held from a decode
                 // that arrived early, else the one already loaded -- the reference's `song.artwork`,
                 // which is what lets a track whose artist/album arrive in a later frame keep its cover
-                // instead of being mistaken for a new track (G3).
+                // instead of being mistaken for a new track (G3). A cached picture is only offered for
+                // the track it was published for (docs/_digest/119 §9).
                 val announced = update.artworkTransferId?.let { artworkCache[it] }
+                    ?.takeIf { coverMayBelongTo(publishedCoverTrack, update) }
+                val transferChanged = update.artworkTransferId != previousTransferId
                 // Never hand the retained previous picture over as the new track cover: doing that
                 // wrote track A bitmap under track B name, and the cluster showed a one-track lag
                 // (A to A, B to A, D showed C; car 2026-10-23). Only the bitmap the phone paired with
                 // this transfer id may be published; until it arrives the cluster keeps the old one.
-                if (update.artworkTransferId != previousTransferId) {
+                if (transferChanged || newTrack) {
                     pendingCover = null
                     pendingCoverId = null
                 }
-                val offered = announced ?: pendingCover?.takeIf { pendingCoverId == update.artworkTransferId }
+                // A new song whose first metadata frame still names the *previous* artwork id is the
+                // case that guard missed: the id is unchanged, so the cached bitmap for it is the last
+                // song's picture, and publishing it renamed A's cover to B's file. B's real cover then
+                // resolved to the same Uri, the vendor dropped it as "totally same", and the cluster
+                // stayed one song behind (car 2026-10-28, docs/_digest/119 §9). Hold instead; the decode
+                // that carries B's id publishes a new file and a new Uri.
+                val offered = when {
+                    newTrack && !transferChanged -> null
+                    else -> announced ?: pendingCover?.takeIf { pendingCoverId == update.artworkTransferId }
+                }
                 pendingCover = null
                 pendingCoverId = null
                 if (titleOnlyChurn) {
@@ -235,12 +263,14 @@ internal object CarPlayMediaKeys {
                 return
             }
             clusterCover = null
+            publishedCoverTrack = null
             publishClusterArtwork(null)
             return
         }
         val repeated = offered === clusterCover
         if (repeated && com.shilapi.xcertplay.media.VendorClusterBridge.artworkMatches(nowPlaying)) return
         clusterCover = offered
+        publishedCoverTrack = coverTrackOf(nowPlaying)
         Log.i(
             TAG,
             "cluster cover id=${nowPlaying.artworkTransferId} title=${nowPlaying.title} " +
@@ -365,6 +395,7 @@ internal object CarPlayMediaKeys {
         // The next session starts with no cover of its own; the cluster clears with it.
         clusterArtwork?.reset()
         clusterCover = null
+        publishedCoverTrack = null
         pendingCover = null
         pendingCoverId = null
         appContext?.let(::stopLegacyKeys)
@@ -397,6 +428,27 @@ internal object CarPlayMediaKeys {
             previous.album == next.album &&
             previous.durationMillis == next.durationMillis &&
             previous.artworkTransferId == next.artworkTransferId
+
+    /**
+     * What a published cluster cover belongs to: artist, album and duration.
+     *
+     * The title stays out: QQ Music rewrites it per lyric line, and the cover is not re-decoded for
+     * that. These are the same fields [com.shilapi.xcertplay.media.isNewTrack] treats as identity.
+     */
+    internal data class CoverTrack(val artist: String?, val album: String?, val durationMillis: Long?)
+
+    internal fun coverTrackOf(now: CarPlayNowPlaying): CoverTrack =
+        CoverTrack(now.artist, now.album, now.durationMillis)
+
+    /**
+     * Whether the cover published for [published] may be shown for [next] again.
+     *
+     * A null [published] means nothing has been published yet, so any candidate is allowed; a
+     * mismatch means the cached bitmap belongs to a previous song and must not be republished under
+     * this one's name (docs/_digest/119 §9).
+     */
+    internal fun coverMayBelongTo(published: CoverTrack?, next: CarPlayNowPlaying): Boolean =
+        published == null || published == coverTrackOf(next)
 
     internal fun placeholderArt(context: Context): Bitmap? = context
         .getDrawableCompat(R.drawable.art_now_playing_placeholder)

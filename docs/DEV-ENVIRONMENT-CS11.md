@@ -141,6 +141,9 @@ adb install -r mobile\build\outputs\apk\debug\mobile-debug.apk
 - 车机是 **user build**，`adb root` 不可用；`/data/tombstones` 读不了，但 `dumpsys dropbox --print SYSTEM_TOMBSTONE` 可以
 - 应用日志用 `run-as`（debug 包才有权限）：`adb shell run-as com.shihab.diplay.hudtest cat files/logs/diplay.log`
 - 存储命名空间不同：adb 侧用 `/sdcard/...`，`run-as` 侧用 `/data/data/...`
+- **`adb reboot` 之后 USB 调试会被关掉**（用户 2026-10-28 确认）。重启后先到车机设置里重新打开
+  USB 调试，再 `adb kill-server` + `adb devices`；否则会误判成"车机没起来"。
+  点火窗口内**不要**为了修连接去 reboot——重启会连带关掉调试通道，代价比插拔一次手机大得多
 
 ---
 
