@@ -838,20 +838,6 @@ class DiPlayActivity : ComponentActivity() {
      * The rows share the card's height, so making the card taller to close the gap between cards also
      * spreads the rows instead of leaving a blank strip at the bottom.
      */
-    /**
-     * Opens the CarPlay screen with its safe-area editor already showing.
-     *
-     * The editor has to be drawn over the picture it is adjusting, so it cannot live on this page; this
-     * hands the screen to the host with the flag that raises it there.
-     */
-    private fun openSafeAreaEditor() {
-        startActivity(
-            Intent(this, CarPlayHostActivity::class.java)
-                .putExtra(EXTRA_OPEN_SAFE_AREA, true)
-                .addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),
-        )
-        overridePendingTransition(0, 0)
-    }
     private fun buildDeviceCard(): View {
         val card = cardView(14)
         val selected = DiPlayPreferences.phoneName(this)
@@ -1311,12 +1297,6 @@ class DiPlayActivity : ComponentActivity() {
                 getString(R.string.screen_corner_mask_description),
                 AirPlayPersistence.loadScreenCornerMask(this),
             ) { AirPlayPersistence.saveScreenCornerMask(this, it) }
-            // The editor is drawn over the CarPlay picture, so this row only opens that screen with the
-            // editor already up; saving or cancelling there returns to this page.
-            card.addView(
-                button(getString(R.string.safe_area), false) { openSafeAreaEditor() },
-                matchButton(12, 60),
-            )
         }
         section(content, getString(R.string.car_button_in_carplay), R.drawable.ic_dp_car) { card -> carButtonCard = card; carButtonControls(card) }
         section(content, getString(R.string.audio_routing), R.drawable.ic_dp_audio) { card ->
@@ -3125,6 +3105,7 @@ class DiPlayActivity : ComponentActivity() {
         )
     }
 }
+
 
 
 

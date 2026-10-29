@@ -303,11 +303,6 @@ class CarPlayHostActivity : ComponentActivity() {
     private var manualHotspotErrorView: TextView? = null
     private var iconPreviewView: ImageView? = null
     private var iconStatusView: TextView? = null
-    private var safeAreaSummaryView: TextView? = null
-    private var safeAreaEditor: View? = null
-    private var safeAreaEditorView: SafeAreaEditorView? = null
-    private var safeAreaEditSize: DisplaySize? = null
-    private var safeAreaEditorActive = false
     private var externalActivityInProgress = false
     private var sink: AndroidMediaSink? = null
     private var controller: CarPlayController? = null
@@ -642,18 +637,12 @@ class CarPlayHostActivity : ComponentActivity() {
         // Bench: db shell setprop debug.diplay.settings_menu 1 opens the three-finger menu on start, so
         // the layout can be screenshotted at a head unit's exact resolution without injecting multi-touch.
         if (debugSettingsMenuRequested()) window.decorView.post { openSettingsMenu() }
-        // Opened from 设置 → 显示与性能 → 安全区域: raise the editor once the picture has a size.
-        if (intent.getBooleanExtra(EXTRA_OPEN_SAFE_AREA, false)) {
-            window.decorView.postDelayed({ openSafeAreaEditor() }, 600L)
-        }
         onBackPressedDispatcher.addCallback(
             this,
             object : OnBackPressedCallback(true) {
                 override fun handleOnBackPressed() {
                     if (picturePanel != null) {
                         closePicturePanel()
-                    } else if (safeAreaEditorActive) {
-                        closeSafeAreaEditor()
                     } else {
                         // No in-CarPlay panel any more: Back always returns to the app.
                         showDiPlayHome()
@@ -1174,8 +1163,6 @@ class CarPlayHostActivity : ComponentActivity() {
         // keeps the menu's z-order without building anything.
         settingsMenuAnchor = FrameLayout(this)
         root.addView(settingsMenuAnchor, FrameLayout.LayoutParams(-1, -1))
-        safeAreaEditor = buildSafeAreaEditor().apply { visibility = View.GONE }
-        root.addView(safeAreaEditor, FrameLayout.LayoutParams(-1, -1))
         videoView = video
         gestureOverlay = gestureLayer
         cornerMaskOverlay = cornerMask
@@ -1311,62 +1298,6 @@ class CarPlayHostActivity : ComponentActivity() {
 
 
 
-    private fun buildSafeAreaEditor(): View {
-        val overlay = FrameLayout(this).apply {
-            setBackgroundColor(Color.BLACK)
-            isClickable = true
-        }
-        val editor = SafeAreaEditorView(this)
-        overlay.addView(
-            editor,
-            FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT,
-            ),
-        )
-        overlay.addView(
-            settingsTitle(getString(R.string.safe_area)).apply {
-                setPadding(dp(16), dp(12), dp(16), dp(8))
-            },
-            FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.WRAP_CONTENT,
-                FrameLayout.LayoutParams.WRAP_CONTENT,
-                Gravity.TOP or Gravity.START,
-            ),
-        )
-        val controls = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER
-            setPadding(dp(16), dp(10), dp(16), dp(16))
-        }
-        controls.addView(
-            SettingsWidgets.createButton(this, getString(R.string.cancel), theme = settingsTheme) {
-                closeSafeAreaEditor()
-            },
-            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
-        )
-        controls.addView(
-            SettingsWidgets.createButton(
-                this,
-                getString(R.string.save),
-                style = SettingsWidgets.ButtonStyle.PRIMARY,
-                theme = settingsTheme,
-            ) { saveSafeAreaEditor() },
-            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
-                marginStart = dp(12)
-            },
-        )
-        overlay.addView(
-            controls,
-            FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.WRAP_CONTENT,
-                Gravity.BOTTOM,
-            ),
-        )
-        safeAreaEditorView = editor
-        return overlay
-    }
 
 
     /** Whether the overlay should be sampling: setting on, session running, settings menu closed. */
@@ -1612,7 +1543,8 @@ class CarPlayHostActivity : ComponentActivity() {
                     .append(if (advancedAudioChannelMapping) getString(R.string.mapping_aaos_buses) else getString(R.string.mapping_mobile_compatible))
                     .append('\n')
             }
-            append(safeAreaSummary())
+            // The safe area is fixed now that its editor is gone: the summary line that used to be
+            // appended here described a value the driver could no longer change.
         }
     }
 
@@ -1897,86 +1829,12 @@ class CarPlayHostActivity : ComponentActivity() {
             basis = physicalSizeBasis,
         )
 
-    private fun safeAreaSummary(): String {
-        val size = currentActivitySize() ?: return getString(R.string.safe_area_waiting_for_activity_size)
-        val mapping = AirPlayPersistence.loadSafeAreaRect(this, size.width, size.height)
-        return if (mapping == null) {
-            "${getString(R.string.safe_area_full_screen_at)}${size.width} x ${size.height}"
-        } else {
-            getString(
-                R.string.safe_area_mapping_summary,
-                mapping.width, mapping.height, mapping.left, mapping.top, size.width, size.height,
-            )
-        }
-    }
 
-    private fun updateSafeAreaSummary() {
-        safeAreaSummaryView?.text = safeAreaSummary()
-    }
 
-    private fun openSafeAreaEditor() {
-        val size = currentActivitySize()
-        if (size == null) {
-            appendLog("Safe area editor is unavailable before display layout")
-            return
-        }
-        val editorView = safeAreaEditorView ?: return
-        val initial = AirPlayPersistence.loadSafeAreaRect(this, size.width, size.height)
-            ?: AirPlaySafeArea.default(size.width, size.height)
-        safeAreaEditSize = size
-        safeAreaEditorActive = true
-        // Keep the current activity size; changing system bars here would remap the safe area.
-        settingsMenu?.visibility = View.GONE
-        safeAreaEditor?.visibility = View.VISIBLE
-        editorView.setRect(initial, size.width, size.height)
-        appendLog(
-            "Safe area editor opened for ${size.width}x${size.height}; " +
-                "drag the four boundaries",
-        )
-    }
 
-    private fun closeSafeAreaEditor() {
-        if (!safeAreaEditorActive) return
-        safeAreaEditorActive = false
-        safeAreaEditSize = null
-        safeAreaEditor?.visibility = View.GONE
-        settingsMenu?.visibility = View.VISIBLE
-        updateSafeAreaSummary()
-        updateResolutionMenu()
-        appendLog("Safe area editor closed")
-    }
 
-    private fun saveSafeAreaEditor() {
-        val size = safeAreaEditSize ?: currentActivitySize() ?: return
-        val rect = safeAreaEditorView?.currentRectForSource() ?: return
-        rememberSafeAreaBeforeEdit(size)
-        AirPlayPersistence.saveSafeAreaRect(this, size.width, size.height, rect)
-        appendLog(
-            "Safe area saved for ${size.width}x${size.height}: " +
-                "${rect.width}x${rect.height} at (${rect.left}, ${rect.top})",
-        )
-        closeSafeAreaEditor()
-    }
 
-    private fun resetSafeAreaForCurrentSize() {
-        val size = currentActivitySize()
-        if (size == null) {
-            appendLog("Safe area reset is unavailable before display layout")
-            return
-        }
-        rememberSafeAreaBeforeEdit(size)
-        AirPlayPersistence.clearSafeAreaRect(this, size.width, size.height)
-        updateSafeAreaSummary()
-        updateResolutionMenu()
-        appendLog("Safe area reset to full screen for ${size.width}x${size.height}")
-    }
 
-    private fun rememberSafeAreaBeforeEdit(size: DisplaySize) {
-        val baseline = settingsBaseline ?: return
-        if (!baseline.safeAreaRects.containsKey(size)) {
-            baseline.safeAreaRects[size] = AirPlayPersistence.loadSafeAreaRect(this, size.width, size.height)
-        }
-    }
 
     private fun refreshDisplaySizeAfterLayout() {
         videoView?.post {
