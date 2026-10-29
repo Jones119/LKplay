@@ -642,6 +642,10 @@ class CarPlayHostActivity : ComponentActivity() {
         // Bench: db shell setprop debug.diplay.settings_menu 1 opens the three-finger menu on start, so
         // the layout can be screenshotted at a head unit's exact resolution without injecting multi-touch.
         if (debugSettingsMenuRequested()) window.decorView.post { openSettingsMenu() }
+        // Opened from 设置 → 显示与性能 → 安全区域: raise the editor once the picture has a size.
+        if (intent.getBooleanExtra(EXTRA_OPEN_SAFE_AREA, false)) {
+            window.decorView.postDelayed({ openSafeAreaEditor() }, 600L)
+        }
         onBackPressedDispatcher.addCallback(
             this,
             object : OnBackPressedCallback(true) {
@@ -3546,6 +3550,7 @@ internal object CarPlayBackgroundSession {
         display = null
     }
 }
+
 
 
 

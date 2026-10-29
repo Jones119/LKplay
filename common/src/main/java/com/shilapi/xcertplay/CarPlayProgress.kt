@@ -37,6 +37,9 @@ internal object CarPlayProgress {
  */
 internal const val EXTRA_START_BEHIND = "com.shilapi.xcertplay.extra.START_BEHIND"
 
+/** Open the CarPlay screen with the safe-area editor already up (the editor draws over the picture). */
+internal const val EXTRA_OPEN_SAFE_AREA = "com.shilapi.xcertplay.extra.OPEN_SAFE_AREA"
+
 /**
  * A still frame of the home page, taken just before the CarPlay host is started from it.
  *
@@ -50,4 +53,5 @@ internal object CarPlayLaunchSnapshot {
     @Volatile
     var bitmap: android.graphics.Bitmap? = null
 }
+
 
