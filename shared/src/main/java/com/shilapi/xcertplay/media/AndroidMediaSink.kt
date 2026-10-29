@@ -162,6 +162,7 @@ class AndroidMediaSink(
     private val audioFocusEnabled: Boolean = false,
     private val mediaChannel: Int = 0,
     private val navigationChannel: Int = 0,
+    private val phoneChannel: Int = 0,
     /**
      * AAC 解码器偏好（设置页「声音设置」，见 [AudioDecoderChoice]）。
      * 只是**偏好**：Freescale 那条路不可用时渲染器一律回落到 MediaCodec，用户不会因此没声音。
@@ -515,6 +516,7 @@ class AndroidMediaSink(
             audioFocusEnabled,
             mediaChannel,
             navigationChannel,
+            phoneChannel,
             audioFocusCoordinator,
             navigationStreamType,
             mediaBufferMillis,
@@ -1103,6 +1105,7 @@ private class AudioRenderer(
     private val audioFocusEnabled: Boolean,
     private val mediaChannel: Int,
     private val navigationChannel: Int,
+    private val phoneChannel: Int,
     private val audioFocusCoordinator: AudioFocusCoordinator,
     private val navigationStreamType: Int,
     private val mediaBufferMillis: Int,
@@ -1496,7 +1499,9 @@ private class AudioRenderer(
     private fun channelOverride(channel: AudioChannel): Int = when (channel) {
         AudioChannel.MEDIA -> mediaChannel
         AudioChannel.NAVIGATION -> navigationChannel
-        else -> 0
+        AudioChannel.PHONE -> phoneChannel
+        // Siri shares the guidance stream by design; there is no separate assistant setting.
+        AudioChannel.ASSISTANT -> 0
     }
 
     private fun mappedSelection(): AudioChannelSelection {

@@ -48,7 +48,7 @@
             android:exported="true"
             android:launchMode="singleTask"
             android:screenOrientation="fullSensor"
-            android:theme="@style/Theme.Xcertplay"
+            android:theme="@style/Theme.Xcertplay.Host"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />
@@ -122,3 +122,5 @@
     </application>
 
 </manifest>
+
+

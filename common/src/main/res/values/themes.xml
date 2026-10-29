@@ -14,6 +14,9 @@
         colour into a ColorDrawable, which is why this only ever broke on the head unit.
     -->
     <style name="Theme.Xcertplay" parent="android:Theme.Holo.NoActionBar">
+        <!-- No activity open/close animation: the app moves between its own screens instantly, and the
+             CarPlay host is only a hidden step of a connect. -->
+        <item name="android:windowAnimationStyle">@style/NoWindowAnimation</item>
         <item name="android:fontFamily">sans</item>
         <!--
             Transparent, not a colour.
@@ -26,10 +29,27 @@
             real drawable.
         -->
         <item name="android:windowBackground">@drawable/diplay_window_transparent</item>
+        <!--
+            A head unit has no status bar: the CS11 gives DiPlay a 1280x650 window above its own dock. On a
+            plain device (the API 19 emulator used for visual checks) the status bar would otherwise take
+            24 dp off the top of every page, which is not the window this layout was drawn for.
+        -->
+        <item name="android:windowFullscreen">true</item>
         <item name="android:windowActionModeOverlay">true</item>
         <item name="android:windowActionBar">false</item>
         <item name="android:windowNoTitle">true</item>
     </style>
+
+    <!-- CarPlay host: no starting window. The host is launched from the home page during a connect and the
+         preview window would be an opaque black frame over the home page until the session owns the
+         screen. Disabling it lets the home page stay visible while the bring-up starts.
+    -->
+    <style name="Theme.Xcertplay.Host" parent="Theme.Xcertplay">
+        <item name="android:windowDisablePreview">true</item>
+    </style>
+
+    <!-- A window that must not animate in or out: the CarPlay host is invisible during a from-home connect. -->
+    <style name="NoWindowAnimation" parent="" />
 
     <style name="Theme.AdbCluster" parent="android:Theme.Holo.NoActionBar">
         <item name="android:windowIsTranslucent">true</item>
@@ -39,3 +59,7 @@
         <item name="android:windowDisablePreview">true</item>
     </style>
 </resources>
+
+
+
+

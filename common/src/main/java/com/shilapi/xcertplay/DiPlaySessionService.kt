@@ -25,7 +25,7 @@ class DiPlaySessionService : Service() {
         @Suppress("DEPRECATION")
         val builder = Notification.Builder(this)
         builder.setSmallIcon(R.drawable.ic_diplay_notification)
-            .setContentTitle("DiPlay")
+            .setContentTitle("LynkPaly")
             .setContentText("CarPlay connection running")
             .setContentIntent(open).setOngoing(true)
         startForeground(1, builder.build())
@@ -44,3 +44,5 @@ class DiPlaySessionService : Service() {
         const val ACTION_STOP = "com.shihab.diplay.DISCONNECT"
     }
 }
+
+

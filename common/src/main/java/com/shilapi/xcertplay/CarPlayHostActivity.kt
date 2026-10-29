@@ -127,6 +127,9 @@ class CarPlayHostActivity : ComponentActivity() {
 
     private var connectionPanel: View? = null
     private var wifiRecoveryButton: View? = null
+
+    /** The Wi-Fi reset failure has already sent the driver to the home page's recovery dialog. */
+    private var wifiRecoveryHandedOff = false
     private var reconnectAttempts = 0
     private val startupRetryBudget = WirelessStartupRetryBudget()
 
@@ -145,7 +148,7 @@ class CarPlayHostActivity : ComponentActivity() {
         remoteMfiServer = remoteMfiServer.trim().takeIf { it.isNotEmpty() },
         remoteMfiToken = remoteMfiToken.takeIf { it.isNotEmpty() },
         identification = Iap2IdentificationConfig(
-            name = "DiPlay",
+            name = DiPlayBootstrap.CARPLAY_NAME,
             modelIdentifier = normalizedModel(),
             manufacturer = normalizedManufacturer(),
             serialNumber = "DIPLAY-" + DiPlayBootstrap.deviceId(airPlayIdentity).replace(":", ""),
@@ -154,7 +157,7 @@ class CarPlayHostActivity : ComponentActivity() {
             carPlayUsbInterfaceNumber = 3,
             locationInformationEnabled = locationReportingEnabled,
         ),
-        label = "DiPlay",
+        label = DiPlayBootstrap.CARPLAY_NAME,
         hostName = "diplay-" + DiPlayBootstrap.deviceId(airPlayIdentity).replace(":", "").lowercase(),
         hostMac = DiPlayBootstrap.deviceId(airPlayIdentity).split(":").map { it.toInt(16).toByte() }.toByteArray(),
         wirelessBluetoothDeviceAddress = DiPlayPreferences.phoneAddress(this),
@@ -376,6 +379,16 @@ class CarPlayHostActivity : ComponentActivity() {
     private var hotspotStatus = HotspotStatus(state = "off")
     private var menuOpen = false
     private var latestStage = "Preparing CarPlay"
+
+    /** Started from the home page: hand the screen back to it while the link comes up. */
+    private var startBehind = false
+
+    /** The home page's still frame shown while the host owns the screen during a from-home connect. */
+    private var launchMirror: View? = null
+
+    /** Finished on request of the home page rather than by the driver leaving this screen. */
+    private var finishingFromBackground = false
+
     private var darkMode = false
     private var paintWaitingScreen: () -> Unit = {}
     private var carPlayNightMode = CarPlayNightMode.SYSTEM
@@ -583,6 +596,15 @@ class CarPlayHostActivity : ComponentActivity() {
         if (isIphoneUsbAttachment(intent)) {
             AirPlayPersistence.saveWirelessEnabled(this, false)
         }
+        // Plugging the iPhone in starts this screen directly; that path must land on the home page as well
+        // (the connecting screen this activity used to show has been deleted), so treat it like a
+        // from-home connect: start the link, hand the screen back, come forward again with the video.
+        startBehind = intent.getBooleanExtra(EXTRA_START_BEHIND, false) || isIphoneUsbAttachment(intent)
+        if (startBehind) {
+            // This window is only an implementation detail of the connect: no task-switch zoom, no
+            // window animation. The still frame it paints is meant to look like nothing happened.
+            window.setWindowAnimations(R.style.NoWindowAnimation)
+        }
         if (runCatching { DiPlayBootstrap.ensure(this, AirPlayPersistence.loadMfiTarget(this)) }.isFailure) {
             startActivity(Intent(this, DiPlayActivity::class.java))
             finish(); return
@@ -602,6 +624,10 @@ class CarPlayHostActivity : ComponentActivity() {
         @Suppress("DEPRECATION")
         requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
         setContentView(buildContentView())
+        // The host takes the screen in its own task for a few hundred milliseconds while the surface is
+        // measured and the session starts; paint the home page's last frame over it so that switch is
+        // invisible instead of a black flash (see CarPlayLaunchSnapshot).
+        if (startBehind) showLaunchSnapshot()
         // Parse the offline MFi identity while the surface and first layout are still coming up. `load` costs
         // about 1.2 s on this CPU (provider init plus a P-256 sign/verify) and used to be pure waiting at the
         // start of every wired connection.
@@ -1071,13 +1097,34 @@ class CarPlayHostActivity : ComponentActivity() {
         // recovered because every attempt reused the wedged stack.
         //
         // Leaving the activity is the point at which this app has nothing to keep, so it takes the process
-        // with it. A rotation or a temporary stop is not that point - only a real finish is.
-        if (isFinishing && !isChangingConfigurations) {
+        // with it. A rotation or a temporary stop is not that point - only a real finish is, and neither is
+        // a disconnect asked for from the home page: that screen is still there and killing the process
+        // under it showed up as a black frame (owner report, 2026-10-29).
+        if (isFinishing && !isChangingConfigurations && !finishingFromBackground) {
             mainHandler.postDelayed(
                 { android.os.Process.killProcess(android.os.Process.myPid()) },
                 PROCESS_EXIT_DELAY_MILLIS,
             )
         }
+    }
+
+    /** Covers the host's first frames with the home page's last image; dropped when the session goes live. */
+    private fun showLaunchSnapshot() {
+        val bitmap = CarPlayLaunchSnapshot.bitmap ?: return
+        CarPlayLaunchSnapshot.bitmap = null
+        val container = findViewById<ViewGroup>(android.R.id.content) ?: return
+        val mirror = android.widget.ImageView(this).apply {
+            scaleType = android.widget.ImageView.ScaleType.FIT_XY
+            setImageBitmap(bitmap)
+        }
+        container.addView(mirror, ViewGroup.LayoutParams(-1, -1))
+        launchMirror = mirror
+    }
+
+    private fun clearLaunchSnapshot() {
+        val mirror = launchMirror ?: return
+        launchMirror = null
+        (mirror.parent as? ViewGroup)?.removeView(mirror)
     }
 
     private fun buildContentView(): View {
@@ -1114,216 +1161,6 @@ class CarPlayHostActivity : ComponentActivity() {
         val cornerMask = CarPlayCornerMaskOverlay(this)
         root.addView(cornerMask, FrameLayout.LayoutParams(-1, -1))
         root.addView(gestureLayer, FrameLayout.LayoutParams(-1, -1))
-        // Measure the preparation content naturally, then fit it inside the safe viewport.
-        val viewport = object : FrameLayout(this) {
-            override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-                super.onMeasure(widthMeasureSpec, heightMeasureSpec)
-                getChildAt(0)?.measure(
-                    View.MeasureSpec.makeMeasureSpec((measuredWidth - paddingLeft - paddingRight).coerceAtLeast(0), View.MeasureSpec.EXACTLY),
-                    View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
-                )
-            }
-        }.apply {
-            isClickable = true
-        }
-        val panel = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-        }
-        // Kept so paintWaitingScreen and the callers below keep their references, but no longer shown: the
-        // screen is signed with a block and a wordmark rather than a coloured app icon (docs/_digest/60).
-        val icon = ImageView(this).apply {
-            setImageResource(R.drawable.ic_carplay)
-            contentDescription = getString(R.string.carplay)
-        }
-        val lockup = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        lockup.addView(
-            View(this).apply { setBackgroundColor(WaitingScreenColors.of(darkMode).text) },
-            LinearLayout.LayoutParams(dp(10), dp(10)),
-        )
-        val title = TextView(this).apply {
-            text = getString(R.string.diplay)
-            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-        }
-        lockup.addView(title, LinearLayout.LayoutParams(-2, -2).apply { leftMargin = dp(14) })
-        lockup.addView(
-            TextView(this).apply {
-                text = "CARPLAY · CS11"
-                textSize = 13f
-                setTextColor(WaitingScreenColors.of(darkMode).secondary)
-            },
-            LinearLayout.LayoutParams(-2, -2).apply { leftMargin = dp(16) },
-        )
-        panel.addView(lockup)
-        panel.addView(
-            View(this).apply { setBackgroundColor(Color.rgb(0x2A, 0x29, 0x26)) },
-            LinearLayout.LayoutParams(-1, dp(1)).apply { topMargin = dp(18) },
-        )
-        // The stage as the page's headline, then the progress line, then the recent stages.
-        val stage = TextView(this).apply {
-            text = getString(R.string.getting_carplay_ready)
-            textSize = 34f
-        }
-        panel.addView(stage, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(26) })
-        val progress = DiPlayProgressBar(this)
-        panel.addView(
-            progress,
-            LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(20) },
-        )
-        val stageList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        stageListView = stageList
-        panel.addView(stageList, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(18) })
-        val instructions = TextView(this).apply {
-            text = if (wirelessEnabled) getString(R.string.keep_your_iphone_nearby_with_bluetooth_and_wi_fi_on_allow)
-                else getString(R.string.use_a_usb_data_cable_and_unlock_your_iphone_allow_trust_an)
-        }
-        panel.addView(instructions, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(16) })
-        val recovery = SettingsWidgets.createButton(
-            this,
-            getString(R.string.reset_carplay_wi_fi),
-            theme = settingsTheme,
-            minHeightDp = 64,
-        ) { showDiPlayHome("wireless-recovery") }.apply {
-            visibility = View.GONE
-            wifiRecoveryButton = this
-        }
-        panel.addView(recovery, LinearLayout.LayoutParams(dp(300), dp(64)).apply { bottomMargin = dp(12) })
-        lateinit var retry: Button
-        retry = SettingsWidgets.createButton(
-            this,
-            getString(R.string.retry_carplay_connection),
-            theme = settingsTheme,
-            minHeightDp = 64,
-        ) {
-            if (!CarPlayBackgroundSession.isOwner(this@CarPlayHostActivity) ||
-                shuttingDown.get() || menuOpen || handshakeResetInProgress) return@createButton
-            startupRetryBudget.manualRetry()
-            startupRetryStopped = false
-            reconnectAttempts = 0
-            retry.visibility = View.GONE
-            restartCarPlay(getString(R.string.connecting_to_your_iphone))
-        }.apply {
-            visibility = View.GONE
-            startupRetryButton = this
-        }
-        panel.addView(retry, LinearLayout.LayoutParams(dp(300), dp(64)).apply { bottomMargin = dp(12) })
-        val back = SettingsWidgets.createButton(
-            this,
-            getString(R.string.back_to_diplay),
-            style = SettingsWidgets.ButtonStyle.PRIMARY,
-            theme = settingsTheme,
-            minHeightDp = 64,
-        ) { showDiPlayHome() }
-        panel.addView(back, LinearLayout.LayoutParams(dp(300), dp(64)))
-        val gestureHint = TextView(this).apply {
-            text = getString(R.string.open_diplay_settings_hint, gestureFingerCount)
-        }
-        panel.addView(gestureHint, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(14) })
-        paintWaitingScreen = {
-            val colors = WaitingScreenColors.of(darkMode)
-            viewport.setBackgroundColor(colors.background)
-            title.setTextColor(colors.text)
-            stage.setTextColor(colors.text)
-            instructions.setTextColor(colors.secondary)
-            gestureHint.setTextColor(colors.secondary)
-            // The progress line and the inverted primary follow the day/night palette as well; on the day side
-            // the white sweep was invisible and the button was white on light (docs/_digest/60).
-            progress.setBarColors(
-                colors.text,
-                if (darkMode) Color.rgb(0x2A, 0x29, 0x26) else Color.rgb(0xD8, 0xD7, 0xD4),
-            )
-            back.setTextColor(colors.background)
-            back.background = GradientDrawable().apply {
-                setColor(colors.text)
-                cornerRadius = dp(4).toFloat()
-            }
-            renderRecentStages()
-        }
-        paintWaitingScreen()
-        viewport.addView(panel, FrameLayout.LayoutParams(-1, -2, Gravity.CENTER))
-        // Left transparent on purpose.
-        //
-        // It was briefly filled with `settingsTheme.background` to hide the black the video TextureView paints
-        // until its first frame, but `settingsTheme` is the OVERLAY palette (the three-finger panel's), so on a
-        // light-themed app the wait turned into four seconds of grey that matched nothing else on screen.
-        // The panel itself stays transparent over video, as it always was.
-        root.addView(viewport, FrameLayout.LayoutParams(-1, -1))
-        // Frame-rate overlay (EasyPlay 10-80 parity). Mounted last so the picture/corner-mask/touch/
-        // preparation order above stays exactly as the layout tests assert; being non-clickable it never
-        // takes a CarPlay touch, and it is GONE unless a session is running with the setting on.
-        val fpsText = TextView(this).apply {
-            setTextSize(12f)
-            setTextColor(Color.WHITE)
-            setBackgroundColor(0x99000000.toInt())
-            setPadding(dp(8), dp(4), dp(8), dp(4))
-            visibility = View.GONE
-            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-            isClickable = false
-            isFocusable = false
-        }
-        root.addView(
-            fpsText,
-            FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.END).apply {
-                topMargin = dp(12)
-                marginEnd = dp(12)
-            },
-        )
-        fpsView = fpsText
-        var preparationHeight = -1
-        fun updatePreparationLayout() {
-            val height = viewport.height - viewport.paddingTop - viewport.paddingBottom
-            if (height <= 0) return
-            // Interpolate within the short viewport range; keep regular screens at their existing size.
-            val fraction = ((height.toFloat() / resources.displayMetrics.density - 240f) / 240f).coerceIn(0f, 1f)
-            fun size(short: Float, regular: Float) = short + (regular - short) * fraction
-            fun spacing(short: Float, regular: Float) = dp(size(short, regular).toInt())
-            val availableWidth = viewport.width - viewport.paddingLeft - viewport.paddingRight - dp(48)
-            val buttonWidth = minOf(dp(300), availableWidth.coerceAtLeast(dp(48)))
-            for (button in listOf(back, recovery, retry)) {
-                if (button.layoutParams.width != buttonWidth) {
-                    button.layoutParams = button.layoutParams.apply { width = buttonWidth }
-                }
-            }
-            if (preparationHeight == height) return
-            preparationHeight = height
-            panel.setPadding(dp(24), spacing(16f, 32f), dp(24), spacing(16f, 32f))
-            val iconSize = spacing(54f, 88f)
-            icon.layoutParams = LinearLayout.LayoutParams(iconSize, iconSize)
-            title.textSize = size(26f, 34f)
-            title.setPadding(0, spacing(8f, 18f), 0, spacing(6f, 14f))
-            stage.textSize = size(19f, 22f)
-            instructions.textSize = size(15f, 17f)
-            instructions.setPadding(0, spacing(8f, 14f), 0, spacing(12f, 24f))
-            for (button in listOf(back, recovery, retry)) {
-                button.textSize = size(17f, 18f)
-                button.layoutParams = button.layoutParams.apply { this.height = spacing(50f, 64f) }
-            }
-            gestureHint.textSize = size(12.5f, 13f)
-            gestureHint.setPadding(0, spacing(10f, 20f), 0, 0)
-        }
-        fun fitPreparationContent() {
-            val availableHeight = viewport.height - viewport.paddingTop - viewport.paddingBottom
-            if (panel.height <= 0 || availableHeight <= 0) return
-            val landscape = viewport.width - viewport.paddingLeft - viewport.paddingRight > availableHeight
-            val scale = if (landscape) minOf(1f, availableHeight.toFloat() / panel.height) else 1f
-            panel.scaleX = scale
-            panel.scaleY = scale
-        }
-        panel.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> fitPreparationContent() }
-        viewport.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
-            updatePreparationLayout()
-            fitPreparationContent()
-        }
-        ViewCompat.setOnApplyWindowInsetsListener(viewport) { _, insets ->
-            val safe = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
-            viewport.setPadding(safe.left, safe.top, safe.right, safe.bottom)
-            viewport.post { updatePreparationLayout() }
-            insets
-        }
-        ViewCompat.requestApplyInsets(viewport)
         // The settings menu is built on first open, not here.
         //
         // `openSettingsMenu` already rebuilds it every time (`buildSettingsMenu()` replaces the previous
@@ -1340,9 +1177,6 @@ class CarPlayHostActivity : ComponentActivity() {
         cornerMaskOverlay = cornerMask
         // On activity start the setting is the persisted one, so a reboot brings the mask back.
         applyScreenCornerMask()
-        settingsGestureHint = gestureHint
-        stageStatusView = stage
-        connectionPanel = viewport
         updateDebugOverlays()
         return root
     }
@@ -3410,7 +3244,7 @@ class CarPlayHostActivity : ComponentActivity() {
         // really sent; the car's own log is the only place that answers why no icon appears.
         val declaredIcon = loadAirPlayIcon()
         return AirPlayConfig(
-            deviceName = "DiPlay",
+            deviceName = DiPlayBootstrap.CARPLAY_NAME,
             deviceId = DiPlayBootstrap.deviceId(airPlayIdentity),
             btMac = DiPlayBluetooth.localAddress(this) ?: DiPlayBootstrap.deviceId(airPlayIdentity),
             sourceVersion = "950.7.1",
@@ -3632,6 +3466,7 @@ class CarPlayHostActivity : ComponentActivity() {
             audioFocusEnabled = AirPlayPersistence.loadAudioFocusEnabled(this),
             mediaChannel = AirPlayPersistence.loadMediaAudioChannel(this),
             navigationChannel = AirPlayPersistence.loadNavigationAudioChannel(this),
+            phoneChannel = AirPlayPersistence.loadCallAudioChannel(this),
             // 设置页「声音设置」的解码器偏好。取下次建流生效；不可用时渲染器自动回落并写诊断行。
             audioDecoderChoice = AirPlayPersistence.loadAudioDecoder(this),
             context = this,
@@ -3730,6 +3565,18 @@ class CarPlayHostActivity : ComponentActivity() {
                     reconnectAttempts = 0
                     logThemeState(ThemeModeDiagnostics.Source.SESSION_ACTIVE, resources.configuration)
                     syncAirPlayDarkMode(ThemeModeDiagnostics.Source.SESSION_ACTIVE)
+                    CarPlayProgress.clear()
+                    // The bring-up is over: if the user started it from the home page, bring the video
+                    // forward the way the connecting screen used to when it swapped to the session.
+                    if (startBehind) {
+                        startBehind = false
+                        // Drop the home page's still frame before the window comes forward with the video.
+                        clearLaunchSnapshot()
+                        startActivity(
+                            Intent(this@CarPlayHostActivity, CarPlayHostActivity::class.java)
+                                .addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),
+                        )
+                    }
                     if (menuOpen) return@runOnUiThread
                     appendLog("AirPlay session active")
                 }
@@ -3913,8 +3760,16 @@ class CarPlayHostActivity : ComponentActivity() {
         setConnectionStage(description)
         when (status) {
             is CarPlayStatus.Failed -> if (status.wifiResetRequired) {
+                // The connecting screen that carried this button has been deleted; the recovery dialog
+                // itself lives on the home page (page "wireless-recovery"), so send the driver there once
+                // instead of restarting by itself.
                 wifiRecoveryButton?.visibility = View.VISIBLE
+                if (!wifiRecoveryHandedOff) {
+                    wifiRecoveryHandedOff = true
+                    showDiPlayHome("wireless-recovery", noAnimation = true)
+                }
             } else {
+                wifiRecoveryHandedOff = false
                 wifiRecoveryButton?.visibility = View.GONE
                 if (status.startupFailure != null) {
                     if (startupFailureGeneration == controllerGeneration) return@report
@@ -4054,6 +3909,9 @@ class CarPlayHostActivity : ComponentActivity() {
         videoView?.let { updateVideoLayout(it.width, it.height) }
         CarPlayBackgroundSession.store(next, renderer, size.width, size.height, this, display) { completion ->
             runOnUiThread {
+                // If this screen is not the one on display, the home page asked for the disconnect: finish
+                // quietly and leave the process alone so that page survives.
+                finishingFromBackground = !isActivityStarted
                 shutdown(terminateProcess = false, reason = "DiPlay disconnect", completion = completion)
                 finish()
             }
@@ -4062,6 +3920,19 @@ class CarPlayHostActivity : ComponentActivity() {
             val serviceIntent = Intent(this, DiPlaySessionService::class.java)
             // CS11: startForegroundService 是 API26；4.4 走 startService
             startService(serviceIntent)
+            // Hand the screen back *before* the bring-up: `next.start()` spends the next stretch loading the
+            // offline MFi identity and opening the link, and letting the host stay on top through that was
+            // the flash of the checklist the owner saw. `setVisible(false)` hides this window instead of
+            // leaving a blank one on top, so the home page below is already visible while the activity
+            // manager finishes the reorder (see EXTRA_START_BEHIND).
+            if (startBehind) {
+                // Home comes forward over the still frame; hiding this window first would leave a beat
+                // where neither screen is drawn, which is the flash the owner saw.
+                showDiPlayHome(noAnimation = true)
+                // The host lives in its own task; without this the cross-task switch reads as a black
+                // flash between two moments where the home page should be the only thing on screen.
+                overridePendingTransition(0, 0)
+            }
             next.start()
         } catch (error: RuntimeException) {
             appendLog("Connection could not start: ${error.javaClass.simpleName}")
@@ -4359,46 +4230,23 @@ class CarPlayHostActivity : ComponentActivity() {
         }
     }
 
-    private fun showDiPlayHome(page: String = "home") {
+    private fun showDiPlayHome(page: String = "home", noAnimation: Boolean = false) {
         controller?.sendTouch(emptyList())
-        startActivity(Intent(this, DiPlayActivity::class.java)
-            .putExtra("page", page).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
+        val intent = Intent(this, DiPlayActivity::class.java)
+            .putExtra("page", page)
+            .addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+        // A task switch on 4.4 plays the system zoom animation (the page shrinking in and out); the
+        // from-home connect must not show it, because it reads as the screen being re-launched.
+        if (noAnimation) intent.addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION)
+        startActivity(intent)
     }
 
     private fun openSettingsMenu() {
         if (menuOpen) return
+        // The three-finger gesture no longer builds an in-CarPlay panel: it opens the app's own settings
+        // page, so there is exactly one settings screen to maintain. The session keeps running behind it.
         controller?.sendTouch(emptyList())
-        loadPersistedSettings()
-        settingsBaseline = captureSettingsBaseline()
-        // Rebuild controls from saved values so a cancelled edit cannot reappear on reopening.
-        val previous = settingsMenu
-        if (previous != null) {
-            val parent = previous.parent as ViewGroup
-            val index = parent.indexOfChild(previous)
-            parent.removeView(previous)
-            settingsMenu = buildSettingsMenu()
-            parent.addView(settingsMenu, index, FrameLayout.LayoutParams(-1, -1))
-        } else {
-            // First open: build it now and put it where the anchor sits, so the z-order is unchanged.
-            val anchor = settingsMenuAnchor
-            val parent = anchor?.parent as? ViewGroup
-            if (parent != null && anchor != null) {
-                val index = parent.indexOfChild(anchor)
-                settingsMenu = buildSettingsMenu()
-                parent.addView(settingsMenu, index, FrameLayout.LayoutParams(-1, -1))
-            }
-        }
-        menuOpen = true
-        refreshVideoFps()
-        gestureOverlay?.visibility = View.GONE
-        // Nothing of the picture is visible under the menu, so the mask is hidden with it; the
-        // persisted flag is only re-applied when the menu closes.
-        applyScreenCornerMask()
-        settingsMenu?.visibility = View.VISIBLE
-        safeAreaEditor?.visibility = View.GONE
-        updateSafeAreaSummary()
-        updateResolutionMenu()
-        updateDebugOverlays()
+        showDiPlayHome("settings", noAnimation = true)
     }
 
     private fun openPicturePanel() {
@@ -4491,6 +4339,9 @@ class CarPlayHostActivity : ComponentActivity() {
 
     private fun shutdown(terminateProcess: Boolean, reason: String, completion: () -> Unit = {}) {
         if (!shuttingDown.compareAndSet(false, true)) { completion(); return }
+        // No session is being brought up any more, and the home page must stop spinning for it.
+        CarPlayProgress.clear()
+        clearLaunchSnapshot()
         // Shutdown restores through DiPlaySessionService's own stop; a grace still pending would fire
         // against a stack that is already gone.
         cancelMediaAudioRestore()
@@ -4799,6 +4650,8 @@ class CarPlayHostActivity : ComponentActivity() {
     private fun setConnectionStage(message: String) {
         latestStage = message
         val friendly = friendlyStage(message)
+        // The home page keeps showing this line while it stays in front during the bring-up.
+        CarPlayProgress.publish(friendly)
         stageStatusView?.text = friendly
         // The recent stages are the connecting screen's own list: it says how far the bring-up got, which is
         // what a driver waiting at the screen - and a log read afterwards - needs (docs/_digest/60).
@@ -5211,3 +5064,11 @@ internal object CarPlayBackgroundSession {
         display = null
     }
 }
+
+
+
+
+
+
+
+

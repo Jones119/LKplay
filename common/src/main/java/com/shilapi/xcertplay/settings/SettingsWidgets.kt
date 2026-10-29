@@ -223,7 +223,7 @@ object SettingsWidgets {
         orientation = LinearLayout.VERTICAL
         background = GradientDrawable().apply {
             setColor(theme.surface)
-            cornerRadius = theme.corner(context)
+            cornerRadius = theme.cardCorner(context)
             setStroke(theme.dp(context, 1), theme.cardBorder)
         }
         setPadding(

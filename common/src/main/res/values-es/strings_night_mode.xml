@@ -8,5 +8,7 @@
     <string name="carplay_night_hint">Se aplica a esta pantalla al instante; la imagen de CarPlay lo toma en la próxima conexión.</string>
     <string name="carplay_night_ambient_hint">El modo automático usa el umbral y el retardo de abajo; sin sensor de luz, sigue Android.</string>
     <string name="carplay_night_time_note">La apariencia automática de CarPlay también usa la hora del iPhone: de noche, Siempre de día puede seguir mostrando el modo oscuro.</string>
-    <string name="carplay_night_auto_unavailable">DiPlay no puede leer ni el sensor de luz ni el estado día/noche de este equipo, así que los dos modos automáticos pueden quedarse en día. Usa «Día fijo» o «Noche fija».</string>
+    <string name="carplay_night_auto_unavailable">LynkPaly no puede leer ni el sensor de luz ni el estado día/noche de este equipo, así que los dos modos automáticos pueden quedarse en día. Usa «Día fijo» o «Noche fija».</string>
 </resources>
+
+

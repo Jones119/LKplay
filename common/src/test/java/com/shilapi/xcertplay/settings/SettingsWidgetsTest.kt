@@ -80,8 +80,8 @@ class SettingsWidgetsTest {
         // the same rank. The wireless row used to ask for 20 sp and stood out in the panel.
         assertEquals(18f, label.textSize / context.resources.displayMetrics.scaledDensity, 0.01f)
         assertFalse(label.includeFontPadding)
-        assertEquals(Color.rgb(0x9A, 0x9A, 0x96), label.currentTextColor)
-        assertEquals(Color.rgb(0x9A, 0x9A, 0x96), description.currentTextColor)
+        assertEquals(SettingsTheme.OVERLAY.textSecondary, label.currentTextColor)
+        assertEquals(SettingsTheme.OVERLAY.textSecondary, description.currentTextColor)
         // The switch is painted through drawables, not tint lists: `thumbTintList` is API 23+ and the CS11
         // is API 19, where it is silently absent — which is how the head unit ended up drawing the
         // framework's own Holo switch in colours this project never chose.
@@ -96,7 +96,7 @@ class SettingsWidgetsTest {
         // What actually matters for the driver: the thumb must not vanish into its own track.
         assertTrue(thumb.color!!.defaultColor != track.color!!.defaultColor)
         val heading = SettingsWidgets.createCategoryHeader(context, "Heading")
-        assertEquals(Color.rgb(0xFF, 0xFF, 0xFF), heading.currentTextColor)
+        assertEquals(SettingsTheme.OVERLAY.accent, heading.currentTextColor)
         assertFalse(heading.includeFontPadding)
     }
 
@@ -131,3 +131,5 @@ class SettingsWidgetsTest {
         if (view is ViewGroup) for (i in 0 until view.childCount) yieldAll(views(view.getChildAt(i)))
     }
 }
+
+

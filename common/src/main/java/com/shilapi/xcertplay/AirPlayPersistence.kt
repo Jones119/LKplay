@@ -44,6 +44,7 @@ object AirPlayPersistence {
     private const val KEY_AUDIO_FOCUS_ENABLED = "audio_focus_enabled"
     private const val KEY_MEDIA_AUDIO_CHANNEL = "media_audio_channel"
     private const val KEY_NAVIGATION_AUDIO_CHANNEL = "navigation_audio_channel"
+    private const val KEY_CALL_AUDIO_CHANNEL = "call_audio_channel"
     private const val KEY_NAVIGATION_STREAM_TYPE = "navigation_stream_type"
     private const val KEY_WIRELESS_ENABLED = "wireless_enabled"
     private const val KEY_WIRELESS_HOTSPOT_MODE = "wireless_hotspot_mode"
@@ -212,6 +213,24 @@ object AirPlayPersistence {
     fun saveNavigationAudioChannel(context: Context, channel: Int) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putInt(KEY_NAVIGATION_AUDIO_CHANNEL, channel.takeIf { it in AUDIO_CHANNELS } ?: 0)
+            .apply()
+    }
+
+    /**
+     * The stream CarPlay phone calls play on.
+     *
+     * CS11: the ROM gives stream 0 (`STREAM_VOICE_CALL`) its own call volume and arbitration that wins over
+     * music and navigation, which is why 0 is both "automatic" here and the right default on this head unit
+     * (docs/_digest/68 §5.4). Any other value in [AUDIO_CHANNELS] overrides it for experimentation.
+     */
+    fun loadCallAudioChannel(context: Context): Int =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getInt(KEY_CALL_AUDIO_CHANNEL, 0)
+            .takeIf { it in AUDIO_CHANNELS } ?: 0
+
+    fun saveCallAudioChannel(context: Context, channel: Int) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putInt(KEY_CALL_AUDIO_CHANNEL, channel.takeIf { it in AUDIO_CHANNELS } ?: 0)
             .apply()
     }
 

@@ -10,6 +10,14 @@ import com.shilapi.xcertplay.compat.noBackupFilesDirCompat
 
 /** Installs the private beta's experimental identity. It has no remote fallback. */
 internal object DiPlayBootstrap {
+    /**
+     * The receiver name the iPhone lists under 通用 → CarPlay → 我的汽车.
+     *
+     * It is the AirPlay `deviceName`, so the home page shows the same string instead of a guess. One
+     * constant, one place to change it.
+     */
+    const val CARPLAY_NAME = "Lynk&Co"
+
     @Volatile private var ready = false
 
     @Synchronized fun ensure(context: Context, mfiTarget: MfiTarget) {
@@ -73,6 +81,25 @@ internal object DiPlayPreferences {
     fun savePhone(context: Context, address: String, name: String) {
         prefs(context).edit().putString("phone_address", address).putString("phone_name", name).apply()
     }
+
+    /**
+     * What actually connected last time, kept apart from the *selected* phone above.
+     *
+     * The selection answers "which phone should this app dial"; this answers "what happened last time",
+     * which is what the home page's summary card reports. Written when a session starts.
+     */
+    fun lastPhoneName(context: Context): String? = prefs(context).getString("last_phone_name", null)
+
+    /** Null until a session has started once; true = wireless, false = USB. */
+    fun lastWireless(context: Context): Boolean? =
+        if (prefs(context).contains("last_wireless")) prefs(context).getBoolean("last_wireless", false) else null
+
+    fun saveLastConnection(context: Context, phoneName: String, wireless: Boolean) {
+        prefs(context).edit()
+            .putString("last_phone_name", phoneName)
+            .putBoolean("last_wireless", wireless)
+            .apply()
+    }
     fun autoConnect(context: Context) = prefs(context).getBoolean("auto_connect", false)
     fun saveAutoConnect(context: Context, value: Boolean) {
         prefs(context).edit().putBoolean("auto_connect", value).apply()
@@ -99,3 +126,5 @@ internal object DiPlayPreferences {
         prefs(context).edit().putBoolean("resume_carplay_on_open", value).apply()
     }
 }
+
+

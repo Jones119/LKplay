@@ -141,6 +141,7 @@ class DiPlayResumeCarPlayTest {
         )
         val display = CarPlaySessionDisplay(1920, 990, Surface.ROTATION_0, true, true, 1920, 990)
         CarPlayBackgroundSession.store(controller, AndroidMediaSink(), 1920, 990, activity, display) {}
+        CarPlayBackgroundSession.active = true
         assertTrue("the session should be owned by this activity", CarPlayBackgroundSession.isOwner(activity))
         assertTrue("the session should read as running", CarPlayBackgroundSession.hasSession())
     }

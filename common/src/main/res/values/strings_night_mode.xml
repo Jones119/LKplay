@@ -8,5 +8,7 @@
     <string name="carplay_night_hint">Takes effect on this screen straight away. The CarPlay picture itself picks it up on the next connection.</string>
     <string name="carplay_night_ambient_hint">Automatic mode uses the threshold and delay below; without a light sensor, it follows Android.</string>
     <string name="carplay_night_time_note">CarPlay Automatic also uses iPhone time: at night, Always day may still appear dark.</string>
-    <string name="carplay_night_auto_unavailable">DiPlay cannot see an ambient light sensor or a day/night flag from this head unit, so the two automatic modes may stay in daylight. Use 固定日间 or 固定夜间.</string>
+    <string name="carplay_night_auto_unavailable">LynkPaly cannot see an ambient light sensor or a day/night flag from this head unit, so the two automatic modes may stay in daylight. Use 固定日间 or 固定夜间.</string>
 </resources>
+
+

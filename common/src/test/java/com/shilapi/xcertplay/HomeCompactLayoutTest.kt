@@ -2,7 +2,8 @@ package com.shilapi.xcertplay
 
 import android.view.View
 import android.view.ViewGroup
-import android.widget.TextView
+import android.widget.FrameLayout
+import android.widget.LinearLayout
 import com.shilapi.xcertplay.host.R
 import org.junit.Assert.*
 import org.junit.Test
@@ -35,10 +36,13 @@ class HomeCompactLayoutTest {
         val activity = Robolectric.buildActivity(DiPlayActivity::class.java).setup().get()
         shadowOf(activity).setInMultiWindowMode(multiWindow)
         ReflectionHelpers.callInstanceMethod<Unit>(activity, "render")
-        // Probes the full home by a line only it carries. It used to probe a_familiar_drive, which the
-        // waiting screen no longer has after it was rebuilt around the state headline (docs/_digest/60).
-        val hero = activity.getString(R.string.your_phone_your_drive)
-        return descendants(activity.window.decorView).filterIsInstance<TextView>().none { it.text == hero }
+        // The wide home is the row of [gauge card | spacer | right column] with weighted children; the
+        // compact home stacks the cards in one column, so no such row exists. Probing the weights survives a
+        // copy change - the old probe looked for a headline string and broke when the design replaced it.
+        return !descendants(activity.window.decorView).filterIsInstance<LinearLayout>().any { row ->
+            row.orientation == LinearLayout.HORIZONTAL && row.childCount == 3 && row.getChildAt(0) is FrameLayout &&
+                (row.getChildAt(0).layoutParams as? LinearLayout.LayoutParams)?.weight?.let { it > 0.4f } == true
+        }
     }
 
     private fun descendants(view: View): Sequence<View> = sequence {
@@ -46,3 +50,6 @@ class HomeCompactLayoutTest {
         if (view is ViewGroup) for (i in 0 until view.childCount) yieldAll(descendants(view.getChildAt(i)))
     }
 }
+
+
+
