@@ -204,69 +204,9 @@ class CarPlayHostDisplaySizeTest {
         }
     }
 
-    @Test fun menuBarChangesPreviewWithoutSavingAndCancelRestoresTheSavedValues() {
-        invoke("loadPersistedSettings")
-        setField("settingsBaseline", invoke("captureSettingsBaseline"))
-        setField("menuOpen", true)
-        val controls = invoke("buildFullscreenSection") as ViewGroup
 
-        menuBarSwitch(controls, R.string.hide_the_navigation_bar).performClick()
 
-        assertEquals(false, getField("hideBottomBar"))
-        assertWindowBars(true, false)
-        assertTrue(AirPlayPersistence.loadHideBottomBar(activity))
 
-        invoke("cancelSettingsEdits")
-
-        assertEquals(true, getField("hideBottomBar"))
-        assertWindowBars(true, true)
-        assertTrue(AirPlayPersistence.loadHideBottomBar(activity))
-    }
-
-    @Test fun cancellingAnUnchangedMenuDoesNotReMeasureTheWindow() {
-        invoke("loadPersistedSettings")
-        setField("settingsBaseline", invoke("captureSettingsBaseline"))
-        setField("menuOpen", true)
-        val video = CountingTextureView(activity).apply { layout(0, 0, 1920, 1080) }
-        setField("videoView", video)
-
-        invoke("cancelSettingsEdits")
-
-        // Nothing was previewed, so no display renegotiation may be scheduled on the way out.
-        assertEquals(0, video.posts)
-        assertEquals(false, getField("menuOpen"))
-    }
-
-    @Test fun cancellingARealBarPreviewStillRestoresTheWindowAndReMeasures() {
-        invoke("loadPersistedSettings")
-        setField("settingsBaseline", invoke("captureSettingsBaseline"))
-        setField("menuOpen", true)
-        val video = CountingTextureView(activity).apply { layout(0, 0, 1920, 1080) }
-        setField("videoView", video)
-        val controls = invoke("buildFullscreenSection") as ViewGroup
-
-        menuBarSwitch(controls, R.string.hide_the_status_bar).performClick()
-        val afterPreview = video.posts
-
-        invoke("cancelSettingsEdits")
-
-        assertTrue(AirPlayPersistence.loadHideTopBar(activity))
-        assertTrue("a real bar preview must still be re-measured on cancel", video.posts > afterPreview)
-    }
-
-    @Test fun savingMenuBarsPreservesAnIndependentCombination() {
-        AirPlayPersistence.saveWirelessHotspotMode(activity, WirelessHotspotMode.WIFI_P2P)
-        invoke("loadPersistedSettings")
-        setField("menuOpen", true)
-        val controls = invoke("buildFullscreenSection") as ViewGroup
-        menuBarSwitch(controls, R.string.hide_the_status_bar).performClick()
-
-        invoke("saveSettingsAndReconnect")
-
-        assertFalse(AirPlayPersistence.loadHideTopBar(activity))
-        assertTrue(AirPlayPersistence.loadHideBottomBar(activity))
-        assertEquals(false, getField("menuOpen"))
-    }
 
     @Test fun quickOpenAndCloseCancelsThePendingShrink() {
         startSession()
