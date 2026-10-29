@@ -342,6 +342,7 @@
     <string name="save">Save</string>
     <string name="save_1_1">Save 1:1</string>
     <string name="save_and_reconnect">Save and reconnect</string>
+    <string name="discard_changes">Discard changes</string>
     <string name="save_details">Save details</string>
     <string name="save_diagnostic_report">Save diagnostic report</string>
     <string name="saved_for_your_next_connection">Saved for your next connection</string>
@@ -636,6 +637,7 @@
     <string name="call_banner_answer">Answer</string>
     <string name="call_banner_end">Hang up</string>
 </resources>
+
 
 
 

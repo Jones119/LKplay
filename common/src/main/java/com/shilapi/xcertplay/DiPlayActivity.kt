@@ -81,6 +81,11 @@ class DiPlayActivity : ComponentActivity() {
     /** The last stack change was a trip to the car's own settings, so the page needs a full rebuild. */
     private var leftForSystemSettings = false
     private var pendingWireless = false
+
+    /** A reconnect-only setting changed while a session was running; the header offers save/cancel. */
+    private var pendingReconnect = false
+    private var pendingSnapshot: Map<String, Map<String, *>>? = null
+    private var pendingActions: LinearLayout? = null
     private var initialLaunch = true
     private var notificationTransport = true
     private var exportInProgress = false
@@ -430,6 +435,37 @@ class DiPlayActivity : ComponentActivity() {
         titles.addView(label("CarPlay · CS11", 10, MUTED))
         bar.addView(titles, LinearLayout.LayoutParams(0, -2, 1f))
 
+        // Shown only when a session is running and a restart-only setting was touched: the driver decides
+        // whether to drop the session now or keep it and let the change apply next time.
+        val actions = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            visibility = if (pendingReconnect) View.VISIBLE else View.GONE
+        }
+        actions.addView(
+            SettingsWidgets.createButton(
+                context = this,
+                title = getString(R.string.discard_changes),
+                style = SettingsWidgets.ButtonStyle.SECONDARY,
+                theme = nightPalette,
+                minHeightDp = 34,
+                textSizeSp = 12f,
+            ) { cancelPendingReconnect() },
+            LinearLayout.LayoutParams(-2, dp(34)),
+        )
+        actions.addView(
+            SettingsWidgets.createButton(
+                context = this,
+                title = getString(R.string.save_and_reconnect),
+                style = SettingsWidgets.ButtonStyle.PRIMARY,
+                theme = nightPalette,
+                minHeightDp = 34,
+                textSizeSp = 12f,
+            ) { applyPendingReconnect() },
+            LinearLayout.LayoutParams(-2, dp(34)).apply { leftMargin = dp(8) },
+        )
+        bar.addView(actions, LinearLayout.LayoutParams(-2, -2).apply { rightMargin = dp(12) })
+        pendingActions = actions
         val pill = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -1796,21 +1832,21 @@ class DiPlayActivity : ComponentActivity() {
         if (value == previous) return
         AirPlayPersistence.saveMediaAudioChannel(this, value)
         control.text = summary(value)
-        if (CarPlayBackgroundSession.hasSession()) connect(AirPlayPersistence.loadWirelessEnabled(this))
+        markNeedsReconnect()
     }
 
     private fun applyNavigationChannel(value: Int, previous: Int, control: Button, summary: (Int) -> String) {
         if (value == previous) return
         AirPlayPersistence.saveNavigationAudioChannel(this, value)
         control.text = summary(value)
-        if (CarPlayBackgroundSession.hasSession()) connect(AirPlayPersistence.loadWirelessEnabled(this))
+        markNeedsReconnect()
     }
 
     private fun applyCallChannel(value: Int, previous: Int, control: Button, summary: (Int) -> String) {
         if (value == previous) return
         AirPlayPersistence.saveCallAudioChannel(this, value)
         control.text = summary(value)
-        if (CarPlayBackgroundSession.hasSession()) connect(AirPlayPersistence.loadWirelessEnabled(this))
+        markNeedsReconnect()
     }
 
     private fun channelLabel(value: Int): String = value.toString()
@@ -2075,8 +2111,62 @@ class DiPlayActivity : ComponentActivity() {
     private fun hasPreciseLocation() =
         hasPermissionCompat(Manifest.permission.ACCESS_FINE_LOCATION)
 
+    /**
+     * Records that a restart-only setting changed and puts the save/cancel pair in the header.
+     *
+     * The first change captures both preference files so 取消保存 can really put everything back, not just
+     * hide the buttons; 保存并重新连接 restarts the session with the new values.
+     */
+    private fun markNeedsReconnect() {
+        if (!CarPlayBackgroundSession.hasSession()) return
+        if (!pendingReconnect) {
+            pendingSnapshot = snapshotPreferences()
+            pendingReconnect = true
+        }
+        pendingActions?.visibility = View.VISIBLE
+    }
+
+    private fun cancelPendingReconnect() {
+        pendingSnapshot?.let(::restorePreferences)
+        pendingSnapshot = null
+        pendingReconnect = false
+        pendingActions?.visibility = View.GONE
+        toast(getString(R.string.discard_changes))
+        render()
+    }
+
+    private fun applyPendingReconnect() {
+        val transport = AirPlayPersistence.loadWirelessEnabled(this)
+        pendingSnapshot = null
+        pendingReconnect = false
+        pendingActions?.visibility = View.GONE
+        connect(transport)
+    }
+
+    private fun snapshotPreferences(): Map<String, Map<String, *>> = mapOf(
+        "xcertplay_airplay" to getSharedPreferences("xcertplay_airplay", MODE_PRIVATE).all,
+        "diplay" to getSharedPreferences("diplay", MODE_PRIVATE).all,
+    )
+
+    private fun restorePreferences(snapshot: Map<String, Map<String, *>>) {
+        for ((name, values) in snapshot) {
+            val editor = getSharedPreferences(name, MODE_PRIVATE).edit().clear()
+            for ((key, value) in values) when (value) {
+                is Boolean -> editor.putBoolean(key, value)
+                is Int -> editor.putInt(key, value)
+                is Long -> editor.putLong(key, value)
+                is Float -> editor.putFloat(key, value)
+                is String -> editor.putString(key, value)
+                is Set<*> -> {
+                    @Suppress("UNCHECKED_CAST")
+                    editor.putStringSet(key, value as Set<String>)
+                }
+            }
+            editor.apply()
+        }
+    }
     private fun reconnectForAppliedSetting() {
-        if (CarPlayBackgroundSession.hasSession()) connect(AirPlayPersistence.loadWirelessEnabled(this))
+        markNeedsReconnect()
     }
 
     private fun onLocationReportingChanged(enabled: Boolean) {
@@ -2098,7 +2188,7 @@ class DiPlayActivity : ComponentActivity() {
         render()
         // Location support is advertised during iAP2 identification, so both enabling and
         // disabling it require a new session. The host also refreshes its location service type.
-        if (CarPlayBackgroundSession.hasSession()) connect(AirPlayPersistence.loadWirelessEnabled(this))
+        if (CarPlayBackgroundSession.hasSession()) markNeedsReconnect()
         else toast(getString(R.string.saved_for_your_next_connection))
     }
 
@@ -3105,6 +3195,11 @@ class DiPlayActivity : ComponentActivity() {
         )
     }
 }
+
+
+
+
+
 
 
 

@@ -80,6 +80,9 @@ class LocationReportingSettingsTest {
             locationSwitch().performClick()
 
             assertEquals(enabled, AirPlayPersistence.loadLocationReportingEnabled(context))
+            // The toggle only records the change now; nothing restarts until the header asks for it.
+            assertNull(shadowOf(activity).nextStartedActivity)
+            ReflectionHelpers.callInstanceMethod<Any>(activity, "applyPendingReconnect")
             assertEquals(CarPlayHostActivity::class.java.name, shadowOf(activity).nextStartedActivity.component?.className)
         }
         assertEquals(listOf(true, false), stoppedWithSettings)

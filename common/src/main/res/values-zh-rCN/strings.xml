@@ -340,6 +340,7 @@
     <string name="save">保存</string>
     <string name="save_1_1">保存 1:1 图片</string>
     <string name="save_and_reconnect">保存并重新连接</string>
+    <string name="discard_changes">取消保存</string>
     <string name="save_details">保存详情</string>
     <string name="save_diagnostic_report">保存诊断报告</string>
     <string name="saved_for_your_next_connection">已保存，将在下次连接时生效</string>
@@ -635,6 +636,7 @@
     <string name="call_banner_answer">接听</string>
     <string name="call_banner_end">挂断</string>
 </resources>
+
 
 
 
