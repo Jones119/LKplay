@@ -554,6 +554,7 @@
     <string name="this_head_unit_has_no_image_picker">لا يحتوي نظام السيارة هذا على أداة لاختيار الصور.</string>
   <string name="exit_application_description">يوقف LynkPaly تمامًا: تنتهي معه جلسة CarPlay ونقطة اتصال السيارة وكل الخيوط الخلفية.</string>
     <string name="iphone_sent_no_picture">لم يرسل iPhone أي صورة منذ بدء CarPlay. أعد تشغيل iPhone (أوقفه ثم شغّله)، ثم اتصل من جديد.</string>
+    <string name="settings_incomplete">هذه الإعدادات غير مكتملة: %1$s. أكملها في إعدادات التطبيق ثم اتصل من جديد.</string>
 </resources>
 
 

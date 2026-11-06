@@ -61,7 +61,6 @@ class CarPlayHostDisplaySizeTest {
     @After fun tearDown() {
         (getField("shuttingDown") as AtomicBoolean).set(true)
         (getField("mainHandler") as Handler).removeCallbacksAndMessages(null)
-        AirPlayPersistence.overlaySettingsListener = null
         (getField("controller") as? CarPlayController)?.let {
             CarPlayMediaKeys.detach(it)
             it.close()

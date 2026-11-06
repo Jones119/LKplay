@@ -131,8 +131,6 @@ object AirPlayPersistence {
                 percent.coerceIn(CarPlayDisplayScale.MIN_PERCENT, CarPlayDisplayScale.MAX_PERCENT),
             ).apply()
     }
-    /** Applied by the CarPlay host so overlay position/size updates without reconnecting. */
-    @Volatile var overlaySettingsListener: (() -> Unit)? = null
 
     private const val KEY_CLUSTER_TURN_CARD_OVERLAY_SIZE_PERCENT = "cluster_turn_card_overlay_size_percent"
     private const val KEY_CLUSTER_TURN_CARD_OPACITY = "cluster_turn_card_opacity_percent"
@@ -659,7 +657,6 @@ object AirPlayPersistence {
 
     fun saveClusterContent(context: Context, content: CarPlayClusterDisplay.Content) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY_CLUSTER_CONTENT, content.name).apply()
-        overlaySettingsListener?.invoke()
     }
 
     /**
@@ -712,7 +709,6 @@ object AirPlayPersistence {
                 KEY_CLUSTER_TURN_CARD_OVERLAY_SIZE_PERCENT,
                 ClusterTurnCardOverlay.snap(percent, ClusterTurnCardOverlay.sizePercents),
             ).apply()
-        overlaySettingsListener?.invoke()
     }
 
     fun loadClusterTurnCardOpacityPercent(context: Context): Int =
@@ -723,7 +719,6 @@ object AirPlayPersistence {
     fun saveClusterTurnCardOpacityPercent(context: Context, percent: Int) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putInt(KEY_CLUSTER_TURN_CARD_OPACITY, percent.coerceIn(20, 100)).apply()
-        overlaySettingsListener?.invoke()
     }
 
     fun loadClusterTurnCardOverlayXPercent(context: Context): Int {
@@ -744,7 +739,6 @@ object AirPlayPersistence {
                 KEY_CLUSTER_TURN_CARD_OVERLAY_X,
                 ClusterTurnCardOverlay.snap(percent, ClusterTurnCardOverlay.xPercents),
             ).apply()
-        overlaySettingsListener?.invoke()
     }
 
     fun loadClusterTurnCardOverlayYPercent(context: Context): Int {
@@ -764,7 +758,6 @@ object AirPlayPersistence {
                 KEY_CLUSTER_TURN_CARD_OVERLAY_Y,
                 ClusterTurnCardOverlay.snap(percent, ClusterTurnCardOverlay.yPercents),
             ).apply()
-        overlaySettingsListener?.invoke()
     }
 
     fun loadClusterMapScalePercent(context: Context): Int = CarPlayClusterDisplay.STREAM_SCALE_PERCENT.let { default ->

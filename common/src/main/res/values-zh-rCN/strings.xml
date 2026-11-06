@@ -636,6 +636,7 @@
     <string name="call_banner_answer">接听</string>
     <string name="call_banner_end">挂断</string>
     <string name="iphone_sent_no_picture">CarPlay 启动后，iPhone 一直没有发送画面。请重启 iPhone（关机再开机），然后重新连接。</string>
+    <string name="settings_incomplete">这些设置不完整：%1$s。请在应用设置里补全后重新连接。</string>
 </resources>
 
 

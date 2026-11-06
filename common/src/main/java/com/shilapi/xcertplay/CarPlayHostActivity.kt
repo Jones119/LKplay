@@ -2276,7 +2276,16 @@ class CarPlayHostActivity : ComponentActivity() {
         if (CarPlayBackgroundSession.hasSession() && !CarPlayBackgroundSession.isOwner(this)) return
         if (shuttingDown.get() || menuOpen || handshakeResetInProgress || controller != null) return
         val controllerGeneration = restartGeneration
-        val config = createRuntimeConfig()
+        // Settings can be incomplete (for example wireless MANUAL with no hotspot SSID). Building the
+        // config used to throw on the main thread and take the app down; report it instead.
+        val config = try {
+            createRuntimeConfig()
+        } catch (error: IllegalArgumentException) {
+            val reason = error.message.orEmpty()
+            appendLog("CarPlay settings rejected: $reason")
+            setConnectionStage(getString(R.string.settings_incomplete, reason))
+            return
+        }
         val effectiveSize = if (isMultiWindowActive() &&
             maximumDetectedWidthPixels >= size.width && maximumDetectedHeightPixels >= size.height &&
             (maximumDetectedWidthPixels > size.width || maximumDetectedHeightPixels > size.height)) {

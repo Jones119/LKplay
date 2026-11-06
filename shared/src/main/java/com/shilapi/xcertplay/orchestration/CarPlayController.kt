@@ -624,9 +624,6 @@ class CarPlayController(
         dashboardMapEpoch.incrementAndGet()
     }
 
-    /** Immutable stream geometry retained when a new host adopts this background controller. */
-    fun configuredClusterSize(): Pair<Int, Int>? = airPlayConfig.cluster?.let { it.widthPixels to it.heightPixels }
-
     /** A visible physical map and its session/stream generation; null for a paused/virtual/turn-card route. */
     fun dashboardMapRoute(): Any? {
         val session = activeSession ?: return null

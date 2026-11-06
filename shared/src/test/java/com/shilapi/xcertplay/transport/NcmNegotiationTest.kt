@@ -61,41 +61,6 @@ class NcmNegotiationTest {
         assertProtocol { NcmNegotiation.parse(response(declared = 40), 28) }
     }
 
-    @Test
-    fun theDatagramOffsetKeepsTheNegotiatedEthernetRemainder() {
-        val parameters = NcmNegotiation.parse(response(), 28)
-        val offset = NcmNegotiation.encodeFrameOffset(parameters)
-        // The legacy build sends the datagram at 30, not at the 28 our fixed-index encoder uses, so
-        // that (offset + 14) % divisor == remainder. This test pins that rule.
-        assertEquals(30, offset)
-        assertEquals(parameters.outputRemainder, (offset + 14) % parameters.outputDivisor)
-    }
-
-    @Test
-    fun aMalformedNtbHeaderIsRejected() {
-        val block = ntbBlock()
-        assertProtocol { NcmNegotiation.validateReceived(block, 27) }
-        assertProtocol { NcmNegotiation.validateReceived(block, block.size + 1) }
-        val wrongHeaderLength = ntbBlock()
-        putU16(wrongHeaderLength, 4, 8)
-        assertProtocol { NcmNegotiation.validateReceived(wrongHeaderLength, wrongHeaderLength.size) }
-    }
-
-    @Test
-    fun theNdpChainIsWalkedAndACycleIsRejected() {
-        val cyclic = ntbBlock()
-        putU16(cyclic, 12 + 6, 12) // next NDP16 points back at itself
-        assertProtocol { NcmNegotiation.validateReceived(cyclic, cyclic.size) }
-
-        val badSignature = ntbBlock()
-        putU32(badSignature, 12, 0)
-        assertProtocol { NcmNegotiation.validateReceived(badSignature, badSignature.size) }
-
-        val badTableLength = ntbBlock()
-        putU16(badTableLength, 12 + 4, 15)
-        assertProtocol { NcmNegotiation.validateReceived(badTableLength, badTableLength.size) }
-    }
-
     private fun assertProtocol(what: String = "", body: () -> Unit) {
         try {
             body()
@@ -103,20 +68,6 @@ class NcmNegotiationTest {
         } catch (expected: IphoneUsbException.Protocol) {
             assertTrue("the message must not be empty: $what", expected.message.orEmpty().isNotEmpty())
         }
-    }
-
-    /** One NTB16 block: a 12-byte NTH16 whose NDP16 sits at 12 and ends the chain. */
-    private fun ntbBlock(): ByteArray {
-        val block = ByteArray(28)
-        putU32(block, 0, Ntb16Codec.NTH16_SIG)
-        putU16(block, 4, 12)
-        putU16(block, 6, 0)
-        putU16(block, 8, 28)
-        putU16(block, 10, 12)
-        putU32(block, 12, Ntb16Codec.NDP16_SIG)
-        putU16(block, 12 + 4, 16)
-        putU16(block, 12 + 6, 0)
-        return block
     }
 
     /**

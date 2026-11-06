@@ -45,7 +45,7 @@ internal object NcmNegotiation {
     private const val CAPABILITY_CRC = 1 shl 4
     private const val MINIMUM_NTB_LIMIT = 2_048
 
-    /** Everything the TX layout needs; [encodeFrameOffset] derives the datagram offset from it. */
+    /** Everything the TX layout needs. */
     internal data class Parameters(
         val formats: Int,
         val inputSize: Int,
@@ -93,41 +93,6 @@ internal object NcmNegotiation {
             outputRemainder = remainder,
             outputAlignment = alignment,
         )
-    }
-
-    /**
-     * Where a datagram starts inside an NTB16 block: the NDP16 header sits at the first
-     * [Parameters.outputAlignment]-aligned offset, and the datagram itself is aligned so that
-     * `offset + 14` (the Ethernet header) keeps the negotiated output remainder.
-     */
-    fun encodeFrameOffset(parameters: Parameters): Int {
-        val ndpOffset = align(NDP16_OFFSET_LOWER_BOUND, parameters.outputAlignment, 0)
-        val ethernetRemainder = (parameters.outputRemainder - ETHERNET_HEADER_BYTES) and (parameters.outputDivisor - 1)
-        return align(ndpOffset + NDP16_BYTES, parameters.outputDivisor, ethernetRemainder)
-    }
-
-    /**
-     * Rejects an NTB16 block whose header or NDP16 chain is malformed, including the CRC-appended
-     * shape the legacy build treats as invalid. Pure: the RX path calls it before trusting offsets.
-     */
-    fun validateReceived(block: ByteArray, length: Int) {
-        if (length < NDP16_OFFSET_LOWER_BOUND + NDP16_BYTES || length > block.size || readU16Le(block, 4) != 12) {
-            throw IphoneUsbException.Protocol("NCM returned an invalid NTB16 header")
-        }
-        var ndp = readU16Le(block, 10)
-        val visited = HashSet<Int>()
-        while (ndp != 0) {
-            if (!visited.add(ndp) || ndp < 12 || ndp > length - NDP16_BYTES ||
-                readU32LeLong(block, ndp) != Ntb16Codec.NDP16_SIG.toLong()
-            ) {
-                throw IphoneUsbException.Protocol("NCM returned an invalid or CRC-appended NDP16")
-            }
-            val tableLength = readU16Le(block, ndp + 4)
-            if (tableLength < NDP16_BYTES || tableLength % 4 != 0 || tableLength > length - ndp) {
-                throw IphoneUsbException.Protocol("NCM returned an invalid NDP16 length")
-            }
-            ndp = readU16Le(block, ndp + 6)
-        }
     }
 
     /**
@@ -209,15 +174,6 @@ internal object NcmNegotiation {
         }
     }
 
-    /**
-     * The smallest offset at or above [value] that keeps `offset % divisor == remainder`.
-     *
-     * `Math.floorMod` is API 24 and the module's `ForbiddenLibraryApiTest` scans for exactly that
-     * kind of `java.*` API, so the non-negative modulo is spelled out.
-     */
-    private fun align(value: Int, divisor: Int, remainder: Int): Int =
-        value + (((remainder - value) % divisor) + divisor) % divisor
-
     private fun validAlignment(value: Int, limit: Int): Boolean =
         value >= MINIMUM_ALIGNMENT && value < limit && (value and (value - 1)) == 0
 
@@ -263,7 +219,4 @@ internal object NcmNegotiation {
         private set
 
     private const val MINIMUM_ALIGNMENT = 4
-    private const val ETHERNET_HEADER_BYTES = 14
-    private const val NDP16_OFFSET_LOWER_BOUND = 12
-    private const val NDP16_BYTES = 16
 }

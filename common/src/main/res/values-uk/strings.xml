@@ -564,6 +564,7 @@
     <string name="this_head_unit_has_no_image_picker">На цьому головному пристрої немає вибору зображень.</string>
   <string name="exit_application_description">Повністю закриває LynkPaly: сеанс CarPlay, точка доступу автомобіля та всі фонові потоки завершуються разом із ним.</string>
     <string name="iphone_sent_no_picture">iPhone не передав зображення від запуску CarPlay. Перезавантажте iPhone (вимкніть і увімкніть), потім підключіть його знову.</string>
+    <string name="settings_incomplete">Ці налаштування неповні: %1$s. Доповніть їх у налаштуваннях застосунку та підключіться знову.</string>
 </resources>
 
 
