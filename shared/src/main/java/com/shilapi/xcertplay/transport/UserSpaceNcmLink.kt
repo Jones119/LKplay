@@ -62,6 +62,7 @@ internal class UserSpaceNcmLink(
     }
 
     private fun pumpReceive() {
+        TransportThreadPriority.applyToCurrentThread()
         val timeout = RECEIVE_TIMEOUT_MILLIS
         while (running.get()) {
             val frame = try {
@@ -85,29 +86,28 @@ internal class UserSpaceNcmLink(
     }
 
     private fun pumpTransmit() {
+        TransportThreadPriority.applyToCurrentThread()
         val frame = ByteArray(TRANSMIT_BUFFER_BYTES)
         while (running.get()) {
-            if (jni.nativeTxPending() <= 0) {
-                // Short enough for the audio path (12 ms frames) and cheap enough on this SoC.
-                //
-                // The sleep is guarded: `close()` interrupts this thread, and an InterruptedException
-                // escaping a thread body is an uncaught exception, which kills the whole process. The pump
-                // spends nearly all of its time in this sleep, so a teardown (a reconnect, a display-size
-                // change) hit it often - measured on the car 2026-10-18 as
-                // `FATAL EXCEPTION: ncm-us-tx / java.lang.InterruptedException ... pumpTransmit`.
-                // Being interrupted here is the normal way out, not a failure to report.
-                try {
-                    Thread.sleep(TRANSMIT_POLL_MILLIS)
-                } catch (interrupted: InterruptedException) {
-                    Thread.currentThread().interrupt()
-                    return
-                }
-                continue
+            // Blocks on the native ring's condition variable until lwIP queues a frame, so an ACK, a window
+            // update or a touch report leaves as soon as it exists; the timeout only bounds how long a
+            // stopping pump takes to see `running` go false (the native wait ignores interrupts).
+            //
+            // The catch is kept for the JVM-fake default (a 1 ms sleep): `close()` interrupts this thread,
+            // and an InterruptedException escaping a thread body kills the whole process - measured on the
+            // car 2026-10-18 as `FATAL EXCEPTION: ncm-us-tx / java.lang.InterruptedException ... pumpTransmit`.
+            val pending = try {
+                jni.nativeWaitTx(TRANSMIT_WAIT_MILLIS)
+            } catch (interrupted: InterruptedException) {
+                Thread.currentThread().interrupt()
+                return
             }
+            if (pending <= 0) continue
             val length = jni.nativePollTxFrame(frame)
             if (length <= 0) continue
             try {
-                bridge.send(frame.copyOf(length), TRANSMIT_TIMEOUT_MILLIS)
+                // `frame` is framed into the bridge's own block before send returns, so it is reused as is.
+                bridge.send(frame, length, TRANSMIT_TIMEOUT_MILLIS)
                 writtenFrames.incrementAndGet()
                 writtenBytes.addAndGet(length.toLong())
             } catch (error: Throwable) {
@@ -178,7 +178,8 @@ internal class UserSpaceNcmLink(
 
         /** How long the RX thread waits for a frame before re-checking whether it should stop. */
         const val RECEIVE_TIMEOUT_MILLIS = 100L
-        private const val TRANSMIT_POLL_MILLIS = 1L
+        /** Upper bound of one native TX wait; frames wake the pump immediately, this only bounds shutdown. */
+        private const val TRANSMIT_WAIT_MILLIS = 20
         private const val TRANSMIT_TIMEOUT_MILLIS = 200
         private const val STATISTICS_INTERVAL_MILLIS = 5_000L
 

@@ -18,6 +18,19 @@ internal interface UserSpaceNetworkJni {
     /** Returns the length of the next outbound frame copied into [out], or 0 when the ring is empty. */
     fun nativePollTxFrame(out: ByteArray): Int
     fun nativeTxPending(): Int
+
+    /**
+     * Blocks up to [timeoutMillis] until the TX ring holds a frame and returns the pending count (0 on
+     * timeout). The native side waits on a condition variable that linkoutput signals, so the pump no
+     * longer wakes 1000 times a second to find the ring empty. The default keeps the old 1 ms poll so
+     * JVM fakes that only implement [nativeTxPending] behave exactly as before.
+     */
+    fun nativeWaitTx(timeoutMillis: Int): Int {
+        val pending = nativeTxPending()
+        if (pending <= 0) Thread.sleep(1L)
+        return pending
+    }
+
     fun nativeStats(): IntArray
 
     fun nativeSocket(type: Int): Int
@@ -59,6 +72,7 @@ internal object UserSpaceNetworkNative : UserSpaceNetworkJni {
     external override fun nativeInjectFrame(frame: ByteArray, length: Int): Int
     external override fun nativePollTxFrame(out: ByteArray): Int
     external override fun nativeTxPending(): Int
+    external override fun nativeWaitTx(timeoutMillis: Int): Int
     external override fun nativeStats(): IntArray
     external override fun nativeSocket(type: Int): Int
     external override fun nativeBind(fd: Int, address: ByteArray, port: Int): Int

@@ -24,8 +24,10 @@
 #endif
 #include "netif/ethernet.h"
 
+#include <errno.h>
 #include <pthread.h>
 #include <string.h>
+#include <time.h>
 
 #define CS11_TX_SLOTS 32
 #define CS11_TX_SLOT_BYTES 1600
@@ -139,6 +141,10 @@ struct cs11_netif_state {
     struct netif netif;
     struct {
         pthread_mutex_t mutex;
+        /* Signalled by linkoutput whenever a frame is queued, so the Kotlin TX pump can block in
+         * cs11_netif_wait_tx() instead of waking every millisecond to ask (doc 102 §4: ncm-us-tx was
+         * ~6% of the app's CPU while it mostly found the ring empty). */
+        pthread_cond_t ready;
         u16_t length[CS11_TX_SLOTS];
         u8_t frame[CS11_TX_SLOTS][CS11_TX_SLOT_BYTES];
         u16_t head;
@@ -181,6 +187,7 @@ static err_t cs11_netif_linkoutput(struct netif *netif, struct pbuf *p) {
     state->tx.count++;
     state->tx_frames++;
     state->tx_bytes += copied;
+    pthread_cond_signal(&state->tx.ready);
     pthread_mutex_unlock(&state->tx.mutex);
     return ERR_OK;
 }
@@ -235,6 +242,7 @@ int cs11_netif_start(const u8_t *host_mac, int mtu) {
 
     memset(&g_cs11, 0, sizeof(g_cs11));
     pthread_mutex_init(&g_cs11.tx.mutex, NULL);
+    pthread_cond_init(&g_cs11.tx.ready, NULL);
 
     /* With IPv4 compiled out, netif_add takes (netif, state, init, input) - lwip/netif.h narrows the
      * signature under #if LWIP_IPV4, so asking for the IPv4 form would not compile. */
@@ -365,6 +373,35 @@ int cs11_netif_take_tx(u8_t *out, size_t capacity) {
     g_cs11.tx.count--;
     pthread_mutex_unlock(&g_cs11.tx.mutex);
     return (int)length;
+}
+
+/**
+ * Blocks until the TX ring holds at least one frame or [timeout_ms] passes; returns the pending count
+ * (0 on timeout). The wait is a condition variable that linkoutput signals, so an ACK, a window update
+ * or a touch report leaves for the USB writer as soon as lwIP produces it instead of after the next
+ * 1 ms poll. CLOCK_REALTIME matches sys_arch.c's waits; the timeout only bounds how long a stopping
+ * pump takes to notice, because every queued frame wakes the waiter directly.
+ */
+int cs11_netif_wait_tx(int timeout_ms) {
+    pthread_mutex_lock(&g_cs11.tx.mutex);
+    if (g_cs11.tx.count == 0 && timeout_ms > 0) {
+        struct timespec deadline;
+        clock_gettime(CLOCK_REALTIME, &deadline);
+        deadline.tv_sec += timeout_ms / 1000;
+        deadline.tv_nsec += (long)(timeout_ms % 1000) * 1000000L;
+        if (deadline.tv_nsec >= 1000000000L) {
+            deadline.tv_sec += 1;
+            deadline.tv_nsec -= 1000000000L;
+        }
+        while (g_cs11.tx.count == 0) {
+            if (pthread_cond_timedwait(&g_cs11.tx.ready, &g_cs11.tx.mutex, &deadline) == ETIMEDOUT) {
+                break;
+            }
+        }
+    }
+    int pending = (int)g_cs11.tx.count;
+    pthread_mutex_unlock(&g_cs11.tx.mutex);
+    return pending;
 }
 
 int cs11_netif_tx_pending(void) {

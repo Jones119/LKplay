@@ -21,6 +21,13 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#ifdef __ANDROID__
+/* Android-only: the native-tests host build (MSYS2/UCRT) has neither header. */
+#include <ctype.h>
+#include <strings.h>
+#include <sys/resource.h>
+#include <sys/system_properties.h>
+#endif
 
 /* ── time ─────────────────────────────────────────────────────────────────────────────────────── */
 
@@ -444,9 +451,46 @@ struct cs11_thread_arg {
     void *argument;
 };
 
+/*
+ * Nice value for lwIP's threads (only tcpip_thread exists).
+ *
+ * sys_thread_new used to ignore `prio`, so lwip-tcpip ran at nice 0 - below the video threads (-8) and
+ * the audio threads (-19) that consume what it delivers, even though every inbound video/audio packet
+ * and every outbound ACK and touch report passes through it. Under the 60 fps load (doc 102) that is a
+ * priority inversion in the middle of the wired path. Default -16 (ANDROID_PRIORITY_AUDIO); the same
+ * property as the Kotlin pumps (TransportThreadPriority) selects -8 or 0 for an A/B without a rebuild.
+ */
+#ifdef __ANDROID__
+static int cs11_transport_nice(void) {
+    int nice = -16;
+    char value[PROP_VALUE_MAX];
+    if (__system_property_get("debug.diplay.transport_priority", value) > 0) {
+        /* Same parsing as TransportThreadPriority.sanitize: surrounding blanks and case are ignored. */
+        char *start = value;
+        while (*start != '\0' && isspace((unsigned char)*start)) {
+            start++;
+        }
+        char *end = start + strlen(start);
+        while (end > start && isspace((unsigned char)end[-1])) {
+            *--end = '\0';
+        }
+        if (strcasecmp(start, "video") == 0 || strcmp(start, "-8") == 0) {
+            nice = -8;
+        } else if (strcasecmp(start, "normal") == 0 || strcmp(start, "0") == 0) {
+            nice = 0;
+        }
+    }
+    return nice;
+}
+#endif
+
 static void *cs11_thread_entry(void *raw) {
     struct cs11_thread_arg arg = *(struct cs11_thread_arg *)raw;
     free(raw);
+#ifdef __ANDROID__
+    /* Linux nice is per thread; Android's init grants apps RLIMIT_NICE down to -20 (as for audio). */
+    (void)setpriority(PRIO_PROCESS, (id_t)gettid(), cs11_transport_nice());
+#endif
     arg.function(arg.argument);
     return NULL;
 }

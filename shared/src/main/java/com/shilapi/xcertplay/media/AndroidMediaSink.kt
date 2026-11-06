@@ -613,6 +613,8 @@ private class VideoDecoder(
     private var releaseMaxNs = 0L
     private var releaseCount = 0
     private var releaseSlowCount = 0
+    /** Decoded pictures released unrendered because a newer one came out in the same drain. */
+    private var supersededCount = 0
 
     private fun logTimingIfDue() {
         if (!timingEnabled) return
@@ -627,11 +629,12 @@ private class VideoDecoder(
         report(
             "video timing in avg=${waitAvg}ms max=${inWaitMaxNs / 1_000_000}ms n=$inWaitCount " +
                 "release avg=${relAvg}ms max=${releaseMaxNs / 1_000_000}ms n=$releaseCount " +
-                "slow>5ms=$releaseSlowCount",
+                "slow>5ms=$releaseSlowCount superseded=$supersededCount",
         )
         timingWindowNs = now
         inWaitNs = 0; inWaitMaxNs = 0; inWaitCount = 0
         releaseNs = 0; releaseMaxNs = 0; releaseCount = 0; releaseSlowCount = 0
+        supersededCount = 0
     }
 
     private val thread = WorkerThreads.create({
@@ -1000,44 +1003,65 @@ private class VideoDecoder(
         // 复用同一个 BufferInfo，而不是每帧 new 一个（30 fps 下就是 30 个/秒的垃圾）。
         // 线程约束：drainOutput 只在 carplay-video 线程上跑（run() 主循环，以及同线程内
         // feed() 经 VideoInputPump.acquire 的重入），所以这个字段不需要同步（doc 41 §5）。
+        //
+        // CS11: only the newest decoded picture of one drain is presented; older ones that are already
+        // superseded go back with render=false. A TextureView consumer kept only the newest anyway (its
+        // SurfaceTexture replaces an unconsumed frame), so on that path this only stops counting
+        // overwritten frames as "shown". A SurfaceView consumer queues every rendered buffer for
+        // SurfaceFlinger, one per vsync: rendering a burst there blocks releaseOutputBuffer, stalls this
+        // thread's input feeding and ages the next frames past RENDER_MAX_AGE_US - the likely source of
+        // doc 103's SurfaceView `dropped`. `video timing ... superseded=` shows how often this fires.
         val info = outputBufferInfo
+        var newestIndex = -1
+        var newestPtsUs = 0L
+        var newestSize = 0
         while (running) {
             val index = codec.dequeueOutputBuffer(info, 0)
-            when {
-                index == MediaCodec.INFO_TRY_AGAIN_LATER -> return
-                index == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> logOutputFormat(codec.outputFormat)
-                index >= 0 -> {
-                    // Decode-but-drop: when a frame's display is far behind (input burst or decoder
-                    // catch-up), skip presenting it but keep decoding the reference chain, so the
-                    // surface stays current without decoder re-creation or keyframe waits.
-                    val ageUs = if (info.presentationTimeUs <= 0L) 0L
-                    else (System.nanoTime() / 1000) - info.presentationTimeUs
-                    val render = outputSurface != null && ageUs <= RENDER_MAX_AGE_US
-                    val releaseStartNs = System.nanoTime()
-                    codec.releaseOutputBuffer(index, render)
-                    if (timingEnabled) {
-                        val dt = System.nanoTime() - releaseStartNs
-                        releaseNs += dt
-                        releaseCount++
-                        if (dt > releaseMaxNs) releaseMaxNs = dt
-                        if (dt > 5_000_000L) releaseSlowCount++
-                    }
-                    if (render) {
-                        stats.onRendered()
-                liveRendered.incrementAndGet()
-                        outputFramesSinceConfigure++
-                    }
-                    // Without a surface nothing can be presented yet; only a refused stale frame counts.
-                    else if (outputSurface != null) stats.onDropped()
-                    if (render && !renderedFrameLogged) {
-                        renderedFrameLogged = true
-                        report("first frame rendered")
-                        Log.i(TAG, "video decoder rendered first frame bytes=${info.size}")
-                    }
-                    if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) return
-                }
-                else -> return
+            if (index == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                logOutputFormat(codec.outputFormat)
+                continue
             }
+            // INFO_TRY_AGAIN_LATER, or API 19's INFO_OUTPUT_BUFFERS_CHANGED (irrelevant for Surface output).
+            if (index < 0) break
+            if (newestIndex >= 0) {
+                codec.releaseOutputBuffer(newestIndex, false)
+                supersededCount++
+            }
+            newestIndex = index
+            newestPtsUs = info.presentationTimeUs
+            newestSize = info.size
+            if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) break
+        }
+        if (newestIndex >= 0) presentOutput(codec, newestIndex, newestPtsUs, newestSize)
+    }
+
+    private fun presentOutput(codec: MediaCodec, index: Int, presentationTimeUs: Long, size: Int) {
+        // Decode-but-drop: when a frame's display is far behind (input burst or decoder
+        // catch-up), skip presenting it but keep decoding the reference chain, so the
+        // surface stays current without decoder re-creation or keyframe waits.
+        val ageUs = if (presentationTimeUs <= 0L) 0L
+        else (System.nanoTime() / 1000) - presentationTimeUs
+        val render = outputSurface != null && ageUs <= RENDER_MAX_AGE_US
+        val releaseStartNs = System.nanoTime()
+        codec.releaseOutputBuffer(index, render)
+        if (timingEnabled) {
+            val dt = System.nanoTime() - releaseStartNs
+            releaseNs += dt
+            releaseCount++
+            if (dt > releaseMaxNs) releaseMaxNs = dt
+            if (dt > 5_000_000L) releaseSlowCount++
+        }
+        if (render) {
+            stats.onRendered()
+            liveRendered.incrementAndGet()
+            outputFramesSinceConfigure++
+        }
+        // Without a surface nothing can be presented yet; only a refused stale frame counts.
+        else if (outputSurface != null) stats.onDropped()
+        if (render && !renderedFrameLogged) {
+            renderedFrameLogged = true
+            report("first frame rendered")
+            Log.i(TAG, "video decoder rendered first frame bytes=$size")
         }
     }
 

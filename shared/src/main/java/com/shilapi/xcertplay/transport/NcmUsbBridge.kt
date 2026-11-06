@@ -60,6 +60,8 @@ class NcmUsbBridge internal constructor(
     private var bulkOutAccepted = false
     private var notReadyWriteTimeouts = 0
     private val frames = ArrayDeque<ByteArray>()
+    /** Reused NTB16 block for [send]; only touched under [writeLock]. One Ethernet frame plus headers. */
+    private var txBlock = ByteArray(TX_BLOCK_BYTES)
     private var queuedBytes = 0
     private var buffered = ByteArray(0)
     private var bufferedSize = 0
@@ -90,24 +92,37 @@ class NcmUsbBridge internal constructor(
     }
 
     /** Wraps one Ethernet frame in one NTB16 block and writes it to bulk OUT. */
-    fun send(frame: ByteArray, timeoutMillis: Int) = synchronized(writeLock) {
+    fun send(frame: ByteArray, timeoutMillis: Int): Unit = send(frame, frame.size, timeoutMillis)
+
+    /**
+     * Same as [send], for the first [length] bytes of a reused buffer. The block is framed into a buffer
+     * owned by this bridge (guarded by [writeLock]), so a frame costs no allocation; [frame] may be
+     * reused by the caller as soon as this returns.
+     */
+    fun send(frame: ByteArray, length: Int, timeoutMillis: Int): Unit = synchronized(writeLock) {
         checkOpen()
         require(timeoutMillis > 0) { "timeoutMillis must be positive" }
         val sequence = synchronized(stateLock) {
             checkOpenLocked()
             this.sequence.also { this.sequence = (this.sequence + 1) and 0xffff }
         }
-        val block = Ntb16Codec.build(frame, sequence)
+        val needed = Ntb16Codec.maxBlockBytes(length)
+        if (txBlock.size < needed) txBlock = ByteArray(needed)
+        val block = txBlock
+        val blockLength = Ntb16Codec.buildInto(frame, length, sequence, block)
         // Until the phone takes its first frame the pipe is NAKed, so waiting the caller's whole
         // timeout on each frame delays the iAP2 handshake. Dropping after 20 ms is what the full
         // timeout would have done anyway (upstream 817ff3fa, #634).
         val effectiveTimeout = NcmWritePolicy.effectiveTimeout(timeoutMillis, bulkOutAccepted)
         // Resume a truncated bulk-out from its real offset under one shared deadline (UsbBulkWrite).
         // The slice is only built on the rare resume, so a normal frame writes in one call.
-        val result = UsbBulkWrite.all(block.size, effectiveTimeout) { offset, length, timeout ->
-            val remaining = if (offset == 0 && length == block.size) block
-            else block.copyOfRange(offset, offset + length)
-            connection.bulkTransfer(outEndpoint, remaining, remaining.size, timeout)
+        val result = UsbBulkWrite.all(blockLength, effectiveTimeout) { offset, chunk, timeout ->
+            if (offset == 0) {
+                connection.bulkTransfer(outEndpoint, block, chunk, timeout)
+            } else {
+                val remaining = block.copyOfRange(offset, offset + chunk)
+                connection.bulkTransfer(outEndpoint, remaining, remaining.size, timeout)
+            }
         }
         val transferred = result.written
         // Before StartCarPlaySession the phone keeps the NCM data path NAKed. Android reports the
@@ -135,9 +150,9 @@ class NcmUsbBridge internal constructor(
             }
         }
         consecutiveWriteFailures = 0
-        if (transferred != block.size) {
+        if (transferred != blockLength) {
             throw IphoneUsbException.DeviceUnavailable(
-                "NCM write transferred $transferred of ${block.size} bytes" +
+                "NCM write transferred $transferred of $blockLength bytes" +
                     if (result.timedOut) " before its deadline" else "",
             )
         }
@@ -458,6 +473,7 @@ class NcmUsbBridge internal constructor(
 
     companion object {
         private const val READ_CHUNK_BYTES = 32 * 1024
+        private const val TX_BLOCK_BYTES = 1600 + 28 + 1
         private const val USB_PACKET_SIZE = 512
         private const val STATUS_POLL_TIMEOUT_MILLIS = 20
         private const val STATUS_POLL_INTERVAL_MILLIS = 500L

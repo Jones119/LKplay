@@ -36,6 +36,7 @@ int cs11_netif_start(const unsigned char *host_mac, int mtu);
 int cs11_netif_input(const unsigned char *frame, unsigned long length);
 int cs11_netif_take_tx(unsigned char *out, unsigned long capacity);
 int cs11_netif_tx_pending(void);
+int cs11_netif_wait_tx(int timeout_ms);
 void cs11_netif_stats(unsigned int *out);
 
 static int to_sockaddr6(JNIEnv *env, jbyteArray address, jint port, struct sockaddr_in6 *out) {
@@ -142,6 +143,14 @@ CS11_JNI(jint) Java_com_shilapi_xcertplay_transport_UserSpaceNetworkNative_nativ
     int length = cs11_netif_take_tx((unsigned char *)bytes, (unsigned long)capacity);
     (*env)->ReleaseByteArrayElements(env, out, bytes, length > 0 ? 0 : JNI_ABORT);
     return length;
+}
+
+/* Blocks the TX pump until linkoutput queues a frame (or the timeout passes); see cs11_netif_wait_tx. */
+CS11_JNI(jint) Java_com_shilapi_xcertplay_transport_UserSpaceNetworkNative_nativeWaitTx(
+        JNIEnv *env, jobject self, jint timeoutMillis) {
+    (void)env;
+    (void)self;
+    return cs11_netif_wait_tx((int)timeoutMillis);
 }
 
 CS11_JNI(jint) Java_com_shilapi_xcertplay_transport_UserSpaceNetworkNative_nativeTxPending(

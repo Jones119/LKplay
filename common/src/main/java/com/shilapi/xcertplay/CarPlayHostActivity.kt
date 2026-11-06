@@ -867,6 +867,11 @@ class CarPlayHostActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        // CS11 / API 19: HWUI draws the TextureView on this UI thread (there is no RenderThread before
+        // Android 5), and the same thread dispatches every touch, so it is both a video stage and the touch
+        // stage. 4.4 leaves a foreground UI thread at nice 0 - below the -8 video threads that feed it and,
+        // with TransportThreadPriority, below the -16 transport threads - so raise it while CarPlay is shown.
+        runCatching { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_DISPLAY) }
         // Coming back after the car's launcher took the screen: the TextureView surface was destroyed,
         // and the decoder rebuilt for the new one cannot render to a surface on this vendor codec
         // (OMX_SetParameter() failed for StoreMetaDataInBuffers → client-side buffers, nothing on the
@@ -1036,6 +1041,8 @@ class CarPlayHostActivity : ComponentActivity() {
 
     override fun onPause() {
         nightModeController.pause()
+        // The UI thread is shared with every other screen of the app; only CarPlay keeps the boost.
+        runCatching { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_DEFAULT) }
         super.onPause()
     }
 

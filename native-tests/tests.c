@@ -9,12 +9,15 @@
  *   2. destroy a mailbox with a blocked poster - the UB fixed in this round (waiter must leave, no UAF)
  *   3. receive storm from four threads         - the message/pbuf churn that killed the tcpip thread
  *   4. a refused packet must not leak a pbuf   - 6c2671b3's leak, asserted on the pool counter
+ *   5. TX wait times out on an empty ring      - the pump's bounded wait returns 0, not early, not never
+ *   6. TX wait wakes on linkoutput             - a queued frame wakes the pump at once (no 1 ms poll)
  *
  * Run under ASan; leak detection is disabled because the tcpip thread and its mailbox live until the
  * process exits (see run.ps1).
  */
 #include <pthread.h>
 #include <stdio.h>
+#include <time.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -32,6 +35,9 @@ int cs11_netif_input(const unsigned char *frame, size_t length);
 int cs11_netif_start(const unsigned char *host_mac, int mtu);
 struct netif *cs11_netif_handle(void);
 void cs11_netif_stats(unsigned int *out);
+int cs11_netif_take_tx(unsigned char *out, size_t capacity);
+int cs11_netif_tx_pending(void);
+int cs11_netif_wait_tx(int timeout_ms);
 
 static int failures;
 
@@ -193,6 +199,86 @@ static void test_receive_storm(void) {
     CHECK(accepted <= STORM_THREADS * STORM_FRAMES, "rx_frames=%u exceeds the frames sent", accepted);
 }
 
+/* ── 5/6. TX wait ──────────────────────────────────────────────────────────────────────────── */
+
+static long elapsed_ms(const struct timespec *start) {
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    return (long)(now.tv_sec - start->tv_sec) * 1000L + (now.tv_nsec - start->tv_nsec) / 1000000L;
+}
+
+/* The link-up announcement (MLD report, router solicitation) leaves frames in the ring; start empty. */
+static void drain_tx_ring(void) {
+    unsigned char frame[1600];
+    while (cs11_netif_take_tx(frame, sizeof(frame)) > 0) {
+    }
+}
+
+static void test_tx_wait_times_out_on_empty_ring(void) {
+    drain_tx_ring();
+    struct timespec start;
+    clock_gettime(CLOCK_MONOTONIC, &start);
+    const int pending = cs11_netif_wait_tx(40);
+    const long waited = elapsed_ms(&start);
+    CHECK(pending == 0, "empty ring reported %d pending frames", pending);
+    CHECK(waited >= 30, "wait returned after %ld ms, before its 40 ms timeout", waited);
+    CHECK(waited < 1000, "wait took %ld ms for a 40 ms timeout", waited);
+    /* A zero timeout is a plain poll. */
+    CHECK(cs11_netif_wait_tx(0) == 0, "zero-timeout poll on an empty ring reported frames");
+}
+
+struct tx_waiter {
+    int pending;
+    long waited_ms;
+};
+
+static void *tx_waiter_thread(void *raw) {
+    struct tx_waiter *waiter = (struct tx_waiter *)raw;
+    struct timespec start;
+    clock_gettime(CLOCK_MONOTONIC, &start);
+    waiter->pending = cs11_netif_wait_tx(5000);
+    waiter->waited_ms = elapsed_ms(&start);
+    return NULL;
+}
+
+static void test_tx_wait_wakes_on_linkoutput(void) {
+    drain_tx_ring();
+    struct netif *netif = cs11_netif_handle();
+    CHECK(netif != NULL && netif->linkoutput != NULL, "netif or its linkoutput is missing");
+    if (netif == NULL || netif->linkoutput == NULL) {
+        return;
+    }
+    struct tx_waiter waiter = {-1, -1};
+    pthread_t thread;
+    CHECK(pthread_create(&thread, NULL, tx_waiter_thread, &waiter) == 0, "pthread_create failed");
+    usleep(100 * 1000); /* let the waiter block first, so the wake-up is what ends its wait */
+
+    struct pbuf *frame = pbuf_alloc(PBUF_RAW, 64, PBUF_RAM);
+    CHECK(frame != NULL, "pbuf_alloc failed");
+    if (frame != NULL) {
+        memset(frame->payload, 0xab, 64);
+        CHECK(netif->linkoutput(netif, frame) == ERR_OK, "linkoutput refused the frame");
+        pbuf_free(frame);
+    }
+    pthread_join(thread, NULL);
+
+    /* lwIP's own timers (MLD report retransmits, ND) may also queue a frame meanwhile, so the waiter can see
+     * more than one, or be woken by one of those: only "woken promptly, not by the 5 s timeout" is asserted. */
+    CHECK(waiter.pending >= 1, "waiter saw %d pending frames, expected at least 1", waiter.pending);
+    CHECK(waiter.waited_ms >= 0 && waiter.waited_ms < 1000,
+          "waiter returned after %ld ms; the linkoutput signal did not end the wait", waiter.waited_ms);
+
+    unsigned char out[1600];
+    int found = 0;
+    int length;
+    while ((length = cs11_netif_take_tx(out, sizeof(out))) > 0) {
+        if (length == 64 && out[0] == 0xab && out[63] == 0xab) {
+            found = 1;
+        }
+    }
+    CHECK(found, "the 64-byte frame queued through linkoutput never came out of the ring");
+}
+
 int main(void) {
     /* A syntactically valid Ethernet II + IPv6 header, so ethernet_input takes the normal path and the
      * packets reach the tcpip thread instead of being rejected at the first length check. */
@@ -217,6 +303,8 @@ int main(void) {
     start_stack();
     test_refused_packet_does_not_leak_pbuf();
     test_receive_storm();
+    test_tx_wait_times_out_on_empty_ring();
+    test_tx_wait_wakes_on_linkoutput();
 
     if (failures == 0) {
         printf("OK: all native bridge tests passed\n");

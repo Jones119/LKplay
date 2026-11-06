@@ -24,6 +24,34 @@ object Ntb16Codec {
 
         val blockLength = DATAGRAM_INDEX + frame.size
         val block = ByteArray(blockLength)
+        writeHeaders(block, blockLength, frame.size, sequence)
+        frame.copyInto(block, DATAGRAM_INDEX)
+        // A transfer that ends exactly on a USB packet boundary is read as a short packet.
+        return if (block.size % USB_PACKET_SIZE == 0) block + byteArrayOf(0) else block
+    }
+
+    /** The largest block [buildInto] can write for a [length]-byte frame (headers plus the pad byte). */
+    fun maxBlockBytes(length: Int): Int = DATAGRAM_INDEX + length + 1
+
+    /**
+     * Allocation-free [build]: writes the block for `frame[0, length)` into [out] and returns how many
+     * bytes of [out] to send. The bytes are identical to [build]'s. The TX pump frames every ACK, window
+     * update and touch report through here, so the two arrays [build] allocates per frame were steady
+     * garbage on the wired path.
+     */
+    fun buildInto(frame: ByteArray, length: Int, sequence: Int, out: ByteArray): Int {
+        require(length in 1..minOf(frame.size, MAX_DATAGRAM_BYTES)) { "frame length out of range: $length" }
+        require(sequence in 0..0xffff) { "sequence must fit in u16" }
+        val blockLength = DATAGRAM_INDEX + length
+        val total = if (blockLength % USB_PACKET_SIZE == 0) blockLength + 1 else blockLength
+        require(out.size >= total) { "output buffer ${out.size} is smaller than the block $total" }
+        writeHeaders(out, blockLength, length, sequence)
+        frame.copyInto(out, DATAGRAM_INDEX, 0, length)
+        if (total != blockLength) out[blockLength] = 0
+        return total
+    }
+
+    private fun writeHeaders(block: ByteArray, blockLength: Int, datagramLength: Int, sequence: Int) {
         writeU32Le(block, 0, NTH16_SIG)
         writeU16Le(block, 4, NTH_LENGTH)
         writeU16Le(block, 6, sequence)
@@ -34,13 +62,9 @@ object Ntb16Codec {
         writeU16Le(block, 16, NDP_LENGTH)
         writeU16Le(block, 18, 0)
         writeU16Le(block, 20, DATAGRAM_INDEX)
-        writeU16Le(block, 22, frame.size)
+        writeU16Le(block, 22, datagramLength)
         writeU16Le(block, 24, 0)
         writeU16Le(block, 26, 0)
-
-        frame.copyInto(block, DATAGRAM_INDEX)
-        // A transfer that ends exactly on a USB packet boundary is read as a short packet.
-        return if (block.size % USB_PACKET_SIZE == 0) block + byteArrayOf(0) else block
     }
 
     /**
