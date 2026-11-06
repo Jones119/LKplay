@@ -39,6 +39,9 @@ import com.shilapi.xcertplay.compat.trackRouteTypeCompat
 import com.shilapi.xcertplay.compat.trackBufferSizeFramesCompat
 import com.shilapi.xcertplay.compat.WorkerThreads
 
+/** Screen stream id of the main CarPlay picture; the app's screen types are 110 and 111. */
+private const val MAIN_SCREEN_TYPE = 110
+
 /** Owns one focus request for all eligible tracks in a CarPlay sink. */
 internal class AudioFocusCoordinator(
     context: Context?,
@@ -304,12 +307,27 @@ class AndroidMediaSink(
         mirrorDecoders(type).forEach { it.configure(codec, codecData) }
     }
 
+    /**
+     * False until the main screen's first video frame. The screen stream's keepalives never reach
+     * the sink, so a stream that carries only those — the stuck iPhones in upstream #975/#249 —
+     * leaves it false and the host can ask the driver to restart the phone.
+     */
+    @Volatile var mainVideoReceived = false
+        private set
+
+    /** Records that [type] produced a frame; split out so the flag is testable without a decoder. */
+    internal fun noteVideoFrameType(type: Int) {
+        if (type == MAIN_SCREEN_TYPE) mainVideoReceived = true
+    }
+
     override fun onVideoFrame(type: Int, naluBytes: ByteArray) {
+        noteVideoFrameType(type)
         videoDecoder(type).submit(naluBytes)
         mirrorDecoders(type).forEach { it.submit(naluBytes) }
     }
 
     override fun onVideoFrame(type: Int, frame: OwnedVideoFrame) {
+        noteVideoFrameType(type)
         try {
             val mirrors = mirrorDecoders(type)
             if (mirrors.isEmpty()) {

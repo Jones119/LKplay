@@ -20,6 +20,10 @@ object IphoneCarPlayConfiguration {
     private const val USBMUX_PROTOCOL = 0x02
     private const val NCM_CONTROL_CLASS = 0x02
     private const val NCM_CONTROL_SUBCLASS = 0x0d
+    /** Apple Ethernet interface of the CarPlay configuration (reference `isAppleEthernet`). */
+    private const val APPLE_ETHERNET_CLASS = 0xff
+    private const val APPLE_ETHERNET_SUBCLASS = 0xfd
+    private const val APPLE_ETHERNET_PROTOCOL = 0x01
     private const val PREFERRED_USBMUX_OUT = 0x04
     private const val PREFERRED_USBMUX_IN = 0x85
 
@@ -47,6 +51,22 @@ object IphoneCarPlayConfiguration {
         }
         return hasMux && hasNcm
     }
+
+    /**
+     * True when the active configuration also carries Apple Ethernet, i.e. it is the CarPlay one.
+     *
+     * API 19 cannot enumerate configurations, but the active one's interfaces are visible. A
+     * USBMUX+NCM configuration without this interface is the one iOS offers outside CarPlay mode;
+     * using it made iAP2 succeed and AirPlay never start (upstream #634). On this car it is
+     * configuration 5, whose NTB answers are short (docs/_digest/117 §4ter).
+     */
+    fun activeConfigIsCarPlayMode(device: UsbDevice): Boolean =
+        (0 until device.interfaceCount).any { index ->
+            val usbInterface = device.getInterface(index)
+            usbInterface.interfaceClass == APPLE_ETHERNET_CLASS &&
+                usbInterface.interfaceSubclass == APPLE_ETHERNET_SUBCLASS &&
+                usbInterface.interfaceProtocol == APPLE_ETHERNET_PROTOCOL
+        }
 
     /** CS11: 从活动配置接口列表直取 USBMUX 接口（UsbDevice#getInterface 是 API12）。 */
     fun activeUsbMuxInterface(device: UsbDevice): UsbInterface? =

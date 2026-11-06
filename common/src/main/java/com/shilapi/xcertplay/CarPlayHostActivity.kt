@@ -407,6 +407,26 @@ class CarPlayHostActivity : ComponentActivity() {
     private var lastConfiguration: Configuration? = null
     private var activeAirPlaySession: AirPlaySession? = null
     private val activeScreenStreamTypes = mutableSetOf<Int>()
+    /** Shown while the main screen stream is open but the iPhone has not sent a single frame. */
+    private var noPictureView: TextView? = null
+    private var noPictureShown = false
+    private val noPictureCheck = object : Runnable {
+        override fun run() {
+            if (isFinishing || isDestroyed) return
+            // Keepalives never reach the sink and a still screen sends no frames, so only a stream
+            // that never had a frame in this session counts (upstream #975/#249).
+            val missing = SCREEN_TYPE_MAIN in activeScreenStreamTypes && sink?.mainVideoReceived == false
+            if (missing && !noPictureShown) {
+                appendLog(
+                    "Screen stream open ${NO_PICTURE_MILLIS / 1000} s with no video frame; " +
+                        "asking to restart the iPhone",
+                )
+            }
+            noPictureShown = missing
+            updateDebugOverlays()
+            if (missing) mainHandler.postDelayed(this, NO_PICTURE_RECHECK_MILLIS)
+        }
+    }
     private var handshakeResetInProgress = false
     private var startAfterHandshakeReset = false
     private var restartGeneration = 0
@@ -1069,6 +1089,7 @@ class CarPlayHostActivity : ComponentActivity() {
         mainHandler.removeCallbacks(expireOldLogLines)
         mainHandler.removeCallbacks(pollConfiguration)
         mainHandler.removeCallbacks(reportVideoFps)
+        mainHandler.removeCallbacks(noPictureCheck)
         // 重建（旋转/换语言）时丢弃上一实例的恢复定时器：否则它会在新实例 active 之前
         // 把手机蓝牙恢复一次，并且让旧 Activity 被主 Handler 多持有整个 grace。
         if (isChangingConfigurations) cancelMediaAudioRestore()
@@ -1156,6 +1177,19 @@ class CarPlayHostActivity : ComponentActivity() {
         // reason, and the flag only toggles the mask's visibility so the tree never changes here.
         val cornerMask = CarPlayCornerMaskOverlay(this)
         root.addView(cornerMask, FrameLayout.LayoutParams(-1, -1))
+        // Sits between the picture and the touch layer: visible when the iPhone sends no frames,
+        // never dispatched to, so CarPlay touches and the three-finger gesture still work.
+        noPictureView = TextView(this).apply {
+            setText(R.string.iphone_sent_no_picture)
+            setTextColor(Color.WHITE)
+            textSize = 20f
+            gravity = Gravity.CENTER
+            setPadding(dp(24), dp(18), dp(24), dp(18))
+            setBackgroundColor(Color.argb(210, 0, 0, 0))
+            visibility = View.GONE
+            isClickable = false
+            isFocusable = false
+        }.also { root.addView(it, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER)) }
         root.addView(gestureLayer, FrameLayout.LayoutParams(-1, -1))
         // The settings menu is built on first open, not here.
         //
@@ -2705,6 +2739,9 @@ class CarPlayHostActivity : ComponentActivity() {
         startupRetryBudget.disconnected()
         restartGeneration += 1
         mainHandler.removeCallbacks(applyDisplaySize)
+        mainHandler.removeCallbacks(noPictureCheck)
+        noPictureShown = false
+        noPictureView?.visibility = View.GONE
         val oldController = controller
         val oldSink = sink
         CarPlayMediaKeys.detach(oldController)
@@ -2996,6 +3033,11 @@ class CarPlayHostActivity : ComponentActivity() {
             } else {
                 activeScreenStreamTypes.remove(type)
             }
+            if (type == SCREEN_TYPE_MAIN) {
+                noPictureShown = false
+                mainHandler.removeCallbacks(noPictureCheck)
+                if (active) mainHandler.postDelayed(noPictureCheck, NO_PICTURE_MILLIS)
+            }
             updateDebugOverlays()
         }
     }
@@ -3152,7 +3194,9 @@ class CarPlayHostActivity : ComponentActivity() {
 
     private fun updateDebugOverlays() {
         statusScrollView?.visibility = View.GONE
-        connectionPanel?.visibility = if (activeScreenStreamTypes.isEmpty()) View.VISIBLE else View.GONE
+        val noPicture = noPictureShown && SCREEN_TYPE_MAIN in activeScreenStreamTypes
+        noPictureView?.visibility = if (noPicture) View.VISIBLE else View.GONE
+        connectionPanel?.visibility = if (activeScreenStreamTypes.isEmpty() || noPicture) View.VISIBLE else View.GONE
     }
 
     private fun friendlyStage(message: String): String = when {
@@ -3300,6 +3344,9 @@ class CarPlayHostActivity : ComponentActivity() {
         private const val CHECKLIST_VISIBLE_NODES = 5
         const val SCREEN_TYPE_MAIN = 110
         const val SCREEN_TYPE_ALT = 111
+        /** The first frame normally arrives within a second of the screen stream opening. */
+        private const val NO_PICTURE_MILLIS = 10_000L
+        private const val NO_PICTURE_RECHECK_MILLIS = 250L
         const val LOG_RETENTION_MILLIS = 5 * 60_000L
         const val DISPLAY_CHANGE_DEBOUNCE_MILLIS = 500L
         const val CONFIGURATION_POLL_INTERVAL_MILLIS = 2_000L

@@ -553,6 +553,7 @@
     <string name="car_button_saved_next_connection">Guardado. CarPlay mostrará el nuevo icono y nombre la próxima vez que se conecte.</string>
     <string name="this_head_unit_has_no_image_picker">Esta unidad principal no tiene selector de imágenes.</string>
   <string name="exit_application_description">Cierra LynkPaly por completo: la sesión de CarPlay, el punto de acceso del coche y todos los hilos en segundo plano terminan con él.</string>
+    <string name="iphone_sent_no_picture">El iPhone no ha enviado ninguna imagen desde que se inició CarPlay. Reinicia el iPhone (apágalo y vuelve a encenderlo) y vuelve a conectarlo.</string>
 </resources>
 
 

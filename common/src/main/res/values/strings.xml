@@ -636,6 +636,7 @@
     <string name="call_banner_active">On a call</string>
     <string name="call_banner_answer">Answer</string>
     <string name="call_banner_end">Hang up</string>
+    <string name="iphone_sent_no_picture">The iPhone has not sent a picture since CarPlay started. Restart the iPhone (turn it off and on), then connect again.</string>
 </resources>
 
 

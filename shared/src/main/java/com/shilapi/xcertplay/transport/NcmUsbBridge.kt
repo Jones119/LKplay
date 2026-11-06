@@ -56,6 +56,9 @@ class NcmUsbBridge internal constructor(
     private var loggedWriteTimeout = false
     /** Consecutive bulk-OUT frames the phone refused; a permanent dead link must end the session. */
     private var consecutiveWriteFailures = 0
+    /** True once the phone accepted one frame, i.e. StartCarPlaySession has run (upstream #634). */
+    private var bulkOutAccepted = false
+    private var notReadyWriteTimeouts = 0
     private val frames = ArrayDeque<ByteArray>()
     private var queuedBytes = 0
     private var buffered = ByteArray(0)
@@ -95,9 +98,13 @@ class NcmUsbBridge internal constructor(
             this.sequence.also { this.sequence = (this.sequence + 1) and 0xffff }
         }
         val block = Ntb16Codec.build(frame, sequence)
+        // Until the phone takes its first frame the pipe is NAKed, so waiting the caller's whole
+        // timeout on each frame delays the iAP2 handshake. Dropping after 20 ms is what the full
+        // timeout would have done anyway (upstream 817ff3fa, #634).
+        val effectiveTimeout = NcmWritePolicy.effectiveTimeout(timeoutMillis, bulkOutAccepted)
         // Resume a truncated bulk-out from its real offset under one shared deadline (UsbBulkWrite).
         // The slice is only built on the rare resume, so a normal frame writes in one call.
-        val result = UsbBulkWrite.all(block.size, timeoutMillis) { offset, length, timeout ->
+        val result = UsbBulkWrite.all(block.size, effectiveTimeout) { offset, length, timeout ->
             val remaining = if (offset == 0 && length == block.size) block
             else block.copyOfRange(offset, offset + length)
             connection.bulkTransfer(outEndpoint, remaining, remaining.size, timeout)
@@ -106,6 +113,7 @@ class NcmUsbBridge internal constructor(
         // Before StartCarPlaySession the phone keeps the NCM data path NAKed. Android reports the
         // resulting timeout as -1; it is not a detach and later packets must be allowed to retry.
         if (transferred <= 0) {
+            if (!bulkOutAccepted) notReadyWriteTimeouts++
             // A NAK before StartCarPlaySession is normal and later frames must retry. An endpoint
             // that stays dead is not: without a bound the TX pump keeps discarding frames while its
             // counters still report them as sent, and only the AirPlay layer times out.
@@ -119,6 +127,12 @@ class NcmUsbBridge internal constructor(
                 Log.i(IphoneCarPlayConfiguration.TAG, "ncm bulk-out not ready; retaining bridge for retry")
             }
             return@synchronized
+        }
+        if (!bulkOutAccepted) {
+            bulkOutAccepted = true
+            runCatching {
+                onDiagnostic("NCM bulk-out ready after $notReadyWriteTimeouts short write timeouts")
+            }
         }
         consecutiveWriteFailures = 0
         if (transferred != block.size) {

@@ -623,6 +623,7 @@
 
     <string name="experimental_surface_view">使用 SurfaceView（實驗）</string>
     <string name="experimental_surface_view_description">改用 SurfaceView 承載 CarPlay 畫面，CPU 佔用明顯更低；但可能掉幀，且「畫面調節」與圓角遮罩不可用。下次啟動 CarPlay 生效。</string>
+    <string name="iphone_sent_no_picture">CarPlay 啟動後，iPhone 一直沒有傳送畫面。請將 iPhone 重新開機（關機再開機），然後重新連線。</string>
 </resources>
 
 

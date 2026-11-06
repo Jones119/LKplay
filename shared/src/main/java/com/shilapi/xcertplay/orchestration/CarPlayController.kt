@@ -1728,25 +1728,35 @@ class CarPlayController(
                 permissionPollGeneration++
                 when (phase) {
                     Phase.REENUMERATION, Phase.IPHONE -> {
-                        // CS11: API19 无配置枚举——检查活动配置是否已含 USBMUX 接口
+                        // CS11: API19 无配置枚举——检查活动配置是否已含 USBMUX+NCM。
+                        // iOS 17+ 还会提供“有 USBMUX+NCM、但没有 Apple Ethernet”的配置：
+                        // 直接用它时 iAP2/StartSession 都成功，iPhone 却永远不开 AirPlay
+                        // （上游 #634；本车即配置 5 与 6 的差别，doc 117 §4ter）。
                         val configurationReady =
                             IphoneCarPlayConfiguration.activeConfigCarPlayReady(result.device)
+                        val carPlayMode = IphoneCarPlayConfiguration.activeConfigIsCarPlayMode(result.device)
+                        val action = WiredConfigurationAction.choose(
+                            found = configurationReady,
+                            carPlayMode = carPlayMode,
+                            transitionsTried = reenumerationAttempts,
+                            maximumTransitions = MAXIMUM_REENUMERATION_ATTEMPTS,
+                        )
                         connectionDiagnostic(
                             "USB configuration ready=$configurationReady " +
                                 "configurationId=none " +
+                                "appleEthernet=$carPlayMode " +
                                 "reenumerationAttempts=$reenumerationAttempts " +
-                                "action=${when {
-                                    configurationReady -> "reuse-descriptors"
-                                    reenumerationAttempts < MAXIMUM_REENUMERATION_ATTEMPTS -> "request-transition"
-                                    else -> "reject-missing-configuration"
-                                }}",
+                                "action=${action.diagnostic}",
                         )
-                        if (configurationReady) {
-                            softReplugThenOpenDataPaths(result.device)
-                        } else if (reenumerationAttempts < MAXIMUM_REENUMERATION_ATTEMPTS) {
-                            beginReenumeration(result.device)
-                        } else {
-                            fail(
+                        when (action) {
+                            WiredConfigurationAction.USE,
+                            WiredConfigurationAction.USE_WITHOUT_APPLE_ETHERNET ->
+                                softReplugThenOpenDataPaths(result.device)
+                            WiredConfigurationAction.REQUEST_TRANSITION -> beginReenumeration(
+                                result.device,
+                                WiredConfigurationAction.fallbackAfterRejection(configurationReady, carPlayMode),
+                            )
+                            WiredConfigurationAction.REJECT -> fail(
                                 IphoneUsbException.Protocol(
                                     "iPhone did not expose a complete CarPlay USB configuration",
                                 ),
@@ -1790,18 +1800,58 @@ class CarPlayController(
         mainHandler.postDelayed(check, PERMISSION_POLL_INTERVAL_MILLIS)
     }
 
-    private fun beginReenumeration(device: UsbDevice) {
+    /** [fallbackAfterRejection]: the iPhone already offers USBMUX and NCM, so try that if it refuses. */
+    private fun beginReenumeration(device: UsbDevice, fallbackAfterRejection: Boolean = false) {
         phase = Phase.REENUMERATION
         reenumerationAttempts += 1
         connectionDiagnostic("USB transition requested count=$reenumerationAttempts")
         onStatus(CarPlayStatus.SelectingConfiguration)
         iphoneHost.requestCarPlayReenumerationAsync(device, executor) { transition ->
             when (transition) {
-                IphoneUsbHost.TransitionResult.ReenumerationRequested ->
+                IphoneUsbHost.TransitionResult.ReenumerationRequested -> {
                     onStatus(CarPlayStatus.WaitingForReenumeration)
-                is IphoneUsbHost.TransitionResult.Failed -> fail(transition.error)
+                    mainHandler.post { watchReenumeration(device) }
+                }
+                is IphoneUsbHost.TransitionResult.Failed -> if (fallbackAfterRejection) {
+                    connectionDiagnostic(
+                        "USB transition rejected; using the configuration without Apple Ethernet " +
+                            "error=${transition.error.message}",
+                    )
+                    mainHandler.post {
+                        if (!closed && phase == Phase.REENUMERATION) openDataPaths(device)
+                    }
+                } else {
+                    fail(transition.error)
+                }
             }
         }
+    }
+
+    /**
+     * Only a USB attach used to end the wait for the iPhone to come back in CarPlay mode, and an
+     * iPhone that ignores the request never attaches again: after Save and reconnect, an iPhone
+     * still in the mode of the ended session left wired CarPlay waiting for minutes (upstream
+     * #335). Without an attach the iPhone is looked at again, which uses the mode it already
+     * offers, as before the request.
+     */
+    private fun watchReenumeration(device: UsbDevice) {
+        val attempt = reenumerationAttempts
+        val generation = availabilityPollGeneration.get()
+        mainHandler.postDelayed({
+            if (closed || phase != Phase.REENUMERATION || attempt != reenumerationAttempts ||
+                generation != availabilityPollGeneration.get()
+            ) {
+                return@postDelayed
+            }
+            // An iPhone that left the bus is still re-enumerating: its attach ends the wait.
+            val listed = runCatching { iphoneHost.discover() }.getOrDefault(emptyList())
+                .firstOrNull { it.deviceName == device.deviceName } ?: return@postDelayed
+            connectionDiagnostic(
+                "USB transition unanswered after ${REENUMERATION_WAIT_MILLIS}ms count=$attempt; " +
+                    "checking the iPhone again",
+            )
+            requestIphonePermission(listed)
+        }, REENUMERATION_WAIT_MILLIS)
     }
 
     private fun onIphoneAttached(device: UsbDevice) {
@@ -3073,6 +3123,9 @@ class CarPlayController(
         private const val RFCOMM_CONNECT_TIMEOUT_MILLIS = 15_000L
         private const val BLUETOOTH_ENABLE_TIMEOUT_MILLIS = 6_000L
         private const val MAXIMUM_REENUMERATION_ATTEMPTS = 2
+
+        /** An iPhone answers the mode request within about a second; one took six (upstream #335). */
+        private const val REENUMERATION_WAIT_MILLIS = 10_000L
 
         /** How long teardown waits for the phone to re-enumerate after the configuration switch. */
         private const val RESET_REENUMERATION_WAIT_MILLIS = 1_500L

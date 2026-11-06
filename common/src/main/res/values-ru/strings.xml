@@ -553,6 +553,7 @@
     <string name="car_button_saved_next_connection">Сохранено. CarPlay покажет новый значок и название при следующем подключении.</string>
     <string name="this_head_unit_has_no_image_picker">На этом головном устройстве нет выбора изображений.</string>
   <string name="exit_application_description">Полностью закрывает LynkPaly: сеанс CarPlay, точка доступа автомобиля и все фоновые потоки завершаются вместе с ним.</string>
+    <string name="iphone_sent_no_picture">iPhone не передал изображение с момента запуска CarPlay. Перезагрузите iPhone (выключите и включите), затем подключите его снова.</string>
 </resources>
 
 
