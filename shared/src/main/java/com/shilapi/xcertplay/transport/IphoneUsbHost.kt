@@ -166,7 +166,9 @@ class IphoneUsbHost(
 
     /** Register once for this host instance and close the returned handle to unregister it. */
     fun registerPermissionReceiver(onResult: (PermissionResult) -> Unit): Closeable =
-        registerReceiver(IntentFilter(permissionAction)) { parsePermissionResult(it)?.let(onResult) }
+        registerReceiver(IntentFilter(permissionAction), guarded = true) {
+            parsePermissionResult(it)?.let(onResult)
+        }
 
     /** Register once for this host instance and close the returned handle to unregister it. */
     fun registerAttachReceiver(onAttached: (UsbDevice) -> Unit): Closeable =
@@ -458,11 +460,20 @@ class IphoneUsbHost(
         return PendingIntent.getBroadcast(appContext, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT)
     }
 
-    private fun registerReceiver(filter: IntentFilter, onReceive: (Intent) -> Unit): Closeable {
+    private fun registerReceiver(
+        filter: IntentFilter,
+        guarded: Boolean = false,
+        onReceive: (Intent) -> Unit,
+    ): Closeable {
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent) = onReceive(intent)
         }
-        appContext.registerReceiver(receiver, filter)
+        if (guarded) {
+            // The permission result is forgeable by any app on API 19 without this.
+            UsbPermissionBroadcast.register(appContext, receiver, filter)
+        } else {
+            appContext.registerReceiver(receiver, filter)
+        }
         val registered = AtomicBoolean(true)
         return Closeable {
             if (registered.compareAndSet(true, false)) appContext.unregisterReceiver(receiver)

@@ -25,6 +25,7 @@ class DiagnosticRedactorTest {
                     log.append(line)
                 }
                 log.append("Audio: payload=private-recording")
+                assertTrue("queued lines must reach the file", log.awaitIdle(2_000))
             }
             val report = file.readText()
             lines.forEach { assertTrue(report.contains(it)) }
@@ -63,6 +64,7 @@ class DiagnosticRedactorTest {
                 it.reset("started")
                 it.append(audio)
                 it.append(video)
+                assertTrue("queued lines must reach the file", it.awaitIdle(2_000))
             }
             val report = folder.resolve("diplay.log").readText()
             assertTrue(report.contains(audio))
@@ -87,6 +89,7 @@ class DiagnosticRedactorTest {
             log.append("password=secret")
             repeat(1600) { log.append("connection state " + "x".repeat(690)) }
             log.append("CarPlay connected")
+            assertTrue("queued lines must reach the file", log.awaitIdle(10_000))
             log.close()
             assertTrue(folder.resolve("diplay.log").length() <= SessionLogFile.MAX_BYTES + 701)
             assertTrue(folder.resolve("previous.log").length() <= SessionLogFile.MAX_BYTES + 701)
@@ -102,6 +105,7 @@ class DiagnosticRedactorTest {
                     it.reset("session=$session")
                     it.append(if (session == 3) "Wi-Fi P2P create rejected code=0" else "CarPlay connected")
                     it.append("password=secret")
+                    it.awaitIdle(2_000)
                 }
             }
             val history = SessionLogFile.REPORT_NAMES.map { folder.resolve(it).readText() }

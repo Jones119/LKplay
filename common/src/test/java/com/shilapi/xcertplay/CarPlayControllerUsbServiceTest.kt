@@ -96,11 +96,22 @@ class CarPlayControllerUsbServiceTest {
             if (name == USB_SERVICE && !hasUsb) null else super.getSystemService(name)
         override fun registerReceiver(receiver: BroadcastReceiver?, filter: IntentFilter): Intent? {
             if (receiver != null) receivers[receiver] = filter
-            return super.registerReceiver(receiver, filter)
+            return null
         }
+
+        /** The permission-result receiver is registered with a broadcast permission (API 19). */
+        override fun registerReceiver(
+            receiver: BroadcastReceiver?,
+            filter: IntentFilter,
+            broadcastPermission: String?,
+            scheduler: android.os.Handler?,
+        ): Intent? {
+            if (receiver != null) receivers[receiver] = filter
+            return null
+        }
+
         override fun unregisterReceiver(receiver: BroadcastReceiver) {
             if (receivers.remove(receiver) != null) unregistered++
-            super.unregisterReceiver(receiver)
         }
     }
 }

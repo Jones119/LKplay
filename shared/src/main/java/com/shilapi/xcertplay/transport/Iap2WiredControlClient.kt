@@ -38,6 +38,8 @@ class Iap2WiredControlClient(
         }
 
         val deadlineNanos = Iap2ControlDeadline(timeoutMillis)
+        // 0x5001/0x5201 repeat every second; one line each would dominate the report.
+        val rxLog = Iap2RxLog()
         val identified = identification.withVehicleStatusFrom(vehicleStatusProvider)
         if (identified.vehicleStatusEnabled != identification.vehicleStatusEnabled) {
             onProgress("iap2 no battery reading: not declaring an electric vehicle")
@@ -110,7 +112,7 @@ class Iap2WiredControlClient(
                     }
 
                     else -> {
-                        onProgress("iap2 rx=0x${incoming.messageId.toString(16).padStart(4, '0')}")
+                        rxLog.line(incoming.messageId)?.let(onProgress)
                         onIncoming(incoming)
                         forwardedFrames++
                     }

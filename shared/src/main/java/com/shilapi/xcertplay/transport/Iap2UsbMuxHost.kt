@@ -25,6 +25,10 @@ class Iap2UsbMuxHost private constructor(
     private var nextMuxSequence = 0
     private var nextMuxAcknowledgement = 0
     private var nextSourcePort = FIRST_SOURCE_PORT
+    // One log line per frame filled logcat within a minute of a wired session (upstream #634).
+    // Large writes and pure ACKs share a budget; SYN/FIN/RST stay unlimited because those are the
+    // lines that explain a failed wired session (upstream 2cce3825 / 8e739c52).
+    private val logBudget = UsbmuxLogBudget()
     private lateinit var readerThread: Thread
     private val receiveFrames = UsbMuxFrameBuffer { line ->
         Log.w("xcertplay-usb", line)
@@ -84,7 +88,7 @@ class Iap2UsbMuxHost private constructor(
         flags: Int,
         payload: ByteArray,
     ) {
-        if (payload.size > 512) Log.i("xcertplay-usb", "usbmux TX source=$sourcePort destination=$destinationPort bytes=${payload.size} seq=$sequence ack=$acknowledgement")
+        if (payload.size > 512 && logBudget.largeWrite()) Log.i("xcertplay-usb", "usbmux TX source=$sourcePort destination=$destinationPort bytes=${payload.size} seq=$sequence ack=$acknowledgement")
         val tcp = ByteArray(TCP_HEADER_BYTES + payload.size)
         writeU16Be(tcp, 0, sourcePort)
         writeU16Be(tcp, 2, destinationPort)
@@ -245,7 +249,10 @@ class Iap2UsbMuxHost private constructor(
             throw IphoneUsbException.Protocol("Invalid USBMUX TCP header length")
         }
         val destinationPort = readU16Be(frame, offset + 2)
-        if (length == tcpHeaderBytes) Log.i("xcertplay-usb", "usbmux TCP control destination=$destinationPort flags=${frame[13].toInt() and 0xff} ack=${readU32Be(frame, 8)} window=${readU16Be(frame, 14)}")
+        // Only pure ACKs count against the cap; a late reset or close is what support needs.
+        if (length == tcpHeaderBytes && logBudget.controlFrame(frame[offset + 13].toInt() and 0xff)) {
+            Log.i("xcertplay-usb", "usbmux TCP control destination=$destinationPort flags=${frame[13].toInt() and 0xff} ack=${readU32Be(frame, 8)} window=${readU16Be(frame, 14)}")
+        }
         val connection = synchronized(stateLock) { connections[destinationPort] } ?: return
         connection.onPacket(
             flags = frame[offset + 13].toInt() and 0xff,

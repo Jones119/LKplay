@@ -1,5 +1,16 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!--
+      Guards the run-time USB permission result receiver on Android 4.4: before Android 13 such a
+      receiver accepts a broadcast from any app, so another app could forge a granted or denied
+      result. The real result travels through this app's own PendingIntent and therefore carries
+      this app's identity (upstream 4c9af446).
+    -->
+    <permission
+        android:name="${applicationId}.USB_PERMISSION_RESULT"
+        android:protectionLevel="signature" />
+    <uses-permission android:name="${applicationId}.USB_PERMISSION_RESULT" />
+
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
