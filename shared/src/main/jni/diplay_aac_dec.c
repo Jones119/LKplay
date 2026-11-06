@@ -265,7 +265,9 @@ diplay_aac_decoder *diplay_aac_decoder_create(diplay_aac_query_dec_mem_fn query_
     d->decoder_init = decoder_init;
     d->decode_frame = decode_frame;
     d->version_info = version_info;
-    d->out_capacity = max_channels * AAC_FRAME_SIZE;
+    /* 厂商解码器按码流自己的声道数写最多 CHANS 路输出；按调用方诉求（通常 2）分配
+       时，多声道或畸形 ADTS 帧会在 aacd_decode_frame 内越界写。缓冲区必须按上限分配。 */
+    d->out_capacity = CHANS * AAC_FRAME_SIZE;
 
     /* 1) 先让厂商库填内存需求清单（头文件：aacd_query_dec_mem(dec_config) 就地填 aacd_mem_info） */
     d->config = (AACD_Decoder_Config *) calloc(1, sizeof(AACD_Decoder_Config));

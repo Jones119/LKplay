@@ -52,6 +52,19 @@ internal class TouchDispatchGate {
         return null
     }
 
+    /**
+     * Ends the current worker run and drops what is queued.
+     *
+     * [reset] only clears the queue; the worker flag stays set. A drain that returns while no
+     * session is active therefore leaves the gate believing a worker is still draining, and the
+     * next session's enqueue never schedules another one - touch stays dead for the whole
+     * controller lifetime. Only the worker itself may call this.
+     */
+    @Synchronized fun abort() {
+        pending.clear()
+        workerActive = false
+    }
+
     /** A new session must not inherit the previous session's pending states. */
     @Synchronized fun reset() {
         pending.clear()

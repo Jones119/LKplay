@@ -333,6 +333,12 @@ internal object CarPlayMediaKeys {
 
     @Suppress("DEPRECATION")
     private fun stopLegacyKeys(context: Context) {
+        // 放弃遗留焦点请求。这里只注销 receiver 就返回，会让车机继续认为 DiPlay 持有
+        // STREAM_MUSIC：上一个播放器收不到 AUDIOFOCUS_GAIN，断开后一直停在暂停/压低状态。
+        context.systemServiceOrNull(AudioManager::class.java)?.let { audio ->
+            runCatching { audio.abandonAudioFocus(legacyFocusListener) }
+        }
+        focusHeld = false
         if (!legacyKeysRegistered) return
         legacyKeysRegistered = false
         context.systemServiceOrNull(AudioManager::class.java)?.unregisterMediaButtonEventReceiver(

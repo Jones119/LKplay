@@ -54,6 +54,8 @@ class NcmUsbBridge internal constructor(
     private var failure: IphoneUsbException? = null
     private var sequence = 0
     private var loggedWriteTimeout = false
+    /** Consecutive bulk-OUT frames the phone refused; a permanent dead link must end the session. */
+    private var consecutiveWriteFailures = 0
     private val frames = ArrayDeque<ByteArray>()
     private var queuedBytes = 0
     private var buffered = ByteArray(0)
@@ -104,12 +106,21 @@ class NcmUsbBridge internal constructor(
         // Before StartCarPlaySession the phone keeps the NCM data path NAKed. Android reports the
         // resulting timeout as -1; it is not a detach and later packets must be allowed to retry.
         if (transferred <= 0) {
+            // A NAK before StartCarPlaySession is normal and later frames must retry. An endpoint
+            // that stays dead is not: without a bound the TX pump keeps discarding frames while its
+            // counters still report them as sent, and only the AirPlay layer times out.
+            if (++consecutiveWriteFailures >= MAX_CONSECUTIVE_WRITE_FAILURES) {
+                throw failSession(
+                    "NCM bulk-out failed $consecutiveWriteFailures consecutive frames",
+                )
+            }
             if (!loggedWriteTimeout) {
                 loggedWriteTimeout = true
                 Log.i(IphoneCarPlayConfiguration.TAG, "ncm bulk-out not ready; retaining bridge for retry")
             }
             return@synchronized
         }
+        consecutiveWriteFailures = 0
         if (transferred != block.size) {
             throw IphoneUsbException.DeviceUnavailable(
                 "NCM write transferred $transferred of ${block.size} bytes" +
@@ -163,14 +174,18 @@ class NcmUsbBridge internal constructor(
                 Thread.currentThread().interrupt()
             }
         }
-        for (usbInterface in claimedInterfaces.asReversed()) {
-            try {
-                connection.releaseInterface(usbInterface)
-            } catch (_: RuntimeException) {
-                // Best-effort release; the connection close below is authoritative.
+        // 写路径全程持有 writeLock 做最长 200 ms 的 bulkTransfer；释放接口与关闭 fd 必须等那次
+        // 传输结束，否则 close(fd) 可能与 ioctl(USBDEVFS_BULK) 并发，fd 被回收后作用到别的 fd。
+        synchronized(writeLock) {
+            for (usbInterface in claimedInterfaces.asReversed()) {
+                try {
+                    connection.releaseInterface(usbInterface)
+                } catch (_: RuntimeException) {
+                    // Best-effort release; the connection close below is authoritative.
+                }
             }
+            connection.close()
         }
-        connection.close()
         runCatching { requestToClose?.close() }
     }
 
@@ -434,6 +449,11 @@ class NcmUsbBridge internal constructor(
         private const val STATUS_POLL_INTERVAL_MILLIS = 500L
         private const val MAX_QUEUED_FRAMES = 256
         private const val MAX_QUEUED_BYTES = 1 shl 20
+        /**
+         * ~20 s of failed 200 ms bulk-OUT attempts. Must stay well above the pre-StartCarPlaySession
+         * NAK window (a few seconds) so a normal bring-up is never failed by this bound.
+         */
+        private const val MAX_CONSECUTIVE_WRITE_FAILURES = 100
         private const val NANOS_PER_MILLISECOND = 1_000_000L
         private const val NTH16_LENGTH = 12
         private const val MAX_RESYNCS_PER_WINDOW = 16

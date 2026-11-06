@@ -645,8 +645,14 @@ class Iap2UsbSession internal constructor(
             closed = true
             pendingRead
         }
-        requestToCancel?.cancel()
-        connection.close()
+        // cancel() 在请求已完成或连接已异常时可能抛 RuntimeException；它绝不能挡住
+        // connection.close()，否则连接与已认领的 USBMUX 接口一起泄漏，下一次 claim 直接失败。
+        runCatching { requestToCancel?.cancel() }
+        try {
+            connection.close()
+        } finally {
+            runCatching { requestToCancel?.close() }
+        }
     }
 
     private fun checkOpen() {

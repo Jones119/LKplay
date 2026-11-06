@@ -550,7 +550,14 @@ class AirPlaySession(
                         "airplay control rx headers=${request.headers} " +
                             "bodyHex=${request.body.toHex()}",
                     )
-                    val response = try {
+                    // 控制端口在配对完成前就可连接。除配对建立步骤与 /info 外，明文请求一律拒绝：
+                    // 否则同一热点上的任何设备都能 SETUP 打开端口、发 /command 或 TEARDOWN。
+                    // 这道闸放在接收网络请求的这里，而不是 handle() 内部：handle() 是纯请求分发，
+                    // 也便于单测直接覆盖各个端点。
+                    val response = if (!isPreAuthRequest(request)) {
+                        debugLog("airplay request refused before pair-verify ${request.method} ${request.path}")
+                        RtspMessage.Response(status = 400)
+                    } else try {
                         handle(request)
                     } catch (error: Exception) {
                         Log.e(
@@ -684,6 +691,21 @@ class AirPlaySession(
             Log.w(TAG, "airplay SETUP response callback failed", error)
         }
         reapplyClusterContent()
+    }
+
+    /**
+     * 配对完成（[cipher] 已建立）之前允许处理的请求。
+     *
+     * CarPlay 的建立顺序是 /pair-setup → /pair-verify → /auth-setup → /info → SETUP，前三个
+     * 端点本身就是建立加密通道的步骤，必须放行；其余端点只在加密通道建立后处理。
+     */
+    private fun isPreAuthRequest(request: RtspMessage.Request): Boolean {
+        if (cipher != null) return true
+        val path = request.path.lowercase()
+        return path.endsWith("/pair-setup") ||
+            path.endsWith("/pair-verify") ||
+            path.endsWith("/auth-setup") ||
+            path.endsWith("/info")
     }
 
     private fun debugLog(message: String, uiVisible: Boolean = true) {

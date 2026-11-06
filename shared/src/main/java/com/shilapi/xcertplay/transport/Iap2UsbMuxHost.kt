@@ -111,41 +111,57 @@ class Iap2UsbMuxHost private constructor(
         writeU32Be(version, 4, VERSION_MESSAGE_BYTES)
         writeU32Be(version, 8, USBMUX_VERSION)
         pipe.write(version, HANDSHAKE_TIMEOUT_MILLIS.toInt())
-        // The phone replies with the same proto=0, length=20, version=2 packet. Protocol 1 is not
-        // a distinct "version reply" here; waiting for it discards the valid reply and times out.
-        val deadline = System.nanoTime() + HANDSHAKE_TIMEOUT_MILLIS * NANOS_PER_MILLISECOND
-        var staleFrames = 0
-        var reply: UsbMuxFrame
-        while (true) {
-            val remainingNanos = deadline - System.nanoTime()
-            if (remainingNanos <= 0) {
-                throw IphoneUsbException.TimedOut("Timed out waiting for the USBMUX version reply")
+        // requestWait() on API 19 has no timeout, so the deadline below is not enforceable by the
+        // read itself. One timer for the handshake (not per read) closes the pipe at the deadline,
+        // turning "the phone never answered" from a permanent thread hang into one failed connect.
+        val handshakeWatchdog = java.util.Timer("usbmux-handshake", true)
+        handshakeWatchdog.schedule(object : java.util.TimerTask() {
+            override fun run() {
+                val line = "USBMUX handshake timed out after ${HANDSHAKE_TIMEOUT_MILLIS}ms; closing the pipe"
+                Log.w("xcertplay-usb", line)
+                runCatching { onDiagnostic(line) }
+                runCatching { pipe.close() }
             }
-            val remainingMillis = (remainingNanos + NANOS_PER_MILLISECOND - 1) / NANOS_PER_MILLISECOND
-            reply = takeFrame(remainingMillis)
-                ?: throw IphoneUsbException.TimedOut("Timed out waiting for the USBMUX version reply")
-            if (
-                reply.protocol == PROTOCOL_VERSION &&
-                reply.length == VERSION_MESSAGE_BYTES &&
-                reply.word8 == USBMUX_VERSION
-            ) {
-                break
+        }, HANDSHAKE_TIMEOUT_MILLIS)
+        try {
+            // The phone replies with the same proto=0, length=20, version=2 packet. Protocol 1 is not
+            // a distinct "version reply" here; waiting for it discards the valid reply and times out.
+            val deadline = System.nanoTime() + HANDSHAKE_TIMEOUT_MILLIS * NANOS_PER_MILLISECOND
+            var staleFrames = 0
+            var reply: UsbMuxFrame
+            while (true) {
+                val remainingNanos = deadline - System.nanoTime()
+                if (remainingNanos <= 0) {
+                    throw IphoneUsbException.TimedOut("Timed out waiting for the USBMUX version reply")
+                }
+                val remainingMillis = (remainingNanos + NANOS_PER_MILLISECOND - 1) / NANOS_PER_MILLISECOND
+                reply = takeFrame(remainingMillis)
+                    ?: throw IphoneUsbException.TimedOut("Timed out waiting for the USBMUX version reply")
+                if (
+                    reply.protocol == PROTOCOL_VERSION &&
+                    reply.length == VERSION_MESSAGE_BYTES &&
+                    reply.word8 == USBMUX_VERSION
+                ) {
+                    break
+                }
+                // Android can leave already-received TCP payloads queued in the bulk endpoint when
+                // an app process is replaced. They belong to the previous host instance and must not
+                // be mistaken for the version reply sent in response to the new handshake.
+                if (reply.protocol != PROTOCOL_TCP || ++staleFrames > MAX_STALE_HANDSHAKE_FRAMES) {
+                    throw IphoneUsbException.Protocol(
+                        "Invalid USBMUX version reply: proto=${reply.protocol} " +
+                            "length=${reply.length} version=${reply.word8}",
+                    )
+                }
+                Log.i("xcertplay-usb", "discarding stale usbmux TCP frame before version reply")
             }
-            // Android can leave already-received TCP payloads queued in the bulk endpoint when
-            // an app process is replaced. They belong to the previous host instance and must not
-            // be mistaken for the version reply sent in response to the new handshake.
-            if (reply.protocol != PROTOCOL_TCP || ++staleFrames > MAX_STALE_HANDSHAKE_FRAMES) {
-                throw IphoneUsbException.Protocol(
-                    "Invalid USBMUX version reply: proto=${reply.protocol} " +
-                        "length=${reply.length} version=${reply.word8}",
-                )
-            }
-            Log.i("xcertplay-usb", "discarding stale usbmux TCP frame before version reply")
+            Log.i("xcertplay-usb", "usbmux version accepted: ${reply.word8}")
+            // Optional reply padding is handled by the incremental framer. Retain a possible
+            // fragmented/coalesced next frame instead of discarding the entire remainder.
+            sendFrame(PROTOCOL_SETUP, byteArrayOf(SETUP_VALUE.toByte()))
+        } finally {
+            handshakeWatchdog.cancel()
         }
-        Log.i("xcertplay-usb", "usbmux version accepted: ${reply.word8}")
-        // Optional reply padding is handled by the incremental framer. Retain a possible
-        // fragmented/coalesced next frame instead of discarding the entire remainder.
-        sendFrame(PROTOCOL_SETUP, byteArrayOf(SETUP_VALUE.toByte()))
         readerThread = WorkerThreads.create({
             android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO)
             readerLoop()

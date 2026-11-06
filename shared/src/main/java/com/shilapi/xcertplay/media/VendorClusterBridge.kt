@@ -666,6 +666,10 @@ object VendorClusterBridge {
     fun detach() {
         artworkUri = null
         artworkUriChanges = null
+        // 这两个 lambda 捕获了宿主 Activity；不清掉，进程级单例会让每次 finish/recreate
+        // 都留下一个含视图树的旧 Activity。
+        answerCallAction = null
+        endCallAction = null
     }
 
     /**
@@ -685,10 +689,18 @@ object VendorClusterBridge {
     fun release() {
         val store = synchronized(pushLock) {
             mainHandler.removeCallbacksAndMessages(null)
+            // 结束 while-playing 重推。它是个进程级常驻定时器，过去在 release() 后仍每 tick
+            // 调 DIM 并保留 lastMedia/pendingCall，会话结束后依然向仪表推送旧卡片。
+            repush?.shutdownNow()
+            repush = null
             artworkStore.also { artworkStore = null }
         }
         artworkUri = null
         artworkMedia = null
+        lastMedia = null
+        pendingCall = null
+        answerCallAction = null
+        endCallAction = null
         sourceTypeSent = false
         sourceListSent = false
         artworkUriChanges = null

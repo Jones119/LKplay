@@ -72,4 +72,15 @@ class TouchDispatchGateTest {
         gate.reset()
         assertNull(gate.next())
     }
+
+    @Test fun abortReleasesTheWorkerSoANewStateCanBeScheduledAgain() {
+        // The drain worker calls abort() when it exits without an active session; the next
+        // session's enqueue must schedule a fresh worker rather than believe one is still running.
+        assertTrue(gate.enqueue(state(contact(0, 0.1))))
+        gate.abort()
+        assertTrue(gate.enqueue(state(contact(0, 0.2))))
+        val sent = gate.next()
+        assertEquals(0.2, sent?.contacts?.get(0)?.x ?: 0.0, 0.0)
+        assertNull(gate.next())
+    }
 }

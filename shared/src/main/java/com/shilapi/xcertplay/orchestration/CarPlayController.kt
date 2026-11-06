@@ -565,10 +565,18 @@ class CarPlayController(
             val state = touchGate.next() ?: return
             val session = activeSession
             if (session == null) {
-                touchGate.reset()
+                // reset() 只清队列，workerActive 仍为 true；下一次会话的 enqueue 会以为还有
+                // worker 在跑而不再调度，触摸从此永久失效。这里必须把 worker 自己也释放掉。
+                touchGate.abort()
                 return
             }
-            session.sendTouch(state.contacts, state.enqueuedNs)
+            try {
+                session.sendTouch(state.contacts, state.enqueuedNs)
+            } catch (_: Exception) {
+                // 任何一次发送异常都不能把 worker 标志留在 true。
+                touchGate.abort()
+                return
+            }
         }
     }
 

@@ -929,7 +929,11 @@ object AirPlayPersistence {
         val publicKey = prefs.getString(KEY_IDENT_PUBLIC, null)
         val pairingId = prefs.getString(KEY_PAIRING_ID, null)
         if (privateKey != null && publicKey != null && pairingId != null) {
-            return AirPlayIdentity(privateKey.decodeHex(), publicKey.decodeHex(), pairingId)
+            // prefs 被写坏（人工修改、迁移遗留、异常断电）时 decodeHex 会抛。失败就重新生成身份：
+            // 一次坏数据不能让应用每次启动都崩在 onCreate，用户连设置页都进不去。
+            runCatching {
+                AirPlayIdentity(privateKey.decodeHex(), publicKey.decodeHex(), pairingId)
+            }.getOrNull()?.let { return it }
         }
         return AirPlayIdentity.generate().also { identity ->
             prefs.edit()

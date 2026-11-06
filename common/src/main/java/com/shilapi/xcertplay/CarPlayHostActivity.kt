@@ -1069,6 +1069,9 @@ class CarPlayHostActivity : ComponentActivity() {
         mainHandler.removeCallbacks(expireOldLogLines)
         mainHandler.removeCallbacks(pollConfiguration)
         mainHandler.removeCallbacks(reportVideoFps)
+        // 重建（旋转/换语言）时丢弃上一实例的恢复定时器：否则它会在新实例 active 之前
+        // 把手机蓝牙恢复一次，并且让旧 Activity 被主 Handler 多持有整个 grace。
+        if (isChangingConfigurations) cancelMediaAudioRestore()
         currentSurface?.let { surface ->
             sink?.clearSurface(SCREEN_TYPE_MAIN, surface)
             sink?.clearSurface(SCREEN_TYPE_ALT, surface)
@@ -2371,6 +2374,8 @@ class CarPlayHostActivity : ComponentActivity() {
             appendLog("THEME_DIAGNOSTIC request source=${source.label} applied=${if (night) "dark" else "light"} sessionActive=false")
             return
         }
+        // shutdown 之后该线程池已关闭，再投递会抛 RejectedExecutionException。
+        if (airPlayCommandExecutor.isShutdown) return
         airPlayCommandExecutor.execute {
             try {
                 val sent = session.setNightMode(night)
@@ -2506,6 +2511,9 @@ class CarPlayHostActivity : ComponentActivity() {
 
     private fun maybeStartCarPlay() {
         if (shuttingDown.get()) return
+        // 这个函数会以 500 ms 自投递等待另一个 Activity 让出会话；Activity 已 finish/销毁后
+        // 仍会继续投递并可能把会话重新绑到一个死实例上。
+        if (isFinishing || isDestroyed) return
         if (CarPlayBackgroundSession.hasSession() && !CarPlayBackgroundSession.isOwner(this)) {
             if (!adoptBackgroundSession()) mainHandler.postDelayed({ maybeStartCarPlay() }, 500)
             return
@@ -2689,6 +2697,11 @@ class CarPlayHostActivity : ComponentActivity() {
         // Shutdown restores through DiPlaySessionService's own stop; a grace still pending would fire
         // against a stack that is already gone.
         cancelMediaAudioRestore()
+        // The session is really over: hand the phone's Bluetooth back and stop every surviving
+        // watchdog instance, including this Activity's own. Without this the home-page "Disconnect"
+        // (terminateProcess = false) leaves an instance that re-releases within its next 5 s tick,
+        // and nothing ever calls restore() again for the life of the process.
+        restorePhoneMediaAudio()
         startupRetryBudget.disconnected()
         restartGeneration += 1
         mainHandler.removeCallbacks(applyDisplaySize)
@@ -2699,6 +2712,9 @@ class CarPlayHostActivity : ComponentActivity() {
         controller = null
         sink = null
         sessionDisplay = null
+        // 会话已结束：UI 侧的会话引用也必须清掉。否则退出瞬间的环境光/日夜模式回调仍会
+        // 往 airPlayCommandExecutor 投递任务，而它在 teardown 里已被 shutdown，抛出 REE。
+        activeAirPlaySession = null
         Log.i(TAG, "shutdown reason=$reason terminateProcess=$terminateProcess")
         teardownExecutor.execute {
             // Ask the iPhone to re-enumerate (the software equivalent of unplugging): without it the
