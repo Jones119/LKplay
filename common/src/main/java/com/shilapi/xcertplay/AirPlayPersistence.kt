@@ -68,7 +68,8 @@ object AirPlayPersistence {
     private const val KEY_SHOW_VIDEO_FPS = "show_video_fps"
 
     /** Experimental SurfaceView video sink; see VideoSurfaceMode. Default stays TextureView. */
-    private const val KEY_SURFACE_VIEW_EXPERIMENTAL = "surface_view_experimental"
+    // 新键名：旧键 surface_view_experimental 存的是切换前的实验默认值（false），升级后不应继续生效。
+    private const val KEY_USE_SURFACE_VIEW = "use_surface_view"
     private const val KEY_MEDIA_BUFFER_MS = "media_buffer_ms"
     private const val KEY_MAIN_BUFFERED_AUDIO = "main_buffered_audio"
     private const val KEY_CLUSTER_MAP = "cluster_map_enabled"
@@ -554,14 +555,17 @@ object AirPlayPersistence {
             .apply()
     }
 
-    /** Experimental SurfaceView video sink; see [VideoSurfaceMode]. Default stays TextureView. */
+    /**
+     * 画面渲染方式：默认 SurfaceView（车主 2026-11-11 决定切换）。关掉可回退到 TextureView，
+     * 用于排查 SurfaceView 档的掉帧或需要画面调节/圆角时。见 [VideoSurfaceMode]。
+     */
     fun loadSurfaceViewExperimental(context: Context): Boolean =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getBoolean(KEY_SURFACE_VIEW_EXPERIMENTAL, false)
+            .getBoolean(KEY_USE_SURFACE_VIEW, true)
 
     fun saveSurfaceViewExperimental(context: Context, enabled: Boolean) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-            .putBoolean(KEY_SURFACE_VIEW_EXPERIMENTAL, enabled)
+            .putBoolean(KEY_USE_SURFACE_VIEW, enabled)
             .apply()
     }
 

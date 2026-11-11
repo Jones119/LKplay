@@ -3,17 +3,15 @@ package com.shilapi.xcertplay
 /**
  * Which view carries the decoded CarPlay picture.
  *
- * TextureView is the shipped default: the UI thread draws a full-screen textured quad every frame
- * (that is the biggest single-thread cost on API 19, where HWUI draws there), but it has been the
- * stable path on this head unit for weeks: `dropped=0` while dragging and no black screen after the
- * surface is recreated.
+ * SurfaceView is the default since 2026-11-11: SurfaceFlinger composites the decoder buffers, so the
+ * UI thread stops drawing a full-screen textured quad every frame (measured 76% -> 12% app CPU on a
+ * static screen). The cost is that picture adjustments (colour matrix via `setLayerPaint`) and the
+ * corner mask do not apply on this path, and its output queue can back up under the 250 ms age rule.
  *
- * SurfaceView is the experiment: measured 76% -> 12% app CPU on a static screen, but it lost picture
- * adjustments and the corner mask, needed explicit buffer sizing (a display-size negotiation bug there
- * squashed the picture), and drops frames under the 250 ms age rule because its output queue backs up.
- * It stays one settings switch away so a future attempt can pick it up without patching the app.
+ * TextureView stays one settings switch away: it applies the colour matrix and the corner mask, and
+ * `dropped=0` while dragging, at the cost of the per-frame UI-thread draw.
  *
- * Precedence: `debug.diplay.video_surface` (lab override) > the settings switch > TextureView.
+ * Precedence: `debug.diplay.video_surface` (lab override) > the settings switch > SurfaceView.
  */
 object VideoSurfaceMode {
 

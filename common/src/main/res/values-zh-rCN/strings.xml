@@ -210,7 +210,7 @@
     <string name="frame_rate">帧率</string>
     <string name="show_video_fps">显示画面帧率</string>
     <string name="show_video_fps_description">在 CarPlay 画面右上角显示实际输出与接收帧率。仅用于诊断，不影响投屏。</string>
-    <string name="show_video_fps_format">输出 %1$d / 接收 %2$d FPS</string>
+    <string name="show_video_fps_format">输出 %1$d / 接收 %2$d FPS/丢包率%3$d%%</string>
     <string name="full_screen">全屏显示</string>
     <string name="fullscreen">全屏</string>
     <string name="getting_carplay_ready">正在准备 CarPlay…</string>
@@ -629,8 +629,8 @@
     <string name="settings_category_other">其他</string>
   <string name="exit_application_description">完全关闭 LynkPaly：CarPlay 连接、车载热点和所有后台线程一起结束。</string>
 
-    <string name="experimental_surface_view">使用 SurfaceView（实验）</string>
-    <string name="experimental_surface_view_description">改用 SurfaceView 承载 CarPlay 画面，CPU 占用明显更低；但可能丢帧，且「画面调节」和圆角遮罩不可用。下次启动 CarPlay 生效。</string>
+    <string name="experimental_surface_view">使用 SurfaceView 渲染</string>
+    <string name="experimental_surface_view_description">用 SurfaceView 承载 CarPlay 画面：由系统合成，CPU 占用远低于 TextureView。该模式下画面调节与圆角遮罩不可用；关闭后改用 TextureView。下次启动 CarPlay 生效。</string>
     <string name="call_banner_incoming">来电</string>
     <string name="call_banner_active">通话中</string>
     <string name="call_banner_answer">接听</string>

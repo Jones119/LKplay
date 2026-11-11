@@ -208,7 +208,7 @@
     <string name="frame_rate">影格率</string>
     <string name="show_video_fps">顯示畫面影格率</string>
     <string name="show_video_fps_description">在 CarPlay 畫面右上角顯示實際輸出與接收影格率。僅供診斷，不影響投影。</string>
-    <string name="show_video_fps_format">輸出 %1$d / 接收 %2$d FPS</string>
+    <string name="show_video_fps_format">輸出 %1$d / 接收 %2$d FPS/丟包率%3$d%%</string>
     <string name="full_screen">全螢幕顯示</string>
     <string name="fullscreen">全螢幕</string>
     <string name="getting_carplay_ready">正在準備 CarPlay…</string>
@@ -621,8 +621,8 @@
     <string name="screen_corner_mask_description">車機可視螢幕的開口是圓角的，滿版的 CarPlay 畫面在四角會被車身邊框裁掉。開啟後在螢幕四角依相同弧度塗黑，讓 CarPlay 畫面正好貼合螢幕開口。預設關閉；只有車機確實裁掉畫面四角時才需要開啟。</string>
   <string name="exit_application_description">完全關閉 LynkPaly：CarPlay 連線、車機熱點與所有背景執行緒一起結束。</string>
 
-    <string name="experimental_surface_view">使用 SurfaceView（實驗）</string>
-    <string name="experimental_surface_view_description">改用 SurfaceView 承載 CarPlay 畫面，CPU 佔用明顯更低；但可能掉幀，且「畫面調節」與圓角遮罩不可用。下次啟動 CarPlay 生效。</string>
+    <string name="experimental_surface_view">使用 SurfaceView 呈現</string>
+    <string name="experimental_surface_view_description">用 SurfaceView 承載 CarPlay 畫面：由系統合成，CPU 佔用遠低於 TextureView。此模式下畫面調整與圓角遮罩不可用；關閉後改用 TextureView。下次啟動 CarPlay 生效。</string>
     <string name="iphone_sent_no_picture">CarPlay 啟動後，iPhone 一直沒有傳送畫面。請將 iPhone 重新開機（關機再開機），然後重新連線。</string>
     <string name="settings_incomplete">這些設定不完整：%1$s。請在應用程式設定裡補全後重新連線。</string>
 </resources>

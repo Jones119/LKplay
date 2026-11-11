@@ -7,9 +7,9 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.os.Handler
-import android.os.HandlerThread
 import android.os.SystemClock
 import android.text.format.DateFormat
+import android.util.Log
 import android.view.View
 import android.widget.RemoteViews
 import com.shilapi.xcertplay.glance.CarPlayGlance
@@ -31,8 +31,19 @@ class NavigationWidget : AppWidgetProvider() {
 /** Follows [CarPlayGlance] and redraws every placed widget, at most once a second. */
 internal object NavigationWidgetUpdater {
     private const val MIN_INTERVAL_MILLIS = 1_000L
+    private const val TAG = "DiPlay-Widget"
 
-    private val worker = Handler(HandlerThread("diplay-widget").apply { start() }.looper)
+    /**
+     * 懒创建：不能写成 object 的静态初始化。
+     *
+     * 这台车机启动几秒后会丢掉 main 线程的 `ThreadGroup`，之后任何 `new Thread(...)` 都在
+     * `Thread.create` 里 NPE（见 [WorkerThreads]）。这个 object 会被 `ManeuverArrowRenderer`
+     * 的 `arrow()` 顺带加载（设置页画 maneuver 图标），静态初始化里建 `HandlerThread` 会让
+     * 打开设置页直接崩溃（2026-11-11 18:13:24 实机：handleLaunchActivity → <clinit> → NPE）。
+     * 现在改为第一次 attach 时用 [WorkerThreads] 的线程组起 looper；起不来就安静降级，
+     * 小组件不更新，绝不把进程带走。
+     */
+    private var worker: Handler? = null
     @Volatile private var context: Context? = null
     private var lastRender = 0L // worker thread
     private var pending = false // worker thread
@@ -50,18 +61,46 @@ internal object NavigationWidgetUpdater {
         if (glance.connected && glance.maneuverType != null) schedule()
     }
 
+    private fun ensureWorker(): Handler? {
+        worker?.let { return it }
+        synchronized(this) {
+            worker?.let { return it }
+            val looperQueue = java.util.concurrent.ArrayBlockingQueue<android.os.Looper>(1)
+            val thread = runCatching {
+                com.shilapi.xcertplay.compat.WorkerThreads.create(
+                    Runnable {
+                        android.os.Looper.prepare()
+                        runCatching { looperQueue.put(android.os.Looper.myLooper()) }
+                        android.os.Looper.loop()
+                    },
+                    "diplay-widget",
+                ).apply { isDaemon = true; start() }
+            }.onFailure { Log.w(TAG, "widget thread could not start", it) }.getOrNull() ?: return null
+            val looper = runCatching {
+                looperQueue.poll(2, java.util.concurrent.TimeUnit.SECONDS)
+            }.getOrNull() ?: return null
+            return Handler(looper).also { worker = it }
+        }
+    }
+
     fun attach(appContext: Context) {
         if (context != null) return
         context = appContext.applicationContext
-        CarPlayGlance.listener = { worker.post(::schedule) }
-        worker.post(::schedule)
+        val handler = ensureWorker()
+        if (handler == null) {
+            Log.w(TAG, "widget worker unavailable; widget updates disabled")
+            return
+        }
+        CarPlayGlance.listener = { handler.post(::schedule) }
+        handler.post(::schedule)
     }
 
     private fun schedule() {
+        val handler = worker ?: return
         if (pending) return
         pending = true
         val wait = (lastRender + MIN_INTERVAL_MILLIS - SystemClock.elapsedRealtime()).coerceAtLeast(0)
-        worker.postDelayed(render, wait)
+        handler.postDelayed(render, wait)
     }
 
     fun views(context: Context, glance: CarPlayGlance.Snapshot): RemoteViews {

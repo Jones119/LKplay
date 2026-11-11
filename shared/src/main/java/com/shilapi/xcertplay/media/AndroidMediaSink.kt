@@ -559,6 +559,8 @@ private class VideoDecoder(
     private val queue = VideoDecodeQueue(
         VideoBacklogPolicy.maxFrames(backlogMode), VideoBacklogPolicy.maxBytes(backlogMode),
     )
+    /** 年龄上限；`debug.diplay.video_age_ms` 可覆盖，用来测「每帧都上屏」时的链路上限。 */
+    private val renderMaxAgeUs = VideoRenderAge.currentUs()
     @Volatile private var running = true
     @Volatile private var decoder: MediaCodec? = null
     private var outputSurface: Surface? = surface
@@ -1041,7 +1043,7 @@ private class VideoDecoder(
         // surface stays current without decoder re-creation or keyframe waits.
         val ageUs = if (presentationTimeUs <= 0L) 0L
         else (System.nanoTime() / 1000) - presentationTimeUs
-        val render = outputSurface != null && ageUs <= RENDER_MAX_AGE_US
+        val render = outputSurface != null && ageUs <= renderMaxAgeUs
         val releaseStartNs = System.nanoTime()
         codec.releaseOutputBuffer(index, render)
         if (timingEnabled) {
@@ -1117,6 +1119,7 @@ private class VideoDecoder(
         const val INPUT_TIMEOUT_US = 10_000L
         // The stall threshold moved to VideoBacklogPolicy.AUTO_STALL_RECOVERY_NS, so the shipped
         // value and the `debug.diplay.video_backlog` experiment cannot drift apart.
+        /** 默认年龄上限；实际值由 [VideoRenderAge] 决定（`debug.diplay.video_age_ms` 可覆盖）。 */
         const val RENDER_MAX_AGE_US = 250_000L
         /** How long a freshly configured decoder may render nothing before it is rebuilt (CS11). */
         const val NO_OUTPUT_GRACE_NS = 700_000_000L

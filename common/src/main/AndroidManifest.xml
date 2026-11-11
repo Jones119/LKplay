@@ -7,9 +7,6 @@
 
     <!-- Optional: the dashboard map as a card over the home screen. -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
-    <!-- The CarPlay host lives in its own task; bringing it forward once the first frame exists
-         uses moveTaskToFront (API 11+). Normal permission, granted at install. -->
-    <uses-permission android:name="android.permission.REORDER_TASKS" />
     <application>
         <provider
             android:name="com.shilapi.xcertplay.DiagnosticReportProvider"

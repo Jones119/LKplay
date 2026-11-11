@@ -2,9 +2,10 @@ package com.shilapi.xcertplay
 
 import android.Manifest
 import com.shilapi.xcertplay.mfi.LocalMfiAuthenticationClient
-import android.app.ActivityManager
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.res.Configuration
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
@@ -263,7 +264,6 @@ class CarPlayHostActivity : ComponentActivity() {
     private var pictureBinding: CarPlayPicture.Binding? = null
     private var picturePanel: View? = null
     private var picturePanelGeneration = 0
-    private var gestureOverlay: View? = null
     private var cornerMaskOverlay: CarPlayCornerMaskOverlay? = null
     private var settingsMenu: View? = null
     /** Marks where the settings menu goes; the menu itself is built on first open. */
@@ -459,6 +459,85 @@ class CarPlayHostActivity : ComponentActivity() {
     private val mainHandler = Handler(Looper.getMainLooper())
 
     /**
+     * 有线会话期间拔出数据线：等一下再结束 CarPlay。
+     *
+     * 等待是必须的：自家拆会话时会向手机请求软重枚举（`requestWiredReenumeration`），
+     * 那本身就是一次 detach；重新插回也会先 detach 再 attach。1.5 s 后手机仍不在
+     * `UsbManager.deviceList` 里，才算真的拔线（车主 2026-11-11 反馈：拔线后 CarPlay
+     * 窗口停在原地不退出）。这是连接的默认行为，不提供开关。
+     */
+    private val usbDetachGrace = Runnable {
+        if (shuttingDown.get() || isFinishing || isDestroyed) return@Runnable
+        if (wirelessEnabled) return@Runnable
+        if (!CarPlayBackgroundSession.isOwner(this@CarPlayHostActivity)) return@Runnable
+        if (hasAppleDeviceAttached()) {
+            // 快速插回：旧 controller 的 USB 句柄已经失效，接管只会得到死会话，必须重建。
+            restartCarPlay("USB was reattached; rebuilding the session")
+        } else {
+            abandonSession("USB cable removed; closing CarPlay")
+        }
+    }
+    private val usbDetachReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            if (intent.action != UsbManager.ACTION_USB_DEVICE_DETACHED) return
+            val device = androidx.core.content.IntentCompat.getParcelableExtra(
+                intent,
+                UsbManager.EXTRA_DEVICE,
+                UsbDevice::class.java,
+            )
+            if (device?.vendorId != IphoneUsbMatcher.APPLE_VENDOR_ID) return
+            if (wirelessEnabled) return
+            if (shuttingDown.get() || handshakeResetInProgress || isFinishing || isDestroyed) return
+            // 标记：这条线真的断过。新实例接管前会消费它并改成重建，而不是沿用死会话。
+            CarPlayBackgroundSession.markUsbLinkLost()
+            mainHandler.removeCallbacks(usbDetachGrace)
+            mainHandler.postDelayed(usbDetachGrace, USB_DETACH_GRACE_MILLIS)
+        }
+    }
+    private var usbDetachReceiverRegistered = false
+
+    /**
+     * 会话掉线后一直没回来（无线断开、有线链路失效但没拔线）时的兜底：到点就结束 CarPlay
+     * 并回到首页，而不是让冻结的画面留在前台。重连尝试期间每掉一次线都会重新计时，
+     * 所以短暂抖动不会误判（车主 2026-11-11：连接断了就不该还停在 CarPlay 界面）。
+     */
+    private val sessionLossDeadline = object : Runnable {
+        override fun run() {
+            if (shuttingDown.get() || isFinishing || isDestroyed) return
+            // 用户在设置页时先不动：他可能正在改连接参数，菜单关闭后由 recoveryPendingAfterMenu 接手。
+            if (menuOpen) {
+                mainHandler.postDelayed(this, 1_000L)
+                return
+            }
+            if (!CarPlayBackgroundSession.isOwner(this@CarPlayHostActivity)) return
+            abandonSession("session did not come back within ${SESSION_LOSS_GRACE_MILLIS}ms; closing CarPlay")
+        }
+    }
+
+    /**
+     * 结束会话并离开 CarPlay 界面。两个入口（拔线、掉线超时）都走这里：
+     * 会话还在 store 里就交给它自己的 stop 回调；重连中 store 已被清掉，就直接走本实例的
+     * shutdown——否则 `hasSession()` 为 false 时 stop() 什么也不会做，窗口会留在原地。
+     */
+    private fun abandonSession(reason: String) {
+        if (shuttingDown.get()) return
+        appendLog(reason)
+        showDiPlayHome(noAnimation = true)
+        if (CarPlayBackgroundSession.hasSession()) {
+            CarPlayBackgroundSession.stop()
+        } else {
+            finishingFromBackground = true
+            shutdown(terminateProcess = false, reason = reason)
+            finish()
+        }
+    }
+
+    private fun hasAppleDeviceAttached(): Boolean {
+        val manager = getSystemService(Context.USB_SERVICE) as? UsbManager ?: return true
+        return manager.deviceList.values.any { it.vendorId == IphoneUsbMatcher.APPLE_VENDOR_ID }
+    }
+
+    /**
      * On-screen frame-rate overlay, ported from EasyPlay 10-80 ("显示画面帧率（输出 / 接收）").
      * It samples the sink's cumulative counters once a second and never affects the session: the view
      * is not clickable, not focusable and hidden unless the setting is on and a session is running.
@@ -480,10 +559,16 @@ class CarPlayHostActivity : ComponentActivity() {
                 refreshVideoFps()
                 return
             }
-            val reading = fpsMeter.update(sink?.liveVideoCounters(), System.nanoTime())
+            val counters = sink?.liveVideoCounters()
+            val reading = fpsMeter.update(counters, System.nanoTime())
             val view = fpsView ?: return
             if (reading != null) {
-                view.text = getString(R.string.show_video_fps_format, reading.shownFps, reading.receivedFps)
+                view.text = getString(
+                    R.string.show_video_fps_format,
+                    reading.shownFps,
+                    reading.receivedFps,
+                    reading.lostPercent,
+                )
                 view.visibility = View.VISIBLE
             }
             fpsReporting = true
@@ -631,6 +716,14 @@ class CarPlayHostActivity : ComponentActivity() {
         }
         window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         initializeSessionLog()
+        // 有线会话期间监听拔线：连接一旦断开就回到首页，不留冻结的 CarPlay 窗口。
+        // 放在这里而不是 Controller 里：宿主 Activity 在会话期间一直存在，即使被首页盖到后面也能收到广播。
+        if (!usbDetachReceiverRegistered) {
+            runCatching {
+                registerReceiver(usbDetachReceiver, IntentFilter(UsbManager.ACTION_USB_DEVICE_DETACHED))
+            }.onSuccess { usbDetachReceiverRegistered = true }
+                .onFailure { appendLog("USB detach receiver could not be registered: ${it.javaClass.simpleName}") }
+        }
         lastConfiguration = Configuration(resources.configuration)
         darkMode = savedInstanceState?.getBoolean("carplay_night_active")
             ?: nightModeOrNull(resources.configuration.uiMode) ?: false
@@ -882,6 +975,9 @@ class CarPlayHostActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        // 设置页改完「显示画面帧率」返回时无需重连即可生效；没有会话时它会把自己藏起来。
+        showVideoFps = AirPlayPersistence.loadShowVideoFps(this)
+        refreshVideoFps()
         // CS11 / API 19: HWUI draws the TextureView on this UI thread (there is no RenderThread before
         // Android 5), and the same thread dispatches every touch, so it is both a video stage and the touch
         // stage. 4.4 leaves a foreground UI thread at nice 0 - below the -8 video threads that feed it and,
@@ -1111,6 +1207,12 @@ class CarPlayHostActivity : ComponentActivity() {
         mainHandler.removeCallbacks(pollConfiguration)
         mainHandler.removeCallbacks(reportVideoFps)
         mainHandler.removeCallbacks(noPictureCheck)
+        mainHandler.removeCallbacks(usbDetachGrace)
+        mainHandler.removeCallbacks(sessionLossDeadline)
+        if (usbDetachReceiverRegistered) {
+            runCatching { unregisterReceiver(usbDetachReceiver) }
+            usbDetachReceiverRegistered = false
+        }
         // 重建（旋转/换语言）时丢弃上一实例的恢复定时器：否则它会在新实例 active 之前
         // 把手机蓝牙恢复一次，并且让旧 Activity 被主 Handler 多持有整个 grace。
         if (isChangingConfigurations) cancelMediaAudioRestore()
@@ -1181,25 +1283,39 @@ class CarPlayHostActivity : ComponentActivity() {
         } else {
             // A/B arm: SurfaceFlinger composites the decoder buffers, so the UI thread stops drawing a
             // full-screen textured quad every frame.
-            videoSurfaceView = SurfaceView(this).apply { holder.addCallback(videoSurfaceCallback) }
+            //
+            // 浮层不会被画面层挡住：SurfaceView 的 surface 是独立图层，始终在宿主窗口之下
+            //（2026-11-11 实机 dumpsys SurfaceFlinger：SurfaceView z=21050、窗口 z=21055），
+            // 所以「显示画面帧率」、圆角遮罩这些窗口内的 View 正常画在画面之上。
+            // 不要用 setZOrderMediaOverlay/setZOrderOnTop 去"修"浮层，那反而会把画面抬到窗口之上。
+            videoSurfaceView = SurfaceView(this).apply {
+                holder.addCallback(videoSurfaceCallback)
+            }
         }
-        val gestureLayer = View(this).apply {
-            isClickable = true
-            setOnTouchListener { view, event -> onHostTouch(view, event) }
-        }
+        // 触摸直接挂在视频 View 上，**不要**再叠一层全屏透明 View。
+        // CS11 实机（2026-11-11）：SurfaceView 之上只要有一层铺满窗口的 View，SurfaceFlinger 就
+        // 不再把视频当独立 HWC overlay 合成，上屏被锁在每隔一个 vsync（33.3ms = 30fps）。
+        // vpubench 对照：同机同解码器，无覆盖层时上屏 16.7ms（60Hz），加一层全屏透明 View 后
+        // 立刻变成 33.3ms。触摸按 View 层级分发，和图层 z 序无关，所以挂在视频 View 上完全等价。
+        val touchTarget: View
         if (video != null) {
             root.addView(video, FrameLayout.LayoutParams(-1, -1))
+            touchTarget = video
         } else {
-            videoSurfaceView?.let { root.addView(it, FrameLayout.LayoutParams(-1, -1)) }
+            val surface = checkNotNull(videoSurfaceView)
+            root.addView(surface, FrameLayout.LayoutParams(-1, -1))
+            touchTarget = surface
         }
-        // The corner mask sits over the picture but under the touch layer: it is drawn, never
-        // dispatched to, so the three-finger gesture and every CarPlay touch reach the layer above
-        // it exactly as before. Its four children are non-clickable and non-focusable for the same
-        // reason, and the flag only toggles the mask's visibility so the tree never changes here.
+        touchTarget.isClickable = true
+        touchTarget.setOnTouchListener { view, event -> onHostTouch(view, event) }
+        // The corner mask sits over the picture but never receives touches: it is drawn, never
+        // dispatched to, so the three-finger gesture and every CarPlay touch reach the video view
+        // underneath exactly as before. Its four children are non-clickable and non-focusable for the
+        // same reason, and the flag only toggles the mask's visibility so the tree never changes here.
         val cornerMask = CarPlayCornerMaskOverlay(this)
         root.addView(cornerMask, FrameLayout.LayoutParams(-1, -1))
-        // Sits between the picture and the touch layer: visible when the iPhone sends no frames,
-        // never dispatched to, so CarPlay touches and the three-finger gesture still work.
+        // Sits over the picture: visible when the iPhone sends no frames, never dispatched to, so
+        // CarPlay touches and the three-finger gesture still reach the video view below.
         noPictureView = TextView(this).apply {
             setText(R.string.iphone_sent_no_picture)
             setTextColor(Color.WHITE)
@@ -1211,7 +1327,25 @@ class CarPlayHostActivity : ComponentActivity() {
             isClickable = false
             isFocusable = false
         }.also { root.addView(it, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER)) }
-        root.addView(gestureLayer, FrameLayout.LayoutParams(-1, -1))
+        // 「显示画面帧率」浮层：诊断用，右上角，压在画面/圆角遮罩之上，不接收点击与焦点。
+        // 它只占一小块区域，且每秒才更新一次，不会像全屏覆盖层那样改变 SurfaceView 的合成路径。
+        fpsView = TextView(this).apply {
+            setTextColor(Color.WHITE)
+            textSize = 14f
+            setPadding(dp(10), dp(4), dp(10), dp(4))
+            setBackgroundColor(Color.argb(150, 0, 0, 0))
+            visibility = View.GONE
+            isClickable = false
+            isFocusable = false
+        }.also {
+            root.addView(
+                it,
+                FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.END).apply {
+                    topMargin = dp(12)
+                    rightMargin = dp(12)
+                },
+            )
+        }
         // The settings menu is built on first open, not here.
         //
         // `openSettingsMenu` already rebuilds it every time (`buildSettingsMenu()` replaces the previous
@@ -1222,7 +1356,6 @@ class CarPlayHostActivity : ComponentActivity() {
         settingsMenuAnchor = FrameLayout(this)
         root.addView(settingsMenuAnchor, FrameLayout.LayoutParams(-1, -1))
         videoView = video
-        gestureOverlay = gestureLayer
         cornerMaskOverlay = cornerMask
         // On activity start the setting is the persisted one, so a reboot brings the mask back.
         applyScreenCornerMask()
@@ -1360,7 +1493,9 @@ class CarPlayHostActivity : ComponentActivity() {
 
     /** Whether the overlay should be sampling: setting on, session running, settings menu closed. */
     private fun shouldShowVideoFps(): Boolean =
-        showVideoFps && !menuOpen && activeAirPlaySession != null && fpsView != null
+        // 用进程级的 active：宿主被重建后会「接管」已有会话，那时本实例的 activeAirPlaySession
+        // 还是 null，用它判断会让浮层一直不出现（2026-11-11 实机）。
+        showVideoFps && !menuOpen && CarPlayBackgroundSession.active && fpsView != null
 
     /** Starts or stops the one-second sampling to match [shouldShowVideoFps]. */
     private fun refreshVideoFps() {
@@ -2019,6 +2154,8 @@ class CarPlayHostActivity : ComponentActivity() {
                     }
                     activeAirPlaySession = session
                     CarPlayBackgroundSession.active = true
+                    // 会话回来了：取消掉线兜底计时，冻结画面不会被误判成“一直没连上”。
+                    mainHandler.removeCallbacks(sessionLossDeadline)
                     refreshVideoFps()
                     reconnectAttempts = 0
                     logThemeState(ThemeModeDiagnostics.Source.SESSION_ACTIVE, resources.configuration)
@@ -2237,23 +2374,59 @@ class CarPlayHostActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * Registers the "home page asked us to stop" callback with the process-wide store.
+     *
+     * 连接路径与接管路径共用同一套语义：这个回调只由首页的 `stop()`（断开/换连接/无线重置）
+     * 或 DiPlaySessionService 的停止请求触发，都属于「首页还在」的断开，所以必须置
+     * `finishingFromBackground`，否则 `onDestroy` 会在 400 ms 后杀掉进程（2026-11-11
+     * 16:15:35 实机表现为断开后黑屏约 2 s）。
+     */
+    private fun registerStopCallback(
+        controller: CarPlayController,
+        sink: AndroidMediaSink,
+        width: Int,
+        height: Int,
+        display: CarPlaySessionDisplay,
+    ) {
+        CarPlayBackgroundSession.store(controller, sink, width, height, this, display) { completion ->
+            runOnUiThread {
+                finishingFromBackground = true
+                shutdown(false, "DiPlay disconnect", completion)
+                finish()
+            }
+        }
+    }
+
     private fun adoptBackgroundSession(): Boolean {
         val snapshot = CarPlayBackgroundSession.snapshot() ?: return false
         if (snapshot.controller.isClosed()) {
             CarPlayBackgroundSession.clear(snapshot.controller)
             return false
         }
+        if (CarPlayBackgroundSession.consumeUsbLinkLost()) {
+            // 旧会话建立于拔线之前：controller 手里的 USB 句柄已经失效，接管只会得到一个
+            // 「iAP2 通了、0x4301 也发了，但手机就是不启动 CarPlay」的死会话
+            //（2026-11-11 第 5/6 次快速插拔实测：READ 一直 TIMED_OUT，ends=0）。
+            // 先按正常接管登记字段与回调（restartCarPlay 要靠 controller 字段关掉旧栈），
+            // 再走一次完整的重建（含软件重枚举）。
+            displayDiagnosticAttempt = DisplayDiagnosticSnapshot.currentAttempt(this)
+            controller = snapshot.controller
+            sink = snapshot.sink
+            sessionDisplay = snapshot.display
+            registerStopCallback(snapshot.controller, snapshot.sink, snapshot.width, snapshot.height, snapshot.display)
+            if (snapshot.width > 0 && snapshot.height > 0) {
+                activeDisplaySize = DisplaySize(snapshot.width, snapshot.height)
+            }
+            appendLog("adopted session predates a USB detach; rebuilding")
+            restartCarPlay("USB was reattached; rebuilding the session")
+            return true
+        }
         displayDiagnosticAttempt = DisplayDiagnosticSnapshot.currentAttempt(this)
         controller = snapshot.controller
         sink = snapshot.sink
         sessionDisplay = snapshot.display
-        CarPlayBackgroundSession.store(snapshot.controller, snapshot.sink, snapshot.width, snapshot.height,
-            this, snapshot.display) { completion ->
-            runOnUiThread {
-                shutdown(false, "DiPlay disconnect", completion)
-                finish()
-            }
-        }
+        registerStopCallback(snapshot.controller, snapshot.sink, snapshot.width, snapshot.height, snapshot.display)
         if (snapshot.width > 0 && snapshot.height > 0) {
             activeDisplaySize = DisplaySize(snapshot.width, snapshot.height)
         }
@@ -2270,6 +2443,8 @@ class CarPlayHostActivity : ComponentActivity() {
             createSessionListener(generation),
             createStatusReporter(generation),
         )
+        // 接管的是已经 active 的会话：本实例不会再收到 onSessionActive，浮层要在这里启动。
+        refreshVideoFps()
         snapshot.sink.setScreenStreamActiveChangedListener { type, active ->
             onScreenStreamStateChanged(restartGeneration, type, active)
         }
@@ -2372,19 +2547,7 @@ class CarPlayHostActivity : ComponentActivity() {
         )
         sessionDisplay = display
         videoView?.let { updateVideoLayout(it.width, it.height) }
-        CarPlayBackgroundSession.store(next, renderer, size.width, size.height, this, display) { completion ->
-            runOnUiThread {
-                // 这个回调只由首页的 CarPlayBackgroundSession.stop()（断开/换连接/无线重置）或
-                // DiPlaySessionService 的停止请求触发，都属于「首页还在」的断开。
-                // 不能再用 isActivityStarted 判断：首页是用 reorder 盖到宿主机之上的，宿主只收到
-                // onPause、没有 onStop，标志仍为 true，于是被误判成「用户自己离开」→ onDestroy
-                // 在 400 ms 后 killProcess，首页跟着死掉再重建（车机上表现为断开后黑屏约 2 s，
-                // 2026-11-11 实测）。
-                finishingFromBackground = true
-                shutdown(terminateProcess = false, reason = "DiPlay disconnect", completion = completion)
-                finish()
-            }
-        }
+        registerStopCallback(next, renderer, size.width, size.height, display)
         try {
             val serviceIntent = Intent(this, DiPlaySessionService::class.java)
             // CS11: startForegroundService 是 API26；4.4 走 startService
@@ -2610,6 +2773,10 @@ class CarPlayHostActivity : ComponentActivity() {
         AirPlayPersistence.saveLastConnectionProblem(this, reason)
         if (menuOpen) recoveryPendingAfterMenu = true
         if (shuttingDown.get() || menuOpen || handshakeResetInProgress || startupRetryStopped) return
+        // 掉线兜底：这么久还没恢复就结束 CarPlay 回首页（有线拔线另有 1.5 s 的快路径）。
+        // 每次掉线都重新计时；会话真正回来时在 onSessionActive 里取消。
+        mainHandler.removeCallbacks(sessionLossDeadline)
+        mainHandler.postDelayed(sessionLossDeadline, SESSION_LOSS_GRACE_MILLIS)
         if (reconnectScheduled) return
         // The session is gone from here on, and wired loss is retried indefinitely, so nothing else
         // will ever stop the watchdogs: arm the grace that gives the phone its Bluetooth back.
@@ -2733,22 +2900,16 @@ class CarPlayHostActivity : ComponentActivity() {
                 if (menuOpen) return
                 // Drop the home page's still frame before the window comes forward with the video.
                 clearLaunchSnapshot()
-                // 宿主在独立任务里：moveTaskToFront 是首选；失败时回退的 startActivity 必须带
-                // FLAG_ACTIVITY_NEW_TASK，否则 REORDER_TO_FRONT 只在当前任务内重排，跨任务无效
-                //（2026-11-11 实测：连接成功后停在首页，要手动点「进入 CarPlay」才切过来）。
-                val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
-                val moved = activityManager?.let { manager ->
-                    runCatching { manager.moveTaskToFront(taskId, 0) }
-                        .onFailure { appendLog("moveTaskToFront failed: ${it.javaClass.simpleName}") }
-                        .isSuccess
-                } == true
-                if (!moved) {
-                    startActivity(
-                        Intent(this@CarPlayHostActivity, CarPlayHostActivity::class.java)
-                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            .addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),
-                    )
-                }
+                // 宿主在独立任务里，4.4 上后台任务不能自己把窗口带到前台（START 之后只有
+                // `BG start`，任务不动，2026-11-11 实测）；这里只留一个一次性标记，由正在显示的
+                // 首页在前台用 NEW_TASK 把宿主任务提上来（DiPlayActivity.refreshStatus）。
+                // 若当时没有首页（例如无线流程），这条 NEW_TASK 启动仍可兜底。
+                CarPlayBackgroundSession.markFrameReady()
+                appendLog("first frame ready; bringing the host task forward")
+                startActivity(
+                    Intent(this@CarPlayHostActivity, CarPlayHostActivity::class.java)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                )
             }
         }
         mainHandler.post(poll)
@@ -2758,7 +2919,10 @@ class CarPlayHostActivity : ComponentActivity() {
         controller?.sendTouch(emptyList())
         val intent = Intent(this, DiPlayActivity::class.java)
             .putExtra("page", page)
-            .addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+            // 首页在主任务里，宿主在自己的 .carplay 任务里；4.4 的 REORDER_TO_FRONT 只在同一
+            // 任务内生效，且和 NEW_TASK 同用时任务不会被提到前台（2026-11-11 实测），所以只发
+            // NEW_TASK：首页任务已存在，系统直接把它带到前台。
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         // A task switch on 4.4 plays the system zoom animation (the page shrinking in and out); the
         // from-home connect must not show it, because it reads as the screen being re-launched.
         if (noAnimation) intent.addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION)
@@ -3288,6 +3452,8 @@ class CarPlayHostActivity : ComponentActivity() {
         val noPicture = noPictureShown && SCREEN_TYPE_MAIN in activeScreenStreamTypes
         noPictureView?.visibility = if (noPicture) View.VISIBLE else View.GONE
         connectionPanel?.visibility = if (activeScreenStreamTypes.isEmpty() || noPicture) View.VISIBLE else View.GONE
+        // 菜单开/关会改变 shouldShowVideoFps() 的结果，这里同步一次，不必等下一秒的 tick。
+        refreshVideoFps()
     }
 
     private fun friendlyStage(message: String): String = when {
@@ -3429,6 +3595,12 @@ class CarPlayHostActivity : ComponentActivity() {
         /** Grace before the process exits with a finished screen; see `onDestroy`. */
         private const val PROCESS_EXIT_DELAY_MILLIS = 400L
 
+        /** 拔线后等这么久再确认手机不在总线上（软重枚举 / 重新插回都会先产生 detach）。 */
+        private const val USB_DETACH_GRACE_MILLIS = 1_500L
+
+        /** 会话掉线后最多等这么久；仍没有新的会话就结束 CarPlay 回首页（无线与有线共用）。 */
+        private const val SESSION_LOSS_GRACE_MILLIS = 30_000L
+
         /** Wait at most this long for the first main-screen frame before coming forward anyway. */
         private const val FIRST_FRAME_FORWARD_TIMEOUT_MILLIS = 15_000L
         private const val FIRST_FRAME_POLL_MILLIS = 100L
@@ -3495,6 +3667,29 @@ internal data class CarPlaySessionDisplay(
 /** Process-local hand-off for keeping the CarPlay session alive while no Activity is visible. */
 internal object CarPlayBackgroundSession {
     @Volatile var active = false
+    /**
+     * 主屏第一帧已就绪，只置位一次，由正在显示的首页消费后把宿主任务带到前台。
+     * 4.4 不允许后台任务自己把窗口提上来，所以切换必须由前台页面发起。
+     */
+    @Volatile private var frameReady = false
+    fun markFrameReady() { frameReady = true }
+    fun consumeFrameReady(): Boolean {
+        if (!frameReady) return false
+        frameReady = false
+        return true
+    }
+
+    /**
+     * 真拔线（不是自家软重枚举）之后置位：旧 controller 的 USB 句柄已经失效，
+     * 即使手机在两秒内插回来也不能再被接管，只能重建。
+     */
+    @Volatile private var usbLinkLost = false
+    fun markUsbLinkLost() { usbLinkLost = true }
+    fun consumeUsbLinkLost(): Boolean {
+        if (!usbLinkLost) return false
+        usbLinkLost = false
+        return true
+    }
     private var stopAction: (((() -> Unit)) -> Unit)? = null
     private var stopping = false
     private var owner: Any? = null
@@ -3555,6 +3750,8 @@ internal object CarPlayBackgroundSession {
         this.width = width
         this.height = height
         this.display = display
+        // 新会话（重新连接或接管完成后）已经拿到新的 USB 句柄，拔线标记不再适用。
+        usbLinkLost = false
     }
 
     @Synchronized
@@ -3564,6 +3761,7 @@ internal object CarPlayBackgroundSession {
         sink = null
         if (!keepOwner) { stopAction = null; owner = null }
         active = false
+        frameReady = false
         width = 0
         height = 0
         display = null

@@ -5,8 +5,11 @@ import kotlin.math.roundToInt
 /** Cumulative video counters, sampled by the on-screen FPS overlay. */
 data class LiveVideoCounters(val received: Long, val rendered: Long)
 
-/** One sampling window's rates: [shownFps] rendered, [receivedFps] arrived from the phone. */
-data class LiveVideoReading(val shownFps: Int, val receivedFps: Int)
+/**
+ * One sampling window's rates: [shownFps] rendered, [receivedFps] arrived from the phone, and
+ * [lostPercent] the share of that window's arrivals that never reached the screen.
+ */
+data class LiveVideoReading(val shownFps: Int, val receivedFps: Int, val lostPercent: Int)
 
 /**
  * Turns two cumulative counters into per-second rates for the "显示画面帧率" overlay.
@@ -29,9 +32,16 @@ class LiveVideoMeter {
         if (counters.received < previous.received || counters.rendered < previous.rendered) return null
         val seconds = elapsedNs / 1e9
         if (seconds <= 0.0) return null
+        val receivedDelta = counters.received - previous.received
+        val renderedDelta = counters.rendered - previous.rendered
         return LiveVideoReading(
-            shownFps = ((counters.rendered - previous.rendered) / seconds).roundToInt().coerceAtLeast(0),
-            receivedFps = ((counters.received - previous.received) / seconds).roundToInt().coerceAtLeast(0),
+            shownFps = (renderedDelta / seconds).roundToInt().coerceAtLeast(0),
+            receivedFps = (receivedDelta / seconds).roundToInt().coerceAtLeast(0),
+            // 与两个 FPS 用同一窗口的原始增量算，避免先四舍五入再相除带来的误差。
+            // 一帧都没收到时没有可比的分母，按 0% 显示。
+            lostPercent = if (receivedDelta <= 0L) 0 else
+                (((receivedDelta - renderedDelta).coerceAtLeast(0L) * 100.0) / receivedDelta)
+                    .roundToInt().coerceIn(0, 100),
         )
     }
 

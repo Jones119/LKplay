@@ -19,6 +19,7 @@ import java.nio.ByteBuffer
 import java.util.concurrent.Executor
 import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.concurrent.withLock
 
 /** Exact Apple USB identities allowed by the deployment configuration. */
 class IphoneUsbMatcher private constructor(
@@ -516,7 +517,9 @@ class Iap2UsbSession internal constructor(
     private val onDiagnostic: (String) -> Unit = {},
 ) : Closeable {
     private val stateLock = Any()
-    private val readLock = Any()
+    // ReentrantLock, not Object: close() has to be able to wait for the reader with a deadline and,
+    // when the cancel did not wake it, close the connection and wait again.
+    private val readLock = java.util.concurrent.locks.ReentrantLock()
     private val writeLock = Any()
     private var closed = false
     private var failure: IphoneUsbException? = null
@@ -557,7 +560,7 @@ class Iap2UsbSession internal constructor(
      * re-queueing a fresh URB for every poll. A timeout now leaves the request queued and the next
      * read simply waits again; only [close] cancels it.
      */
-    fun read(timeoutMillis: Long): ByteArray? = synchronized(readLock) {
+    fun read(timeoutMillis: Long): ByteArray? = readLock.withLock {
         checkOpen()
         require(timeoutMillis > 0) { "timeoutMillis must be positive" }
         var acceptedFallback: UsbReadQueueResult? = null
@@ -628,7 +631,7 @@ class Iap2UsbSession internal constructor(
             } catch (_: TimeoutException) {
                 // Nothing arrived; the request stays queued for the next read instead of being
                 // cancelled and drained on every idle period.
-                return@synchronized null
+                return@withLock null
             }
             if (completed == null) {
                 throw failSession("Android returned no USBMUX read request")
@@ -638,8 +641,8 @@ class Iap2UsbSession internal constructor(
             }
             readQueued = false
             val transferred = readBuffer.position()
-            if (transferred <= 0) return@synchronized ByteArray(0)
-            return@synchronized ByteArray(transferred).also {
+            if (transferred <= 0) return@withLock ByteArray(0)
+            return@withLock ByteArray(transferred).also {
                 readBuffer.flip()
                 readBuffer.get(it)
             }
@@ -660,17 +663,34 @@ class Iap2UsbSession internal constructor(
         // connection.close()，否则连接与已认领的 USBMUX 接口一起泄漏，下一次 claim 直接失败。
         runCatching { requestToCancel?.cancel() }
         // cancel() 只唤醒 requestWait，并不等读线程退出；它可能刚返回、正在访问 readBuffer 与
-        // 已完成的 request。这里取一次 readLock 把关闭序列排在读线程之后，否则 request.close()
+        // 已完成的 request。这里先等读线程让出 readLock，再关闭序列，否则 request.close()
         // 释放 native 结构后读线程仍在访问 —— 2026-11-11 实机 tombstone：线程 iap2-usbmux-rea，
         // SIGSEGV at 0x3c（空指针 + 字段偏移），每次都把整个进程带走。
-        // 锁顺序：stateLock 已在上面释放，cancel 无锁，因此不会与 read() 的 readLock→stateLock 互死。
-        synchronized(readLock) { }
+        //
+        // 但 cancel() 在厂商主机控制器上并不一定把阻塞的 requestWait 叫醒：2026-11-11 实机
+        // 断开连接时，读线程停在 usb_request_wait 的 ioctl 里，teardown 于是永久卡在 readLock，
+        // 首页一直显示「连接中」。所以等待必须有上限，超时就关连接强制唤醒它，再等一次。
+        var readerGone = awaitReadLock(READER_EXIT_WAIT_MILLIS)
+        if (!readerGone) {
+            runCatching { connection.close() }
+            readerGone = awaitReadLock(READER_FORCE_WAIT_MILLIS)
+        }
         try {
             connection.close()
         } finally {
-            runCatching { requestToCancel?.close() }
+            if (readerGone) {
+                readLock.unlock()
+                runCatching { requestToCancel?.close() }
+            }
+            // 读线程仍未退出时宁可漏掉这个 request，也不能 close() 之后让它访问已释放的
+            // native 结构（SIGSEGV 会带走整个进程）。连接已关闭，会话已经不可用。
         }
     }
+
+    /** Returns true when the read lock was acquired, i.e. no read is in flight any more. */
+    private fun awaitReadLock(timeoutMillis: Long): Boolean = runCatching {
+        readLock.tryLock(timeoutMillis, java.util.concurrent.TimeUnit.MILLISECONDS)
+    }.getOrDefault(false)
 
     private fun checkOpen() {
         synchronized(stateLock) { checkOpenLocked() }
@@ -701,6 +721,12 @@ class Iap2UsbSession internal constructor(
 
         /** One short pause before re-queueing a read the kernel refused while it released the previous URB. */
         const val QUEUE_RETRY_MILLIS = 50L
+
+        /** How long close() waits for a cancelled read to leave requestWait on its own. */
+        const val READER_EXIT_WAIT_MILLIS = 250L
+
+        /** How long close() waits after closing the connection to force the blocked ioctl to return. */
+        const val READER_FORCE_WAIT_MILLIS = 1_000L
     }
 }
 

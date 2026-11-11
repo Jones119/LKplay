@@ -217,7 +217,7 @@
     <string name="frame_rate">Frame rate</string>
     <string name="show_video_fps">Show frame rate</string>
     <string name="show_video_fps_description">Draws the rendered and received frame rates in the corner of the CarPlay picture. Diagnostic only; it does not change the session.</string>
-    <string name="show_video_fps_format">Shown %1$d / received %2$d FPS</string>
+    <string name="show_video_fps_format">Shown %1$d / received %2$d FPS/lost %3$d%%</string>
     <string name="full_screen">Full screen</string>
     <string name="fullscreen">Fullscreen</string>
     <string name="getting_carplay_ready">Getting CarPlay ready…</string>
@@ -630,8 +630,8 @@
     <string name="settings_category_other">Other</string>
   <string name="exit_application_description">Stops LynkPaly completely: the CarPlay session, the car hotspot and every background thread end with it.</string>
 
-    <string name="experimental_surface_view">Use SurfaceView (experimental)</string>
-    <string name="experimental_surface_view_description">Renders the CarPlay picture through a SurfaceView instead of a TextureView: much lower CPU, but it can drop frames and it loses picture adjustments and the corner mask. Applies the next time CarPlay starts.</string>
+    <string name="experimental_surface_view">Use SurfaceView rendering</string>
+    <string name="experimental_surface_view_description">Draws the CarPlay picture through a SurfaceView: SurfaceFlinger composites it, so CPU use is much lower than TextureView. Picture adjustments and the corner mask are not available in this mode; turn this off to use TextureView. Applies the next time CarPlay starts.</string>
     <string name="call_banner_incoming">Incoming call</string>
     <string name="call_banner_active">On a call</string>
     <string name="call_banner_answer">Answer</string>

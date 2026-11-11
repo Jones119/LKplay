@@ -795,7 +795,7 @@ class CarPlayController(
                 debugLog("wired teardown: phone re-enumerated waitedMs=$waited")
                 return
             }
-            Thread.sleep(RESET_REENUMERATION_POLL_MILLIS)
+            if (!settleSleep(RESET_REENUMERATION_POLL_MILLIS)) return
             waited += RESET_REENUMERATION_POLL_MILLIS
         }
         debugLog(
@@ -1968,7 +1968,7 @@ class CarPlayController(
         for (attempt in 0 until CONFIGURATION_SWITCH_ATTEMPTS) {
             val claimed = claimAllForConfigurationSwitch(connection, device)
             releaseClaimed(connection, claimed)
-            Thread.sleep(CONFIGURATION_SWITCH_SETTLE_MILLIS)
+            if (!settleSleep(CONFIGURATION_SWITCH_SETTLE_MILLIS)) return false
             val errno = LegacyUsbNative.setConfiguration(connection.fileDescriptor, id)
             debugLog(
                 "soft replug: set id=$id attempt=$attempt claimed=${claimed.size} " +
@@ -1992,12 +1992,28 @@ class CarPlayController(
      * R-2 的判据改进需要换一种不依赖反复 binder 查询的方式再做。
      */
     private fun awaitReenumeratedDevice(settleMillis: Long): UsbDevice? {
-        Thread.sleep(settleMillis)
+        if (!settleSleep(settleMillis)) return null
         return runCatching {
             requireUsbManager().deviceList.values.firstOrNull {
                 it.vendorId == IphoneUsbMatcher.APPLE_VENDOR_ID
             }
         }.getOrNull()
+    }
+
+    /**
+     * [Thread.sleep] that never lets `InterruptedException` escape a pool task.
+     *
+     * ThreadPoolExecutor rethrows an escaping InterruptedException as `java.lang.Error` on the
+     * worker's top level, which kills the process (2026-11-11 18:20 实机：连接栈被拆时正好卡在
+     * `switchConfiguration` 的 sleep，`carplay-usb` 线程 FATAL）。返回 false 表示被中断，
+     * 并已把中断标志还回去，调用方应直接放弃当前步骤。
+     */
+    private fun settleSleep(millis: Long): Boolean = try {
+        Thread.sleep(millis)
+        true
+    } catch (_: InterruptedException) {
+        Thread.currentThread().interrupt()
+        false
     }
 
     private fun openDataPaths(device: UsbDevice) {

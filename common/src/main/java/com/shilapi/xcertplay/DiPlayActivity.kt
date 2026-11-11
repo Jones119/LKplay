@@ -317,7 +317,10 @@ class DiPlayActivity : ComponentActivity() {
         }
         return runCatching {
             startActivity(
-                Intent(this, CarPlayHostActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),
+                Intent(this, CarPlayHostActivity::class.java)
+                    // 宿主在 .carplay 任务里：4.4 上只带 NEW_TASK 才会把它自己的任务提到前台
+                    //（NEW_TASK 与 REORDER_TO_FRONT 同用时任务不会动，2026-11-11 实测）。
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
             )
             carPlayScreenBroughtForward = true
             true
@@ -1315,7 +1318,9 @@ class DiPlayActivity : ComponentActivity() {
             card.addView(ambientControls)
             card.addView(button(getString(R.string.picture_adjustments), false) {
                 startActivity(Intent(this, CarPlayHostActivity::class.java)
-                    .putExtra("picture_controls", true).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
+                    .putExtra("picture_controls", true)
+                    // 宿主在 .carplay 任务里，4.4 上只带 NEW_TASK 才会跨任务把它带到前台。
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             }, matchButton(0, 56).apply { bottomMargin = dp(24) })
             carPlaySizeControl(card)
             resolutionSettingControl(
@@ -1344,6 +1349,14 @@ class DiPlayActivity : ComponentActivity() {
                 getString(R.string.experimental_surface_view_description),
                 AirPlayPersistence.loadSurfaceViewExperimental(this),
             ) { AirPlayPersistence.saveSurfaceViewExperimental(this, it) }
+            // 诊断用：在 CarPlay 画面右上角显示「输出 / 接收 FPS」。默认关，开启后下次进入
+            // CarPlay（或从本页返回）即生效。
+            toggle(
+                card,
+                getString(R.string.show_video_fps),
+                getString(R.string.show_video_fps_description),
+                AirPlayPersistence.loadShowVideoFps(this),
+            ) { AirPlayPersistence.saveShowVideoFps(this, it) }
             toggle(card, getString(R.string.right_hand_drive), getString(R.string.place_carplay_s_controls_closer_to_the_driver), AirPlayPersistence.loadRightHandDrive(this)) { AirPlayPersistence.saveRightHandDrive(this, it) }
             carPlayDockControl(card)
             addSystemBarControls(
@@ -2571,8 +2584,13 @@ class DiPlayActivity : ComponentActivity() {
      * instead of the host's own "preparing CarPlay" checklist. Tapping 打开 CarPlay passes false.
      */
     private fun openProjection(startBehind: Boolean = false) {
+        // 手动进入/重连时清掉一次性首帧标记，避免之后回到首页又被自动切回 CarPlay。
+        CarPlayBackgroundSession.consumeFrameReady()
         val intent = Intent(this, CarPlayHostActivity::class.java)
-            .addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+            // CS11/4.4：宿主在 .carplay 任务里，REORDER_TO_FRONT 不能跨任务，而且和 NEW_TASK
+            // 同用时任务不会被提到前台（2026-11-11 实测）；只发 NEW_TASK 才能保证宿主与首页
+            // 各在自己的任务中并被正确带到前台。
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         if (startBehind) {
             intent.putExtra(EXTRA_START_BEHIND, true)
             // The host takes the screen in its own task for a few hundred milliseconds before it can hand
@@ -2591,7 +2609,9 @@ class DiPlayActivity : ComponentActivity() {
             window.decorView.postDelayed({
                 startActivity(
                     Intent(this, DiPlayActivity::class.java)
-                        .addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+                        // NEW_TASK 让首页回到它自己的任务；只带 REORDER_TO_FRONT 时 4.4 会把
+                        // 新实例建在宿主任务里，之后再怎么把宿主任务提前都只能看到首页。
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                         .addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION),
                 )
                 overridePendingTransition(0, 0)
@@ -2698,6 +2718,23 @@ class DiPlayActivity : ComponentActivity() {
     private fun refreshStatus() {
         val running = CarPlayBackgroundSession.hasSession()
         val active = CarPlayBackgroundSession.active
+        // 连接成功后由这里切换到 CarPlay 画面：4.4 不允许后台的宿主任务自己把窗口提到前台
+        //（宿主发出的 START 只换来一条 `BG start`，任务不动），必须由一个正在显示的 Activity
+        // 发起。宿主在首帧就绪时置一个一次性标记，本页每秒的 tick 消费它。
+        if (!carPlayScreenBroughtForward && page == "home" && active &&
+            CarPlayBackgroundSession.consumeFrameReady()
+        ) {
+            carPlayScreenBroughtForward = true
+            runCatching {
+                startActivity(
+                    Intent(this, CarPlayHostActivity::class.java)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                )
+            }.onFailure {
+                carPlayScreenBroughtForward = false
+                android.util.Log.w("DiPlay-Open", "bringing the CarPlay screen forward failed", it)
+            }
+        }
         status?.text = when {
             setupError != null -> getString(R.string.setup_needs_attention)
             CarPlayBackgroundSession.active -> getString(R.string.carplay_connected)
