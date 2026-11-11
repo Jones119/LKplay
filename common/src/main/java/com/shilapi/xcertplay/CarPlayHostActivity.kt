@@ -248,6 +248,9 @@ class CarPlayHostActivity : ComponentActivity() {
 
     private var videoView: TextureView? = null
 
+    /** 真正上屏过一帧（TextureView 的 onSurfaceTextureUpdated）。见 awaitMainFrameThenComeForward。 */
+    @Volatile private var firstFrameOnScreen = false
+
     /**
      * Experimental video sink for the `debug.diplay.video_surface` A/B: a SurfaceView renders the
      * decoder's output through SurfaceFlinger instead of drawing a full-screen textured quad on the
@@ -549,7 +552,9 @@ class CarPlayHostActivity : ComponentActivity() {
             return true
         }
 
-        override fun onSurfaceTextureUpdated(texture: SurfaceTexture) = Unit
+        override fun onSurfaceTextureUpdated(texture: SurfaceTexture) {
+            firstFrameOnScreen = true
+        }
     }
 
     /**
@@ -643,6 +648,17 @@ class CarPlayHostActivity : ComponentActivity() {
         // measured and the session starts; paint the home page's last frame over it so that switch is
         // invisible instead of a black flash (see CarPlayLaunchSnapshot).
         if (startBehind) showLaunchSnapshot()
+        if (startBehind) {
+            // 插线启动走的是系统广播，没有首页截图可贴（CarPlayLaunchSnapshot 为空），这个任务会
+            // 在前台露出黑色根布局。这里一次性把首页带上来并退到它后面：原来 onCreate 和 store
+            // 回调各做一次，两次任务切换就是用户看到的“闪两下”。
+            window.decorView.post {
+                if (isFinishing || isDestroyed || firstFrameOnScreen) return@post
+                showDiPlayHome(noAnimation = true)
+                moveTaskToBack(true)
+                overridePendingTransition(0, 0)
+            }
+        }
         // Parse the offline MFi identity while the surface and first layout are still coming up. `load` costs
         // about 1.2 s on this CPU (provider init plus a P-256 sign/verify) and used to be pure waiting at the
         // start of every wired connection.
@@ -2379,16 +2395,8 @@ class CarPlayHostActivity : ComponentActivity() {
             // leaving a blank one on top, so the home page below is already visible while the activity
             // manager finishes the reorder (see EXTRA_START_BEHIND).
             if (startBehind) {
-                // Home comes forward over the still frame; hiding this window first would leave a beat
-                // where neither screen is drawn, which is the flash the owner saw.
-                showDiPlayHome(noAnimation = true)
-                // 4.4 上 FLAG_ACTIVITY_REORDER_TO_FRONT 只在同一个任务内重排，不会把首页那个任务
-                // 带到前台：宿主仍留在最上面，用户看到的是它的黑色根布局（2026-11-11 反馈：
-                // 插线后一直黑屏）。把宿主任务退到后面，首页任务自然浮上来；首帧到达后再
-                // moveTaskToFront 把这一任务带回前台。
-                moveTaskToBack(true)
-                // The host lives in its own task; without this the cross-task switch reads as a black
-                // flash between two moments where the home page should be the only thing on screen.
+                // 首页已经在 onCreate 里带上来并退到后面（见那里的注释）；这里只压掉跨任务切换
+                // 动画，不能再做一次 reorder/moveTaskToBack，否则会多闪一下。
                 overridePendingTransition(0, 0)
             }
             next.start()
@@ -2708,7 +2716,8 @@ class CarPlayHostActivity : ComponentActivity() {
         val poll = object : Runnable {
             override fun run() {
                 if (shuttingDown.get() || isFinishing || isDestroyed) return
-                val hasFrame = sink?.mainVideoReceived == true
+                // TextureView 走“真的上屏过一帧”；SurfaceView 没有可靠的绘制回调，退回“已收到主屏帧”。
+                val hasFrame = if (videoView != null) firstFrameOnScreen else sink?.mainVideoReceived == true
                 if (!hasFrame && System.nanoTime() < deadline) {
                     mainHandler.postDelayed(this, FIRST_FRAME_POLL_MILLIS)
                     return
