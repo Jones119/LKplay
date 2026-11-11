@@ -312,7 +312,6 @@ class CarPlayHostActivity : ComponentActivity() {
     private var currentSurfaceTexture: SurfaceTexture? = null
     /** Set when the video surface is destroyed; a fresh activity is the only working recovery. */
     private var surfaceLostSinceCreate = false
-    private var isActivityStarted = false
     private var activeDisplaySize: DisplaySize? = null
     private var pendingDisplaySize: DisplaySize? = null
     private var sessionDisplay: CarPlaySessionDisplay? = null
@@ -840,7 +839,6 @@ class CarPlayHostActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
-        isActivityStarted = true
         DiPlayScreenState.carPlayHostVisible = true
         // One honest line about what this ROM actually provides. It is reported, never acted on:
         // wireless CarPlay must keep advertising Opus even though the platform has none, because
@@ -1049,7 +1047,6 @@ class CarPlayHostActivity : ComponentActivity() {
     override fun onStop() {
         closePicturePanel()
         // The controller, USB/iAP2 link, and VPN attachment intentionally outlive the UI.
-        isActivityStarted = false
         DiPlayScreenState.carPlayHostVisible = false
         logThemeState(ThemeModeDiagnostics.Source.STOP, resources.configuration)
         mainHandler.removeCallbacks(pollConfiguration)
@@ -2362,9 +2359,13 @@ class CarPlayHostActivity : ComponentActivity() {
         videoView?.let { updateVideoLayout(it.width, it.height) }
         CarPlayBackgroundSession.store(next, renderer, size.width, size.height, this, display) { completion ->
             runOnUiThread {
-                // If this screen is not the one on display, the home page asked for the disconnect: finish
-                // quietly and leave the process alone so that page survives.
-                finishingFromBackground = !isActivityStarted
+                // 这个回调只由首页的 CarPlayBackgroundSession.stop()（断开/换连接/无线重置）或
+                // DiPlaySessionService 的停止请求触发，都属于「首页还在」的断开。
+                // 不能再用 isActivityStarted 判断：首页是用 reorder 盖到宿主机之上的，宿主只收到
+                // onPause、没有 onStop，标志仍为 true，于是被误判成「用户自己离开」→ onDestroy
+                // 在 400 ms 后 killProcess，首页跟着死掉再重建（车机上表现为断开后黑屏约 2 s，
+                // 2026-11-11 实测）。
+                finishingFromBackground = true
                 shutdown(terminateProcess = false, reason = "DiPlay disconnect", completion = completion)
                 finish()
             }
