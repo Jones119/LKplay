@@ -2,6 +2,7 @@ package com.shilapi.xcertplay
 
 import android.Manifest
 import com.shilapi.xcertplay.mfi.LocalMfiAuthenticationClient
+import android.app.ActivityManager
 import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
@@ -2381,6 +2382,11 @@ class CarPlayHostActivity : ComponentActivity() {
                 // Home comes forward over the still frame; hiding this window first would leave a beat
                 // where neither screen is drawn, which is the flash the owner saw.
                 showDiPlayHome(noAnimation = true)
+                // 4.4 上 FLAG_ACTIVITY_REORDER_TO_FRONT 只在同一个任务内重排，不会把首页那个任务
+                // 带到前台：宿主仍留在最上面，用户看到的是它的黑色根布局（2026-11-11 反馈：
+                // 插线后一直黑屏）。把宿主任务退到后面，首页任务自然浮上来；首帧到达后再
+                // moveTaskToFront 把这一任务带回前台。
+                moveTaskToBack(true)
                 // The host lives in its own task; without this the cross-task switch reads as a black
                 // flash between two moments where the home page should be the only thing on screen.
                 overridePendingTransition(0, 0)
@@ -2710,10 +2716,15 @@ class CarPlayHostActivity : ComponentActivity() {
                 if (menuOpen) return
                 // Drop the home page's still frame before the window comes forward with the video.
                 clearLaunchSnapshot()
-                startActivity(
-                    Intent(this@CarPlayHostActivity, CarPlayHostActivity::class.java)
-                        .addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),
-                )
+                // 宿主在独立任务里，首帧到达时要用任务级前置；REORDER_TO_FRONT 只在同一任务内生效。
+                val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+                val moved = activityManager?.let { runCatching { it.moveTaskToFront(taskId, 0) }.isSuccess } == true
+                if (!moved) {
+                    startActivity(
+                        Intent(this@CarPlayHostActivity, CarPlayHostActivity::class.java)
+                            .addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),
+                    )
+                }
             }
         }
         mainHandler.post(poll)
