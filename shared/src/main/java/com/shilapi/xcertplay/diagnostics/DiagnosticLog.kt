@@ -36,9 +36,11 @@ internal object DiagnosticLog {
     private var writer: BufferedWriter? = null
     private var file: File? = null
     private var bytesWritten = 0L
-    private var lastFlush = 0L
     private var truncated = false
     private var previousHandler: Thread.UncaughtExceptionHandler? = null
+    private var flusher: java.util.Timer? = null
+    /** Private directory that survives a read-only /sdcard; see [CrashRecord]. */
+    private var crashDirectory: File? = null
 
     private val timestamp = SimpleDateFormat("MM-dd HH:mm:ss.SSS", Locale.US)
 
@@ -70,7 +72,6 @@ internal object DiagnosticLog {
             file = target
             bytesWritten = 0
             truncated = false
-            lastFlush = 0
             DiagnosticLogPolicy.header(
                 startedAtMillis = startedAt,
                 appVersion = appVersion(context),
@@ -82,11 +83,31 @@ internal object DiagnosticLog {
                 sessionLabel = sessionLabel,
             ).forEach { writeLocked(it) }
             writeLocked("logFile=${target.absolutePath}")
+            crashDirectory = runCatching { context.filesDir }.getOrNull()
             flushLocked()
+            startFlusher()
             installCrashHandler()
             Log.i(TAG, "diagnostic log started: ${target.absolutePath}")
             return target
         }
+    }
+
+    /**
+     * 把周期 flush 交给一条专用线程。
+     *
+     * `/sdcard` 在 CS11 上很慢，一次 flush 可能十几毫秒；以前这个代价落在调用线程上，而调用方
+     * 包括音频与 RTSP 线程，正好是连接/播放最敏感的窗口。写入顺序仍在调用线程内完成，只有
+     * 刷盘搬走了。`error()`、`stop()`、`start()` 仍同步 flush —— 崩溃前必须落盘。
+     */
+    private fun startFlusher() {
+        if (flusher != null) return
+        val timer = java.util.Timer("diplay-diag-flush", true)
+        timer.schedule(object : java.util.TimerTask() {
+            override fun run() {
+                synchronized(lock) { flushLocked() }
+            }
+        }, FLUSH_INTERVAL_MILLIS, FLUSH_INTERVAL_MILLIS)
+        flusher = timer
     }
 
     fun line(message: String) {
@@ -94,7 +115,7 @@ internal object DiagnosticLog {
             if (writer == null) return
             val stamp = timestamp.format(Date())
             writeLocked("$stamp I $message")
-            maybeFlushLocked()
+            // No flush here: the dedicated flusher owns that (startFlusher).
         }
     }
 
@@ -113,6 +134,8 @@ internal object DiagnosticLog {
     /** Copies the newest sessions into this session's file, for a report the user can read on the car. */
     fun stop() {
         synchronized(lock) {
+            flusher?.cancel()
+            flusher = null
             writeLocked("${timestamp.format(Date())} I log stopped")
             flushLocked()
             runCatching { writer?.close() }
@@ -137,13 +160,7 @@ internal object DiagnosticLog {
         runCatching { target.write(clean); target.newLine() }
     }
 
-    private fun maybeFlushLocked() {
-        val now = System.currentTimeMillis()
-        if (now - lastFlush >= FLUSH_INTERVAL_MILLIS) flushLocked()
-    }
-
     private fun flushLocked() {
-        lastFlush = System.currentTimeMillis()
         runCatching { writer?.flush() }
     }
 
@@ -157,6 +174,8 @@ internal object DiagnosticLog {
         previousHandler = previous
         Thread.setDefaultUncaughtExceptionHandler { thread, error ->
             error("uncaught on ${thread.name}", error)
+            // 私有目录那一份与日志文件相互独立：日志可能在 /sdcard 上写不了，报告也未必读得到。
+            crashDirectory?.let { CrashRecord.record(it, thread.name, error) }
             stop()
             previous?.uncaughtException(thread, error)
         }

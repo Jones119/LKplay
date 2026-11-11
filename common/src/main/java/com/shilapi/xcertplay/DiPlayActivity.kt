@@ -36,6 +36,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.shilapi.xcertplay.adb.LocalAdb
 import com.shilapi.xcertplay.airplay.CarPlayDisplayScale
+import com.shilapi.xcertplay.diagnostics.CrashRecord
 import com.shilapi.xcertplay.host.R
 import com.shilapi.xcertplay.network.CarHotspotSettings
 import com.shilapi.xcertplay.network.CarHotspotTethering
@@ -957,6 +958,13 @@ class DiPlayActivity : ComponentActivity() {
     private fun subline(): String {
         if (sessionActive() || CarPlayBackgroundSession.hasSession()) {
             return DiPlayPreferences.phoneName(this) ?: ""
+        }
+        // 上次会话为什么结束：连接失败后进程通常会被重连流程重启，所以这条来自持久化而不是内存。
+        AirPlayPersistence.loadLastConnectionProblem(this)?.let { (reason, at) ->
+            val whenText = if (at > 0L) {
+                SimpleDateFormat("MM-dd HH:mm", Locale.US).format(Date(at))
+            } else null
+            return if (whenText != null) "上次连接失败（$whenText）：$reason" else "上次连接失败：$reason"
         }
         return if (isWirelessMode()) "未发现 iPhone" else "未检测到 iPhone"
     }
@@ -2770,6 +2778,9 @@ class DiPlayActivity : ComponentActivity() {
                     appendLine()
                     appendLine("--- Recent own-app process exits (Android 11+) ---")
                     appendLine(ProcessExitDiagnostics.report(appContext))
+                    appendLine()
+                    appendLine("--- Last uncaught crash ---")
+                    appendLine(CrashRecord.read(appContext.filesDir) ?: "(none recorded)")
                     appendLine()
                     for (name in SessionLogFile.REPORT_NAMES) {
                         val file = File(appContext.filesDir, "logs/$name")

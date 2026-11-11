@@ -1932,7 +1932,7 @@ class CarPlayController(
         } finally {
             runCatching { first.close() }
         }
-        val afterOther = awaitReenumeratedDevice(SOFT_REPLUG_SETTLE_MILLIS) ?: run {
+        val afterOther = awaitReenumeratedDevice(SOFT_REPLUG_SETTLE_MILLIS, device.deviceId) ?: run {
             debugLog("soft replug: the phone did not come back on $otherId")
             return null
         }
@@ -1948,7 +1948,7 @@ class CarPlayController(
         } finally {
             runCatching { second.close() }
         }
-        val afterCarPlay = awaitReenumeratedDevice(SOFT_REPLUG_SETTLE_MILLIS)
+        val afterCarPlay = awaitReenumeratedDevice(SOFT_REPLUG_SETTLE_MILLIS, afterOther.deviceId)
         debugLog("soft replug: done device=${afterCarPlay?.deviceName ?: "not re-enumerated"}")
         return afterCarPlay ?: afterOther
     }
@@ -1987,13 +1987,24 @@ class CarPlayController(
      * "the old node left" therefore reports a false negative, so the wait is time-boxed and the caller
      * continues with whatever the manager lists afterwards.
      */
-    private fun awaitReenumeratedDevice(settleMillis: Long): UsbDevice? {
-        Thread.sleep(settleMillis)
-        return runCatching {
-            requireUsbManager().deviceList.values.firstOrNull {
-                it.vendorId == IphoneUsbMatcher.APPLE_VENDOR_ID
-            }
-        }.getOrNull()
+    private fun awaitReenumeratedDevice(settleMillis: Long, previousDeviceId: Int?): UsbDevice? {
+        // 原实现只是 sleep 之后取“任意 Apple 设备”。重新枚举期间旧节点还在列表里，于是经常拿着
+        // 还没重枚举的句柄去切配置，日志里就会看到 “the phone did not come back on 5”（doc 117）。
+        // 现在优先等一个新 deviceId；到期仍未变化就回退到旧行为，保持原来的宽容度。
+        val deadline = System.nanoTime() + settleMillis * NANOS_PER_MILLISECOND
+        var fallback: UsbDevice? = null
+        while (true) {
+            val apple = runCatching {
+                requireUsbManager().deviceList.values.filter {
+                    it.vendorId == IphoneUsbMatcher.APPLE_VENDOR_ID
+                }
+            }.getOrNull().orEmpty()
+            if (previousDeviceId == null) return apple.firstOrNull()
+            apple.firstOrNull { it.deviceId != previousDeviceId }?.let { return it }
+            fallback = apple.firstOrNull() ?: fallback
+            if (System.nanoTime() >= deadline) return fallback
+            Thread.sleep(REENUMERATION_POLL_MILLIS)
+        }
     }
 
     private fun openDataPaths(device: UsbDevice) {
@@ -3134,6 +3145,10 @@ class CarPlayController(
 
         /** Each leg of the pre-connect replug waits this long for the switch to settle. */
         private const val SOFT_REPLUG_SETTLE_MILLIS = 1_200L
+
+        /** How often the replug wait re-reads the USB list looking for a new node. */
+        private const val REENUMERATION_POLL_MILLIS = 100L
+        private const val NANOS_PER_MILLISECOND = 1_000_000L
         private const val EXECUTOR_CLOSE_TIMEOUT_MILLIS = 2_000L
         private const val ADAPTER_ADDRESS_PLACEHOLDER = "02:00:00:00:00:00"
         private val BLUETOOTH_ADDRESS = Regex("^[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){5}$")

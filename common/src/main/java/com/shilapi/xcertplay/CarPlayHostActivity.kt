@@ -1987,6 +1987,8 @@ class CarPlayHostActivity : ComponentActivity() {
             private val diagnosticLog = sessionLog
 
             override fun onSessionActive(session: AirPlaySession) {
+                // 会话真的建立起来了，首页不必再显示上一次的失败原因。
+                AirPlayPersistence.clearLastConnectionProblem(this@CarPlayHostActivity)
                 // A live session is no longer owed the phone's Bluetooth, so a grace armed by an earlier
                 // loss is dropped before anything else can fire it.
                 cancelMediaAudioRestore()
@@ -2590,6 +2592,9 @@ class CarPlayHostActivity : ComponentActivity() {
 
     private fun reconnectAfterLoss(reason: String, startupFailure: WirelessStartupFailure? = null) {
         if (!CarPlayBackgroundSession.isOwner(this)) return
+        // 首页在会话结束后要告诉用户“上次为什么没连上”，进程被重连流程重启后也要能读到，
+        // 所以写进 SharedPreferences；成功建立会话时再清除（onSessionActive）。
+        AirPlayPersistence.saveLastConnectionProblem(this, reason)
         if (menuOpen) recoveryPendingAfterMenu = true
         if (shuttingDown.get() || menuOpen || handshakeResetInProgress || startupRetryStopped) return
         if (reconnectScheduled) return

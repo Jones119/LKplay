@@ -55,6 +55,8 @@ object AirPlayPersistence {
     private const val KEY_MANUAL_HOTSPOT_CHANNEL = "manual_hotspot_channel"
     private const val KEY_MANUAL_HOTSPOT_SECURITY = "manual_hotspot_security"
     private const val KEY_DEBUG_LOGS_ENABLED = "debug_logs_enabled"
+    private const val KEY_LAST_CONNECTION_PROBLEM = "last_connection_problem"
+    private const val KEY_LAST_CONNECTION_PROBLEM_AT = "last_connection_problem_at"
     private const val KEY_MANUFACTURER = "manufacturer"
     private const val KEY_MODEL = "model"
     private const val KEY_OEM_LABEL = "oem_label"
@@ -411,6 +413,37 @@ object AirPlayPersistence {
             .putBoolean(KEY_LOCATION_REPORTING_ENABLED, enabled)
             .apply()
     }
+
+    /**
+     * The last reason a session ended or failed to start, shown on the home page until the next successful
+     * connection (`doc 127` LastConnectionProblem). Persisted so it survives the process restart that a
+     * failed wired bring-up usually ends with.
+     */
+    fun saveLastConnectionProblem(context: Context, reason: String) {
+        val trimmed = reason.trim().take(MAX_CONNECTION_PROBLEM_CHARS)
+        if (trimmed.isEmpty()) return
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putString(KEY_LAST_CONNECTION_PROBLEM, trimmed)
+            .putLong(KEY_LAST_CONNECTION_PROBLEM_AT, System.currentTimeMillis())
+            .apply()
+    }
+
+    /** Reason and wall-clock time of the last failure, or null when none was recorded. */
+    fun loadLastConnectionProblem(context: Context): Pair<String, Long>? {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val reason = prefs.getString(KEY_LAST_CONNECTION_PROBLEM, null)?.takeIf { it.isNotBlank() }
+            ?: return null
+        return reason to prefs.getLong(KEY_LAST_CONNECTION_PROBLEM_AT, 0L)
+    }
+
+    fun clearLastConnectionProblem(context: Context) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .remove(KEY_LAST_CONNECTION_PROBLEM)
+            .remove(KEY_LAST_CONNECTION_PROBLEM_AT)
+            .apply()
+    }
+
+    private const val MAX_CONNECTION_PROBLEM_CHARS = 120
 
     fun loadManufacturer(context: Context): String =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
