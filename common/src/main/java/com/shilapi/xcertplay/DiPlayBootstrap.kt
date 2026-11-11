@@ -21,6 +21,8 @@ internal object DiPlayBootstrap {
     @Volatile private var ready = false
 
     @Synchronized fun ensure(context: Context, mfiTarget: MfiTarget) {
+        // 安装默认设置：新装时补上随包默认值，已有配置不受影响（见 AirPlayPersistence）。
+        AirPlayPersistence.applyInstallDefaultsOnce(context)
         if (mfiTarget != MfiTarget.LOCAL) return
         if (ready) return
         val target = File(context.noBackupFilesDirCompat(), LocalMfiAuthenticationClient.DIRECTORY)

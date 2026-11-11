@@ -145,7 +145,22 @@ class CarPlayHostActivity : ComponentActivity() {
         super.attachBaseContext(AppLocale.wrap(newBase))
     }
 
-    private fun createRuntimeConfig(): CarPlayRuntimeConfig = CarPlayRuntimeConfig(
+    private fun createRuntimeConfig(): CarPlayRuntimeConfig {
+        // CS11/4.4：车机固件自带一份可用的热点配置（doc 84）。控制器启动热点时会优先采用它，
+        // 但 CarPlayRuntimeConfig 的校验仍要求 MANUAL 模式有非空 SSID —— 车主没手输过就会在这里
+        // 被拒，表现为「点开始无线连接黑一下、然后什么也不发生」（2026-11-11 实机）。
+        // 这里在保存值为空时先采用固件配置，让校验和控制器看到同一份 SSID。
+        val adoptedAp = if (wirelessEnabled && wirelessHotspotMode == WirelessHotspotMode.MANUAL) {
+            runCatching {
+                com.shilapi.xcertplay.network.LegacySoftApControl.readUsableStored(this)
+            }.getOrNull()
+        } else {
+            null
+        }
+        val effectiveHotspotSsid = manualHotspotSsid.trim().ifEmpty { adoptedAp?.ssid.orEmpty() }
+        val effectiveHotspotPassphrase =
+            manualHotspotPassphrase.ifEmpty { adoptedAp?.password.orEmpty() }
+        val config = CarPlayRuntimeConfig(
         mfiTarget = mfiTarget,
         remoteMfiServer = remoteMfiServer.trim().takeIf { it.isNotEmpty() },
         remoteMfiToken = remoteMfiToken.takeIf { it.isNotEmpty() },
@@ -166,15 +181,17 @@ class CarPlayHostActivity : ComponentActivity() {
         transport = if (wirelessEnabled) CarPlayTransport.WIRELESS else CarPlayTransport.WIRED,
         wirelessHotspotMode = wirelessHotspotMode,
         wifiP2pPreferredChannel = AirPlayPersistence.loadWifiP2pPreferredChannel(this),
-        manualHotspotSsid = manualHotspotSsid,
-        manualHotspotPassphrase = manualHotspotPassphrase,
+        manualHotspotSsid = effectiveHotspotSsid,
+        manualHotspotPassphrase = effectiveHotspotPassphrase,
         manualHotspotBand = manualHotspotBand,
         manualHotspotChannel = manualHotspotChannel,
         manualHotspotSecurity = manualHotspotSecurity,
         existingWifiSsid = existingWifiSsid,
         existingWifiPassphrase = existingWifiPassphrase,
         locationReportingEnabled = locationReportingEnabled,
-    )
+        )
+        return config
+    }
 
     private val wirelessPermissions =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
@@ -314,8 +331,6 @@ class CarPlayHostActivity : ComponentActivity() {
     private var callBanner: CallBannerOverlay? = null
     private var currentSurface: Surface? = null
     private var currentSurfaceTexture: SurfaceTexture? = null
-    /** Set when the video surface is destroyed; a fresh activity is the only working recovery. */
-    private var surfaceLostSinceCreate = false
     private var activeDisplaySize: DisplaySize? = null
     private var pendingDisplaySize: DisplaySize? = null
     private var sessionDisplay: CarPlaySessionDisplay? = null
@@ -629,10 +644,6 @@ class CarPlayHostActivity : ComponentActivity() {
             }
             currentSurface = null
             currentSurfaceTexture = null
-            // The vendor decoder cannot be rebuilt into surface mode on this head unit (it falls back
-            // to client-side buffers and renders nothing visible), so a lost surface means the whole
-            // host activity has to come back fresh — see onResume (docs/_digest/36).
-            surfaceLostSinceCreate = true
             appendLog("Texture surface destroyed")
             return true
         }
@@ -686,7 +697,6 @@ class CarPlayHostActivity : ComponentActivity() {
             }
             currentSurface = null
             currentSurfaceTexture = null
-            surfaceLostSinceCreate = true
             appendLog("SurfaceView surface destroyed")
         }
     }
@@ -905,6 +915,7 @@ class CarPlayHostActivity : ComponentActivity() {
             return
         }
         wirelessPermissionsReady = false
+        appendLog("requesting wireless permissions: ${permissions.joinToString()}")
         updateHotspotStatusBlock()
         awaitingWirelessPermissions = true
         wirelessPermissions.launch(permissions.toTypedArray())
@@ -983,18 +994,10 @@ class CarPlayHostActivity : ComponentActivity() {
         // stage. 4.4 leaves a foreground UI thread at nice 0 - below the -8 video threads that feed it and,
         // with TransportThreadPriority, below the -16 transport threads - so raise it while CarPlay is shown.
         runCatching { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_DISPLAY) }
-        // Coming back after the car's launcher took the screen: the TextureView surface was destroyed,
-        // and the decoder rebuilt for the new one cannot render to a surface on this vendor codec
-        // (OMX_SetParameter() failed for StoreMetaDataInBuffers → client-side buffers, nothing on the
-        // panel). A freshly created activity builds a fresh decoder, which is the path that works, so
-        // restart ourselves once instead of showing a black screen (docs/_digest/36).
-        if (surfaceLostSinceCreate && !shuttingDown.get() && !isFinishing && !isChangingConfigurations) {
-            surfaceLostSinceCreate = false
-            appendLog("surface was lost; recreating the CarPlay screen for a fresh decoder")
-            recreate()
-            return
-        }
-        // Also make sure the decoder is bound to whatever surface is live now.
+        // 返回时视频 Surface 已经换了一个：这里只把它重新挂给解码器（sink 的 changeSurface 会重建
+        // 解码器并请求关键帧）。以前这里会 recreate() 整个 Activity，但重建只换 Activity，不换
+        // sink（会话是从后台服务接管的），实测每个实例的首帧照样为零，只是多了一轮 Surface 往返
+        // 和一次任务切换（2026-11-11 实机日志 previous-3..6 全部以这一行结尾）。
         currentSurface?.takeIf { it.isValid }?.let(::attachSurface)
         val savedNightMode = AirPlayPersistence.loadCarPlayNightMode(this)
         val savedThreshold = AirPlayPersistence.loadAmbientLightThreshold(this)
@@ -1053,7 +1056,6 @@ class CarPlayHostActivity : ComponentActivity() {
             }
         }
     }
-
 
     /**
      * Hands the cluster bridge its context and the persisted on/off setting.
@@ -1151,6 +1153,12 @@ class CarPlayHostActivity : ComponentActivity() {
     }
 
     override fun onPause() {
+        // 趁窗口 Surface 仍然有效先停掉视频解码器：等 surfaceDestroyed 之后再 stop()，这台车机的
+        // 厂商 VPU 会卡在 FlushInputBuffer 失败状态，之后重建的解码器再也产不出帧（黑屏）。
+        // 停用期间到达的帧由 sink 丢弃；返回时新 Surface 会重新配置解码器并请求关键帧。
+        currentSurface?.takeIf { it.isValid }?.let { surface ->
+            sink?.detachVideoForSurfaceLoss(SCREEN_TYPE_MAIN, surface)
+        }
         nightModeController.pause()
         // The UI thread is shared with every other screen of the app; only CarPlay keeps the boost.
         runCatching { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_DEFAULT) }
@@ -2477,9 +2485,23 @@ class CarPlayHostActivity : ComponentActivity() {
         val config = try {
             createRuntimeConfig()
         } catch (error: IllegalArgumentException) {
+            Log.w(TAG, "wireless configuration rejected", error)
             val reason = error.message.orEmpty()
             appendLog("CarPlay settings rejected: $reason")
             setConnectionStage(getString(R.string.settings_incomplete, reason))
+            // startBehind 时首页在前台，宿主面板上的提示用户看不到：把原因交给首页显示，
+            // 否则又回到「点一下黑一下、什么也不发生」。
+            AirPlayPersistence.saveLastConnectionProblem(this, getString(R.string.settings_incomplete, reason))
+            showDiPlayHome(noAnimation = true)
+            return
+        } catch (error: Throwable) {
+            Log.e(TAG, "CarPlay configuration could not be built", error)
+            appendLog("CarPlay settings build failed: ${error.javaClass.simpleName}: ${error.message}")
+            AirPlayPersistence.saveLastConnectionProblem(
+                this,
+                "${error.javaClass.simpleName}: ${error.message.orEmpty()}",
+            )
+            showDiPlayHome(noAnimation = true)
             return
         }
         val effectiveSize = if (isMultiWindowActive() &&
@@ -2564,6 +2586,7 @@ class CarPlayHostActivity : ComponentActivity() {
             }
             next.start()
         } catch (error: RuntimeException) {
+            Log.w(TAG, "starting the CarPlay controller failed", error)
             appendLog("Connection could not start: ${error.javaClass.simpleName}")
             shutdown(false, "foreground service could not start")
             setConnectionStage(getString(R.string.could_not_start_carplay_return_to_diplay_and_check_app_per))
@@ -2761,6 +2784,13 @@ class CarPlayHostActivity : ComponentActivity() {
             pendingDisplaySize != null ||
             controller != null
         ) {
+            appendLog(
+                "start deferred: transportReady=$transportReady wirelessPerms=$wirelessPermissionsReady " +
+                    "locationReady=$locationReady locationReporting=$locationReportingEnabled " +
+                    "fineLocation=$locationPermissionAvailable micResolved=$microphonePermissionResolved " +
+                    "pending=${pendingDisplaySize != null} menu=$menuOpen reset=$handshakeResetInProgress " +
+                    "controller=${controller != null} shuttingDown=${shuttingDown.get()}",
+            )
             return
         }
         startCarPlay(size)
@@ -2933,6 +2963,7 @@ class CarPlayHostActivity : ComponentActivity() {
         if (menuOpen) return
         // The three-finger gesture no longer builds an in-CarPlay panel: it opens the app's own settings
         // page, so there is exactly one settings screen to maintain. The session keeps running behind it.
+        // 宿主离开前会在 onPause 里趁 Surface 仍有效先停掉解码器，回来重建时厂商 VPU 不会卡死。
         controller?.sendTouch(emptyList())
         showDiPlayHome("settings", noAnimation = true)
     }

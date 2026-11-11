@@ -24,6 +24,16 @@ internal sealed interface VideoJob {
     }
 
     data class SurfaceChanged(val surface: Surface?) : VideoJob
+
+    /**
+     * 在窗口 Surface 失效前停掉解码器：宿主 onPause 时入队，视频线程执行完干净拆除后
+     * count down，调用方最多等 [timeoutMillis]（CS11 厂商 VPU 在失效 Surface 上 stop 会卡死）。
+     */
+    data class DetachSurface(
+        val surface: Surface,
+        val done: java.util.concurrent.CountDownLatch,
+    ) : VideoJob
+
     data object Resync : VideoJob
 }
 

@@ -13,22 +13,39 @@ claims support for the CS11. See [Scope](#scope) before installing it anywhere e
 > Geely or ECARX affiliation or endorsement is implied.
 
 - Package: `com.shihab.diplay` (`com.shihab.diplay.hudtest` for the debug variant)
-- Version: `0.2.21-cs11.1` (`-hud-test`), versionCode 40
+- Version: `0.2.22-cs11-bata2` (`-hud-test`), versionCode 42
 - Engines: `minSdk 19`, `targetSdk 19`, `armeabi-v7a` only, core library desugaring on, multidex
 
-## Status (2026-10-12)
+## Status (2026-11-11)
+
+### Supported today (verified on the CS11)
 
 | Area | State |
 |---|---|
-| Wireless CarPlay (car's own hotspot + Bluetooth iAP2 hand-off) | **Working** on the CS11 |
-| Wired CarPlay (USB + userspace NCM bridge) | **Working**, first on-screen 2026-10-10 |
-| Cluster navigation card (arrow / street / distance / ETA) | **Working**, verified in the car |
-| Cluster media card (title / artist / album / progress) | **Working**, verified in the car |
-| Cluster album artwork | **Not solved** — the vendor reader never draws our URI (HTTP tier added, verdict experiment pending) |
-| Touch latency / video smoothness | Tuned: receive window, aging threshold, allocation cuts, `TCP_NODELAY`, thread priority |
-| API-19 hardening | Compat sweep + source-scanning guard tests |
-| Wired/wireless stability gaps | Known, not fixed yet (first-frame watchdog, USB detach broadcast, visible failures, mode convergence) |
-| Unit tests | `:shared` **1072 / 0 failures**, `:common` **395 / 0**, nothing skipped |
+| Wireless CarPlay (car's own hotspot + Bluetooth iAP2 hand-off) | **Working** |
+| Wired CarPlay (USB + userspace NCM bridge, no root) | **Working** |
+| Video | H.264 via the vendor VPU. **SurfaceView** by default (16.7 ms present interval), TextureView selectable in settings. 1280×650 negotiated from the view, display scale, night brightness |
+| Video recovery | Coming back from the car's launcher, our settings/home page or a task switch rebuilds the decoder onto the new surface and renders the first frame in ~150 ms |
+| Video diagnostics | On-screen FPS overlay (rendered / received FPS, loss %), five-second `video stats` line (rx / shown / dropped / queue / kbps / recoveries / touch2frame) |
+| Touch | Full forwarding, multi-touch, three-finger gesture (settings), in-car picture panel |
+| Audio | Media, navigation, phone and assistant streams with independent routing, audio focus, navigation ducking; AAC-LC hardware/`Freescale` choice, LPCM, Opus through the bundled libopus (the ROM has no platform Opus decoder) |
+| Display settings | Day/night (ambient light / fixed day / fixed night), screen size (Large 250 mm), display scale, hide top/bottom bar, corner mask |
+| Cluster (vendor DIM) | Navigation card (arrow / street / distance / ETA), media card (title / artist / album / progress), call card including VOIP calls the phone never announces, answer/hang-up from the cluster |
+| Session lifecycle | USB detach returns to the home page, 30 s lost-session fallback, fast replug rebuild, wireless start-failure reporting and recovery |
+| Diagnostics | Rotating log file, crash record, "last connection problem" on the home page, diagnostics page |
+| API 19 hardening | Compat layer plus source-scanning guard tests |
+
+### Not solved / not verified yet
+
+| Area | State |
+|---|---|
+| Cluster album artwork | **Not solved** — the vendor reader never draws our URI (HTTP tier in place, verdict experiment pending) |
+| Software H.264 fallback | **Not available on this ROM**: `OMX.google.h264.decoder` cannot output to a Surface (`storeMetaDataInBuffers` missing), so video always uses the vendor VPU |
+| Three-finger → settings/home → "打开 CarPlay" | Fixed in `0.2.22-bata2` (the render-age rule no longer drops idle frames); awaiting the owner's confirmation in the car |
+| Long-run stability | Not measured over hours or repeated ignition cycles (wired and wireless) |
+| Manual hotspot mode | Only this unit's firmware verified; the app falls back to the firmware's stored AP when no SSID is saved |
+| Other head units / Android 5+ | Not supported and not tested (the APK targets API 19 only) |
+| Unit tests | `:shared` **1151 / 0 failures**, `:common` **360 / 0**, nothing skipped |
 
 Detailed engineering notes (measurements, rejection lists, car-session evidence) are kept **outside**
 this repository by project convention — this README is the code-level entry point only.
@@ -56,7 +73,7 @@ cd CarPlay-CS11
 
 ```powershell
 .\gradlew.bat :shared:testDebugUnitTest :common:testDebugUnitTest --continue --offline
-# expected: :shared 940 / 0 failures, :common 590 / 0 failures, 0 skipped
+# expected: :shared 1151 / 0 failures, :common 360 / 0 failures, 0 skipped
 ```
 
 The **failure set must stay empty**; new tests may increase the counts. Never run two Gradle builds

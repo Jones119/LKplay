@@ -260,6 +260,17 @@ class AndroidMediaSink(
         videoDecoders[type]?.setSurface(surface)
     }
 
+    /**
+     * 宿主窗口 Surface 即将失效（Activity.onPause）时，趁它仍然有效先同步停掉视频解码器。
+     *
+     * 若等 Surface 销毁后再 stop()，这台车机的厂商 VPU 会报
+     * `FlushInputBuffer failure state transition`，之后重建的解码器再也产不出帧（黑屏根因，
+     * docs/_digest/36、78 §6）。趁 Surface 有效时停属于干净拆除，返回时可正常重建。
+     */
+    fun detachVideoForSurfaceLoss(type: Int, surface: Surface, timeoutMillis: Long = 500L) {
+        videoDecoders[type]?.detachForSurfaceLoss(surface, timeoutMillis)
+    }
+
     fun clearSurface(type: Int, surface: Surface) {
         Log.i("xcertplay-usb", "video surface cleared type=$type id=${System.identityHashCode(surface)}")
         if (surfaces.remove(type, surface)) videoDecoders[type]?.setSurface(null)
@@ -565,6 +576,15 @@ private class VideoDecoder(
     @Volatile private var decoder: MediaCodec? = null
     private var outputSurface: Surface? = surface
     private var lastConfig: VideoJob.Config? = null
+    /** Surface 已经离我们而去：下一次挂上新 Surface 时要走“表丢失恢复”路径。 */
+    private var surfaceWasLost = false
+    /**
+     * 本次配置已经 flush 过几次，用来救“收输入、零输出”的厂商 VPU（见看门狗）。
+     *
+     * flush 比 stop/release 安全得多：重建会把解码器从表面上断开再连上，而这条 ROM 的 VPU 正是
+     * 在表面换过一次后卡死（2026-11-11 实机：重建后输入照收、输出为零）。
+     */
+    private var noOutputFlushes = 0
     // CS11: a decoder rebuilt for a new surface can land in the vendor's client-side buffer mode,
     // where it produces no output at all while our counters still look healthy — the black screen
     // after returning from the car's launcher. EasyPlay retries the rebuild on a one second cooldown
@@ -673,6 +693,35 @@ private class VideoDecoder(
         if (surface != null) requestKeyFrame()
     }
 
+    /**
+     * 趁窗口 Surface 仍然有效，同步停掉并释放解码器。
+     *
+     * 见 [AndroidMediaSink.detachVideoForSurfaceLoss]：Surface 失效后再 stop() 会让厂商 VPU 卡在
+     * FlushInputBuffer 失败状态，之后重建的解码器不出帧。这里同时清空 [outputSurface]，让停用期间
+     * 到达的帧只被丢弃、不再喂给已释放/已失效的解码器。
+     */
+    fun detachForSurfaceLoss(surface: Surface, timeoutMillis: Long) {
+        if (!running) return
+        val done = java.util.concurrent.CountDownLatch(1)
+        queue.offer(VideoJob.DetachSurface(surface, done))
+        val completed = runCatching { done.await(timeoutMillis, TimeUnit.MILLISECONDS) }.getOrDefault(false)
+        if (!completed) Log.w(TAG, "video decoder detach timed out after ${timeoutMillis}ms")
+    }
+
+    private fun detachSurfaceForLoss(job: VideoJob.DetachSurface) {
+        try {
+            if (outputSurface === job.surface) {
+                surfaceWasLost = true
+                releaseDecoder()
+                outputSurface = null
+                referenceChain.reset()
+                report("Video: decoder stopped while its surface was still valid")
+            }
+        } finally {
+            job.done.countDown()
+        }
+    }
+
     override fun close() {
         running = false
         thread.interrupt()
@@ -698,6 +747,7 @@ private class VideoDecoder(
                             } else feed(job)
                         }
                         is VideoJob.SurfaceChanged -> changeSurface(job.surface)
+                        is VideoJob.DetachSurface -> detachSurfaceForLoss(job)
                         is VideoJob.Resync -> recover("video queue overflow")
                         null -> Unit
                     }
@@ -706,24 +756,35 @@ private class VideoDecoder(
                     stats.logIfDue()?.let(report)
                     if (referenceChain.needsKeyFrame && lastConfig != null && outputSurface != null) requestKeyFrameIfDue()
             // CS11: a decoder rebuilt for a new surface can stop rendering entirely while the stream
-            // keeps arriving. Two shapes of that: the vendor component lands in client-side buffer
-            // mode, or the reference chain never sees a keyframe so nothing is ever handed to it. Both
-            // look the same from here — data arrives, nothing renders — and both are what EasyPlay's
-            // one second rebuild cooldown exists for (docs/_digest/36).
-            if (outputFramesSinceConfigure == 0 && receivedSinceConfigure > 0 && decoder != null &&
+            // keeps arriving. Only judge that once a decodable frame has actually been fed: while the
+            // reference chain still waits for a keyframe, rebuilding here throws away the very IDR this
+            // rebuild is waiting for, and the screen stays black until the phone happens to send
+            // another one (measured 2026-11-11: the rebuild every 0.75 s discarded each arriving
+            // keyframe; a touch that made the phone redraw finally produced a frame between rebuilds).
+            if (outputFramesSinceConfigure == 0 && inputsSinceConfigure > 0 && decoder != null &&
                 lastConfig != null && outputSurface != null
             ) {
                 val now = System.nanoTime()
                 if (now - lastConfigureAtNs > NO_OUTPUT_GRACE_NS && now - lastRebuildAtNs > REBUILD_COOLDOWN_NS) {
                     lastRebuildAtNs = now
-                    Log.w(
-                        TAG,
-                        "video decoder rendered nothing since configure " +
-                            "(received=$receivedSinceConfigure inputs=$inputsSinceConfigure); rebuilding it",
-                    )
-                    releaseDecoder()
-                    lastConfig?.let(::configureDecoder)
-                    requestKeyFrameIfDue()
+                    // 先 flush 再等关键帧，而不是 stop/release 重建：这台车机的厂商 VPU 在表面换过
+                    // 一次后会“输入照收、零输出”，而重建要把解码器从表面上断开再连上，正是让它卡死
+                    // 的路径（2026-11-11 实机：每次重建都能 configure、能收 IDR，但输出永远是零）。
+                    val codec = decoder
+                    val flushed = codec != null && runCatching { codec.flush() }.isSuccess
+                    if (flushed && noOutputFlushes < MAX_NO_OUTPUT_FLUSHES) {
+                        noOutputFlushes++
+                        // 重新计一窗口：flush 之后的输入还没喂进去，看门狗不该立刻再触发。
+                        inputsSinceConfigure = 0
+                        referenceChain.reset()
+                        report("Video: decoder produced nothing since configure; flushed it and asked for a keyframe")
+                        requestKeyFrameIfDue()
+                    } else {
+                        report("Video: decoder still produced nothing after flushing; rebuilding it")
+                        releaseDecoder()
+                        lastConfig?.let(::configureDecoder)
+                        requestKeyFrameIfDue()
+                    }
                 }
             }
                 } catch (error: Exception) {
@@ -804,19 +865,23 @@ private class VideoDecoder(
         renderedFrameLogged = false
         submittedFrameLogged = false
         if (next != null) {
-            report("decoder=${next.name} mime=$mime size=${width}x$height")
+            val surfaceId = System.identityHashCode(surface).toString(16)
+            report("decoder=${next.name} mime=$mime size=${width}x$height surface=$surfaceId valid=${surface.isValid}")
             Log.i(
                 TAG,
-                "video decoder configured name=${next.name} mime=$mime size=${width}x$height",
+                "video decoder configured name=${next.name} mime=$mime size=${width}x$height " +
+                    "surface=$surfaceId valid=${surface.isValid}",
             )
             // A freshly configured decoder owes us its first frame; the retry guard watches for it.
             outputFramesSinceConfigure = 0
             inputsSinceConfigure = 0
             receivedSinceConfigure = 0
+            noOutputFlushes = 0
             lastConfigureAtNs = System.nanoTime()
-            // A new configuration starts a new no-output window; keeping the old rebuild timestamp
-            // would let the cooldown swallow the first recovery attempt after a surface switch.
-            lastRebuildAtNs = 0L
+            // A new configuration starts a new no-output window. The window has to be a full grace
+            // period long: leaving this at 0 fired the rebuild a grace after *every* configure, which
+            // is how the old code rebuilt the vendor decoder forever without ever seeing a frame.
+            lastRebuildAtNs = lastConfigureAtNs
         }
     }
 
@@ -902,16 +967,23 @@ private class VideoDecoder(
         if (outputSurface === surface) return
         outputSurface = surface
         if (surface == null) {
+            surfaceWasLost = true
             releaseDecoder()
             Log.i(TAG, "video decoder detached from surface")
             return
         }
         releaseDecoder()
+        val recovered = surfaceWasLost
+        surfaceWasLost = false
+        if (recovered) report("Video: surface returned; rebuilding the decoder")
         // CS11: rebuilding the vendor decoder immediately after releasing it makes the component fall
         // back to client-side buffers ("OMX_SetParameter() failed for StoreMetaDataInBuffers" then
         // "Using client-side OMX mux"), and those frames never reach the visible surface — the black
-        // screen after the surface is recreated. Letting the old instance tear down avoids it.
-        runCatching { Thread.sleep(200L) }
+        // screen after the surface is recreated. Letting the old instance tear down avoids it, and a
+        // new layer needs roughly a second before SurfaceFlinger has composed it once: configuring a
+        // decoder onto that cold surface left every instance in the same client-side mode (measured
+        // 2026-11-11 right after "surface returned": configure OK, keyframe in, zero frames out).
+        runCatching { Thread.sleep(if (recovered) SURFACE_READY_DELAY_MS else 200L) }
         lastConfig?.let(::configureDecoder)
     }
 
@@ -1043,7 +1115,13 @@ private class VideoDecoder(
         // surface stays current without decoder re-creation or keyframe waits.
         val ageUs = if (presentationTimeUs <= 0L) 0L
         else (System.nanoTime() / 1000) - presentationTimeUs
-        val render = outputSurface != null && ageUs <= renderMaxAgeUs
+        // CS11: the age rule only makes sense while something newer is still waiting. A static
+        // CarPlay screen makes the phone send 1-2 fps, so the vendor VPU hands every frame back
+        // later than the 250 ms limit (its latency is about one frame interval) and *every* frame
+        // was dropped: rx=2.8fps dropped=4 shown=0, a black screen that only a swipe fixed because
+        // a swipe makes the phone stream 30 fps again (measured 2026-11-11, docs/_digest/36).
+        val backlogged = queue.pendingFrames() > 0
+        val render = outputSurface != null && (!backlogged || ageUs <= renderMaxAgeUs)
         val releaseStartNs = System.nanoTime()
         codec.releaseOutputBuffer(index, render)
         if (timingEnabled) {
@@ -1121,10 +1199,21 @@ private class VideoDecoder(
         // value and the `debug.diplay.video_backlog` experiment cannot drift apart.
         /** 默认年龄上限；实际值由 [VideoRenderAge] 决定（`debug.diplay.video_age_ms` 可覆盖）。 */
         const val RENDER_MAX_AGE_US = 250_000L
-        /** How long a freshly configured decoder may render nothing before it is rebuilt (CS11). */
-        const val NO_OUTPUT_GRACE_NS = 700_000_000L
-        /** Minimum spacing between those rebuilds, matching EasyPlay's one second cooldown. */
-        const val REBUILD_COOLDOWN_NS = 1_000_000_000L
+        /**
+         * How long a freshly configured decoder may render nothing before the watch dog reacts (CS11).
+         *
+         * 700 ms was too short. The vendor VPU can need longer than that to come out of a surface
+         * switch, and every reaction used to rebuild the decoder, discarding the first keyframe the
+         * new instance was waiting for (measured 2026-11-11: no frame for 20 s while the log shows a
+         * configure every ~0.75 s).
+         */
+        const val NO_OUTPUT_GRACE_NS = 2_000_000_000L
+        /** Minimum spacing between watch-dog reactions, matching EasyPlay's one second cooldown. */
+        const val REBUILD_COOLDOWN_NS = 3_000_000_000L
+        /** Flush attempts before the watch dog falls back to releasing the decoder (see run()). */
+        const val MAX_NO_OUTPUT_FLUSHES = 1
+        /** 新 Surface 先让窗口合成一次，再往上配置解码器；见 [VideoDecoder.changeSurface]。 */
+        const val SURFACE_READY_DELAY_MS = 1_000L
         /** 4.4 vendor OMX 读取的调度提示键名（对应的 `MediaFormat.KEY_*` 是 API 21+）；值是 Int。 */
         const val OPERATING_RATE_KEY = "operating-rate"
         const val FRAME_RATE_KEY = "frame-rate"

@@ -5,6 +5,7 @@ import com.shilapi.xcertplay.airplay.AirPlayDisplaySettings
 import com.shilapi.xcertplay.airplay.AirPlayPhysicalSizeBasis
 import com.shilapi.xcertplay.airplay.CarPlayDisplayScale
 import com.shilapi.xcertplay.airplay.CarPlayClusterDisplay
+import com.shilapi.xcertplay.airplay.CarPlaySize
 import com.shilapi.xcertplay.airplay.ClusterTurnCardOverlay
 import com.shilapi.xcertplay.airplay.CarPlayUiScale
 import com.shilapi.xcertplay.airplay.AirPlayIdentity
@@ -99,6 +100,8 @@ object AirPlayPersistence {
     private const val KEY_SCREEN_CORNER_MASK = "screen_corner_mask"
     private const val KEY_SAFE_AREA_DRAW_OUTSIDE = "safe_area_draw_outside"
     private const val KEY_AUTO_START_ON_BOOT = "auto_start_on_boot"
+    /** 安装默认设置只写一次；之后车主的修改优先。 */
+    private const val KEY_INSTALL_DEFAULTS_APPLIED = "install_defaults_applied_v1"
     private const val KEY_LOCATION_REPORTING_ENABLED = "location_reporting_enabled"
     private const val KEY_MFI_TARGET = "mfi_target"
     private const val KEY_REMOTE_MFI_SERVER = "remote_mfi_server"
@@ -112,6 +115,36 @@ object AirPlayPersistence {
     const val DEFAULT_OEM_LABEL = "领克"
     /** Defaults this fork shipped before the label became a Lynk & Co one; treated as unset. */
     private val LEGACY_OEM_LABELS = setOf("BYD", "DiPlay")
+
+    /**
+     * 安装默认设置（2026-11-11 车主在实车上定稿的值）。
+     *
+     * 车主当前的设置里只有这四项与代码默认不同，其余设置项（30 fps、SurfaceView、无线 + 手动热点、
+     * 100% 画面等）本来就是代码默认，无需重复写入。只补缺失的键、不覆盖已存值：全新安装得到这套
+     * 默认，老用户升级时自己改过的设置保持不变。只执行一次，由 [KEY_INSTALL_DEFAULTS_APPLIED] 记录。
+     */
+    fun applyInstallDefaultsOnce(context: Context) {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        if (prefs.getBoolean(KEY_INSTALL_DEFAULTS_APPLIED, false)) return
+        val editor = prefs.edit()
+        // CarPlay 日夜模式：自动（环境光）。
+        if (!prefs.contains(KEY_CARPLAY_NIGHT_MODE)) {
+            editor.putString(KEY_CARPLAY_NIGHT_MODE, CarPlayNightMode.AMBIENT.key)
+        }
+        // CarPlay 大小：大（250 mm 宽）。
+        if (!prefs.contains(KEY_WIDTH_PHYSICAL_MM)) {
+            editor.putInt(KEY_WIDTH_PHYSICAL_MM, CarPlaySize.LARGE.widthMillimeters)
+        }
+        // 右上角「输出 / 接收 FPS」浮层：开。
+        if (!prefs.contains(KEY_SHOW_VIDEO_FPS)) {
+            editor.putBoolean(KEY_SHOW_VIDEO_FPS, true)
+        }
+        // 音频解码器：优先厂商 AAC（不可用时回落到平台解码器）。
+        if (!prefs.contains(KEY_AUDIO_DECODER)) {
+            editor.putString(KEY_AUDIO_DECODER, AudioDecoderChoice.toStorage(AudioDecoderChoice.FREESCALE))
+        }
+        editor.putBoolean(KEY_INSTALL_DEFAULTS_APPLIED, true).apply()
+    }
 
     fun loadAmbientDelaySeconds(context: Context): Int =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
