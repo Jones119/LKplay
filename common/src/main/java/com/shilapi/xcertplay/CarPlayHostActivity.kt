@@ -2713,24 +2713,39 @@ class CarPlayHostActivity : ComponentActivity() {
      */
     private fun awaitMainFrameThenComeForward() {
         val deadline = System.nanoTime() + FIRST_FRAME_FORWARD_TIMEOUT_MILLIS * 1_000_000L
+        var settleDeadline = 0L
         val poll = object : Runnable {
             override fun run() {
                 if (shuttingDown.get() || isFinishing || isDestroyed) return
-                // TextureView 走“真的上屏过一帧”；SurfaceView 没有可靠的绘制回调，退回“已收到主屏帧”。
-                val hasFrame = if (videoView != null) firstFrameOnScreen else sink?.mainVideoReceived == true
-                if (!hasFrame && System.nanoTime() < deadline) {
+                val now = System.nanoTime()
+                // 这里在后台跑，TextureView 不会渲染，onSurfaceTextureUpdated 永远不触发；所以
+                // “已上屏”只能当提前量，不能当必要条件，否则要等满 15 s。收到主屏帧后再给
+                // 解码/首帧 300 ms，然后无论是否上屏都切过去（Surface 恢复后会立即画出已解码帧）。
+                val hasFrame = sink?.mainVideoReceived == true
+                if (hasFrame && settleDeadline == 0L) {
+                    settleDeadline = now + FIRST_FRAME_SETTLE_MILLIS * 1_000_000L
+                }
+                val settled = firstFrameOnScreen || (settleDeadline != 0L && now >= settleDeadline)
+                if (!settled && now < deadline) {
                     mainHandler.postDelayed(this, FIRST_FRAME_POLL_MILLIS)
                     return
                 }
                 if (menuOpen) return
                 // Drop the home page's still frame before the window comes forward with the video.
                 clearLaunchSnapshot()
-                // 宿主在独立任务里，首帧到达时要用任务级前置；REORDER_TO_FRONT 只在同一任务内生效。
+                // 宿主在独立任务里：moveTaskToFront 是首选；失败时回退的 startActivity 必须带
+                // FLAG_ACTIVITY_NEW_TASK，否则 REORDER_TO_FRONT 只在当前任务内重排，跨任务无效
+                //（2026-11-11 实测：连接成功后停在首页，要手动点「进入 CarPlay」才切过来）。
                 val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
-                val moved = activityManager?.let { runCatching { it.moveTaskToFront(taskId, 0) }.isSuccess } == true
+                val moved = activityManager?.let { manager ->
+                    runCatching { manager.moveTaskToFront(taskId, 0) }
+                        .onFailure { appendLog("moveTaskToFront failed: ${it.javaClass.simpleName}") }
+                        .isSuccess
+                } == true
                 if (!moved) {
                     startActivity(
                         Intent(this@CarPlayHostActivity, CarPlayHostActivity::class.java)
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                             .addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),
                     )
                 }
@@ -3417,6 +3432,9 @@ class CarPlayHostActivity : ComponentActivity() {
         /** Wait at most this long for the first main-screen frame before coming forward anyway. */
         private const val FIRST_FRAME_FORWARD_TIMEOUT_MILLIS = 15_000L
         private const val FIRST_FRAME_POLL_MILLIS = 100L
+
+        /** After the first frame arrives, give the decoder this long to produce something to show. */
+        private const val FIRST_FRAME_SETTLE_MILLIS = 300L
 
         /** Overlay sampling period, as EasyPlay uses (one second). */
         private const val VIDEO_FPS_INTERVAL_MILLIS = 1_000L
