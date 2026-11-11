@@ -18,6 +18,14 @@ captures/
 # Local agent working notes
 /agent_docs/
 
+# 开发过程文档只留在本地，不再入库：审计台账、PR/安全评审、验证记录、设计笔记、
+# 发布说明草稿等都不进仓库。GPL 要求的许可文本与隐私说明除外（见下面的例外）。
+/docs/*
+!/docs/PRIVACY.md
+!/docs/THIRD_PARTY_NOTICES.md
+!/docs/Opus-LICENSE.txt
+!/docs/licenses/
+
 # OS files
 .DS_Store
 Thumbs.db

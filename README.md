@@ -112,18 +112,23 @@ shared/   protocol + core: AirPlay (RTSP, H.264, AAC/LPCM, HID, NTP, crypto), iA
 common/   Android host: activities, settings UI, persistence, notifications, permissions,
           corner-mask overlay, artwork provider
 mobile/   the packaged application + the committed accessory identity
-docs/     upstream documentation kept as-is (build, install, compatibility, release notes, licenses)
+docs/     only what has to ship with the code: licences and third-party notices
 site/ asset/  upstream leftovers, unused on the CS11
 ```
 
 ## Documentation
 
-- [`docs/BUILD.md`](docs/BUILD.md) — upstream guide plus a "this fork" note at the top with the
-  commands that actually apply here; [`docs/INSTALL.md`](docs/INSTALL.md) and
-  [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md) describe the BYD target, not this fork.
-- [`docs/UPSTREAM-README.md`](docs/UPSTREAM-README.md) — upstream README as published.
+Development documents (audits, PR and safety reviews, validation records, design notes and upstream
+guides) are **deliberately not kept in this repository** — they stay in the maintainer's workspace and
+are excluded by `.gitignore`. What remains here is what the licence and the released APK need:
+
 - [`docs/THIRD_PARTY_NOTICES.md`](docs/THIRD_PARTY_NOTICES.md), `docs/licenses/` — credits and
-  licenses.
+  licences.
+- [`docs/Opus-LICENSE.txt`](docs/Opus-LICENSE.txt) — the bundled Opus codec.
+- [`docs/PRIVACY.md`](docs/PRIVACY.md) — what the app does and does not collect.
+
+Build, test and install commands are in the sections above; they are the ones that actually apply to
+this fork.
 
 ## Source and credits
 
