@@ -8,6 +8,7 @@ import android.app.Dialog
 import android.view.Window
 import android.bluetooth.BluetoothManager
 import android.content.Context
+import android.hardware.usb.UsbManager
 import android.content.Intent
 import android.content.res.Configuration
 import android.graphics.BitmapFactory
@@ -44,6 +45,7 @@ import com.shilapi.xcertplay.network.WifiP2pChannels
 import com.shilapi.xcertplay.orchestration.WirelessHotspotMode
 import com.shilapi.xcertplay.settings.SettingsTheme
 import com.shilapi.xcertplay.settings.SettingsWidgets
+import com.shilapi.xcertplay.transport.IphoneUsbMatcher
 import com.shilapi.xcertplay.ui.GaugeView
 import com.shilapi.xcertplay.ui.Glyph
 import com.shilapi.xcertplay.ui.GlyphView
@@ -77,6 +79,9 @@ class DiPlayActivity : ComponentActivity() {
     private var status: TextView? = null
     private var connectButton: Button? = null
     private var disconnectButton: Button? = null
+    /** USB 卡片的两行文字，`refreshStatus` 每秒按实际插入状态刷新（插拔无需重建页面）。 */
+    private var usbStatusView: TextView? = null
+    private var usbHintView: TextView? = null
     private var lastRunning: Boolean? = null
 
     /** The last stack change was a trip to the car's own settings, so the page needs a full rebuild. */
@@ -800,9 +805,13 @@ class DiPlayActivity : ComponentActivity() {
             )
             card.addView(row, LinearLayout.LayoutParams(-1, -2))
         } else {
+            val attached = iphoneUsbAttached()
             card.addView(label("USB", 10, MUTED, true))
-            card.addView(label("未插入", 17, TEXT, true).apply { setPadding(0, dp(3), 0, dp(2)) })
-            card.addView(label("插入后会自动尝试连接。", 11, MUTED))
+            usbStatusView = label(if (attached) "已插入" else "未插入", 17, TEXT, true)
+                .apply { setPadding(0, dp(3), 0, dp(2)) }
+            card.addView(usbStatusView)
+            usbHintView = label(usbHintText(attached), 11, MUTED)
+            card.addView(usbHintView)
             card.addView(linkLabel("USB 权限说明") { wirelessHelp() }.apply { setPadding(0, dp(10), 0, 0) })
         }
         return card
@@ -960,16 +969,34 @@ class DiPlayActivity : ComponentActivity() {
             return DiPlayPreferences.phoneName(this) ?: ""
         }
         // 上次会话为什么结束：连接失败后进程通常会被重连流程重启，所以这条来自持久化而不是内存。
+        // 卡片副标题只有一行，`reason` 最长 120 字，这里再压到 40 字，避免被截成两行省略号。
         AirPlayPersistence.loadLastConnectionProblem(this)?.let { (reason, at) ->
             val whenText = if (at > 0L) {
                 SimpleDateFormat("MM-dd HH:mm", Locale.US).format(Date(at))
             } else null
-            return if (whenText != null) "上次连接失败（$whenText）：$reason" else "上次连接失败：$reason"
+            val short = if (reason.length > 40) reason.take(39) + "…" else reason
+            return if (whenText != null) "上次失败 $whenText：$short" else "上次失败：$short"
         }
         return if (isWirelessMode()) "未发现 iPhone" else "未检测到 iPhone"
     }
 
-    private fun pillText(): String = if (isWirelessMode()) "无线 · 5 GHz" else "USB · 未插入"
+    // 之前这里是写死的“USB · 未插入”：线插着也照旧，因为首页从不看 USB 状态。
+    // `refreshStatus` 每秒跑一次，这里直接查设备表即可（一个 binder 调用）。
+    private fun pillText(): String = if (isWirelessMode()) {
+        "无线 · 5 GHz"
+    } else if (iphoneUsbAttached()) {
+        "USB · 已插入"
+    } else {
+        "USB · 未插入"
+    }
+
+    private fun iphoneUsbAttached(): Boolean = runCatching {
+        val usb = getSystemService(Context.USB_SERVICE) as? UsbManager ?: return@runCatching false
+        usb.deviceList.values.any { it.vendorId == IphoneUsbMatcher.APPLE_VENDOR_ID }
+    }.getOrDefault(false)
+
+    private fun usbHintText(attached: Boolean): String =
+        if (attached) "iPhone 已接入，点上方按钮开始连接。" else "插入后会自动尝试连接。"
 
     private fun headerStatusTextValue(): String = when {
         sessionActive() -> "已连接"
@@ -2722,6 +2749,15 @@ class DiPlayActivity : ComponentActivity() {
         if (headerStatusText?.text?.toString() != text) {
             headerStatusText?.text = text
             headerStatusDot?.background = circle(if (state == 0) MUTED else ACCENT)
+        }
+        val attached = !isWirelessMode() && iphoneUsbAttached()
+        usbStatusView?.let { view ->
+            val label = if (attached) "已插入" else "未插入"
+            if (view.text?.toString() != label) view.text = label
+        }
+        usbHintView?.let { view ->
+            val hint = usbHintText(attached)
+            if (view.text?.toString() != hint) view.text = hint
         }
         val gauge = gaugeView ?: return
         // While the link is coming up the gauge spins and the small line reports the host's current step,

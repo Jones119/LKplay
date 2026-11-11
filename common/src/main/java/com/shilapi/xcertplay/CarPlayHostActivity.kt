@@ -3075,7 +3075,14 @@ class CarPlayHostActivity : ComponentActivity() {
         latestStage = message
         val friendly = friendlyStage(message)
         // The home page keeps showing this line while it stays in front during the bring-up.
-        CarPlayProgress.publish(friendly)
+        // 有线时它应当是 checklist 的当前节点（选择配置 / 打开数据路径 / MFi 认证…）：friendlyStage
+        // 会把八个阶段折叠成同一句“正在准备 CarPlay”，首页就看不到进度到底走到哪了。
+        val published = if (!wirelessEnabled) {
+            connectNodes.getOrNull(connectNodeIndex)?.let { getString(it.second) } ?: friendly
+        } else {
+            friendly
+        }
+        CarPlayProgress.publish(published)
         stageStatusView?.text = friendly
         // The recent stages are the connecting screen's own list: it says how far the bring-up got, which is
         // what a driver waiting at the screen - and a log read afterwards - needs (docs/_digest/60).
