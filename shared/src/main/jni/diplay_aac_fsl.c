@@ -305,11 +305,14 @@ Java_com_shilapi_xcertplay_media_FreescaleAacNative_decodeFrameNative(JNIEnv *en
     jsize outCap = (*env)->GetArrayLength(env, pcmOut);
     if (outCap <= 0) return -1;
 
-    /* 只 Pin 输入（厂商库只读），输出用局部缓冲避免长时间钉住 Java 堆。 */
-    jbyte *auPtr = (*env)->GetPrimitiveArrayCritical(env, au, NULL);
+    /* 输入只按字节数组取一次，输出放在本调用的栈上：两者原来一个是 GetPrimitiveArrayCritical、
+     * 一个是进程级 static。static 会让两路 AAC 并发解码时互相覆盖 PCM（偶发爆音，无日志），
+     * 而 critical section 会把最耗时的厂商解码包在里面，阻止 ART 的 GC 线程翻转。
+     * 24 KiB 栈对播放线程（默认 1 MB 栈）安全。 */
+    jbyte *auPtr = (*env)->GetByteArrayElements(env, au, NULL);
     if (auPtr == NULL) return -1;
 
-    static short scratch[2 * DIPLAY_AAC_MAX_OUT_SAMPLES];
+    short scratch[2 * DIPLAY_AAC_MAX_OUT_SAMPLES];
     int samples = 0, channels = 0, rate = 0;
     diplay_aac_adts_header h;
     h.sampling_freq_index = hdrBuf[0];
@@ -321,7 +324,7 @@ Java_com_shilapi_xcertplay_media_FreescaleAacNative_decodeFrameNative(JNIEnv *en
                                      (const unsigned char *) auPtr + auOffset, (int) auLength,
                                      &h, scratch, (int) (sizeof(scratch) / sizeof(scratch[0])),
                                      &samples, &channels, &rate);
-    (*env)->ReleasePrimitiveArrayCritical(env, au, auPtr, JNI_ABORT);
+    (*env)->ReleaseByteArrayElements(env, au, auPtr, JNI_ABORT);
 
     if (rc != 0) return rc;
     if (samples > outCap) return -3; /* -3 = 调用方给的输出缓冲太小（正常不该发生） */

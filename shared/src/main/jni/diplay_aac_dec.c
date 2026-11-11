@@ -312,8 +312,9 @@ diplay_aac_decoder *diplay_aac_decoder_create(diplay_aac_query_dec_mem_fn query_
     d->config->aac_plus_enable = 0;
     d->config->params = &d->params;
     {
-        static int bno = 0; /* 厂商要求 long*；一个解码器一个计数器即可 */
-        d->config->AACD_bno = (long *) &bno;
+        /* 厂商要 long*；解码器结构体里本来就有 bno 字段。这里曾是进程级 static，
+         * 两路 AAC（媒体/导航）并发解码时会互相踩计数器，厂商的状态机因此错乱。 */
+        d->config->AACD_bno = (long *) &d->bno;
     }
 
     /* 5) 初始化 */
