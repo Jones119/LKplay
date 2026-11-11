@@ -14,6 +14,7 @@
 #include <android/log.h>
 #include <jni.h>
 #include <errno.h>
+#include <pthread.h>
 #include "lwip/mld6.h"
 #include "lwip/netif.h"
 #include <string.h>
@@ -69,12 +70,16 @@ CS11_JNI(jint) Java_com_shilapi_xcertplay_transport_UserSpaceNetworkNative_nativ
      * lwip_init() alone leaves that mailbox unset, and the first lwip_socket then crashed inside
      * sys_mbox_post - measured on the car as SIGSEGV at fault addr 0x10 on the session's own pool thread.
      * tcpip_init() calls lwip_init() itself. Guarded because a second bring-up would start a second
-     * tcpip thread on the same mailbox. */
+     * tcpip thread on the same mailbox; the mutex makes that guard hold when two JNI threads race
+     * (probe and connect are separate callers). */
+    static pthread_mutex_t stack_lock = PTHREAD_MUTEX_INITIALIZER;
     static int stack_started = 0;
+    pthread_mutex_lock(&stack_lock);
     if (!stack_started) {
         tcpip_init(NULL, NULL);
         stack_started = 1;
     }
+    pthread_mutex_unlock(&stack_lock);
     return cs11_netif_start(macPtr, mtu);
 }
 

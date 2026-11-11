@@ -216,29 +216,43 @@ sys_sem_t *sys_thread_sem_get(void) {
 u32_t sys_arch_sem_wait(sys_sem_t *sem, u32_t timeout) {
     sys_sem_impl *s = *sem;
     u32_t waited = 0;
+    struct timespec deadline;
+    struct timespec started;
+    int deadline_set = 0;
     pthread_mutex_lock(&s->mutex);
     while (s->count == 0) {
         if (timeout == 0) {
             pthread_cond_wait(&s->cond, &s->mutex);
         } else {
-            struct timespec deadline;
-            clock_gettime(CLOCK_REALTIME, &deadline);
-            u32_t seconds = (timeout + waited) / 1000u;
-            u32_t nanos = ((timeout + waited) % 1000u) * 1000000u;
-            deadline.tv_sec += (time_t)seconds;
-            deadline.tv_nsec += (long)nanos;
-            if (deadline.tv_nsec >= 1000000000L) {
-                deadline.tv_sec += 1;
-                deadline.tv_nsec -= 1000000000L;
+            /* One absolute deadline for the whole call. Recomputing it from `waited` after a spurious
+             * wake-up used to double the budget (2x, then 3x), so a declared 100 ms wait could block
+             * for 300 ms and lwIP's timeouts ran long. */
+            if (!deadline_set) {
+                clock_gettime(CLOCK_MONOTONIC, &started);
+                clock_gettime(CLOCK_REALTIME, &deadline);
+                deadline.tv_sec += (time_t)(timeout / 1000u);
+                deadline.tv_nsec += (long)(timeout % 1000u) * 1000000L;
+                if (deadline.tv_nsec >= 1000000000L) {
+                    deadline.tv_sec += 1;
+                    deadline.tv_nsec -= 1000000000L;
+                }
+                deadline_set = 1;
             }
             if (pthread_cond_timedwait(&s->cond, &s->mutex, &deadline) == ETIMEDOUT) {
                 pthread_mutex_unlock(&s->mutex);
                 return SYS_ARCH_TIMEOUT;
             }
         }
-        waited = timeout; /* the timed wait has already consumed the whole budget */
     }
     s->count--;
+    if (deadline_set) {
+        struct timespec now;
+        clock_gettime(CLOCK_MONOTONIC, &now);
+        long long elapsed = (long long)(now.tv_sec - started.tv_sec) * 1000LL +
+                            (now.tv_nsec - started.tv_nsec) / 1000000L;
+        waited = elapsed > 0 ? (u32_t)elapsed : 0;
+        if (waited > timeout) waited = timeout;
+    }
     pthread_mutex_unlock(&s->mutex);
     return waited;
 }
@@ -370,6 +384,9 @@ err_t sys_mbox_trypost_fromisr(sys_mbox_t *mbox, void *msg) {
 u32_t sys_arch_mbox_fetch(sys_mbox_t *mbox, void **msg, u32_t timeout) {
     sys_mbox_impl *m = *mbox;
     u32_t waited = 0;
+    struct timespec deadline;
+    struct timespec started;
+    int deadline_set = 0;
     pthread_mutex_lock(&m->mutex);
     while (m->count == 0 && !m->closing) {
         if (timeout == 0) {
@@ -380,15 +397,18 @@ u32_t sys_arch_mbox_fetch(sys_mbox_t *mbox, void **msg, u32_t timeout) {
                 pthread_cond_signal(&m->drained);
             }
         } else {
-            struct timespec deadline;
-            clock_gettime(CLOCK_REALTIME, &deadline);
-            u32_t seconds = (timeout + waited) / 1000u;
-            u32_t nanos = ((timeout + waited) % 1000u) * 1000000u;
-            deadline.tv_sec += (time_t)seconds;
-            deadline.tv_nsec += (long)nanos;
-            if (deadline.tv_nsec >= 1000000000L) {
-                deadline.tv_sec += 1;
-                deadline.tv_nsec -= 1000000000L;
+            /* Fixed absolute deadline, same reason as sys_arch_sem_wait: a spurious wake-up must not
+             * extend the caller's budget. */
+            if (!deadline_set) {
+                clock_gettime(CLOCK_MONOTONIC, &started);
+                clock_gettime(CLOCK_REALTIME, &deadline);
+                deadline.tv_sec += (time_t)(timeout / 1000u);
+                deadline.tv_nsec += (long)(timeout % 1000u) * 1000000L;
+                if (deadline.tv_nsec >= 1000000000L) {
+                    deadline.tv_sec += 1;
+                    deadline.tv_nsec -= 1000000000L;
+                }
+                deadline_set = 1;
             }
             m->waiters++;
             const int timed = pthread_cond_timedwait(&m->not_empty, &m->mutex, &deadline);
@@ -404,7 +424,6 @@ u32_t sys_arch_mbox_fetch(sys_mbox_t *mbox, void **msg, u32_t timeout) {
                 return SYS_ARCH_TIMEOUT;
             }
         }
-        waited = timeout;
     }
     if (m->closing) {
         pthread_mutex_unlock(&m->mutex);
@@ -412,6 +431,14 @@ u32_t sys_arch_mbox_fetch(sys_mbox_t *mbox, void **msg, u32_t timeout) {
             *msg = NULL;
         }
         return SYS_ARCH_TIMEOUT;
+    }
+    if (deadline_set) {
+        struct timespec now;
+        clock_gettime(CLOCK_MONOTONIC, &now);
+        long long elapsed = (long long)(now.tv_sec - started.tv_sec) * 1000LL +
+                            (now.tv_nsec - started.tv_nsec) / 1000000L;
+        waited = elapsed > 0 ? (u32_t)elapsed : 0;
+        if (waited > timeout) waited = timeout;
     }
     void *value = m->slots[m->head];
     m->head = (m->head + 1) % m->capacity;

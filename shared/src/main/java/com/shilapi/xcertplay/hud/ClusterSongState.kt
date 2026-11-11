@@ -66,11 +66,12 @@ internal class ClusterSongState {
         fun text(title: String?, artist: String?): String? {
             val name = title?.trim()?.takeIf { it.isNotEmpty() } ?: return null
             val full = artist?.trim()?.takeIf { it.isNotEmpty() }?.let { "$name — $it" } ?: name
-            var end = full.length
-            while (full.substring(0, end).toByteArray(Charsets.UTF_16LE).size > MAX_TEXT_BYTES) {
-                end--
-                if (end > 0 && Character.isLowSurrogate(full[end])) end--
-            }
+            // UTF-16LE 每个 code unit 固定 2 字节，所以 255 字节就是 127 个 code unit。原来的
+            // “substring + toByteArray”循环在长标题上每减一个字符就重算整串，是 O(n²)；
+            // 直接算上限再回退一个孤立低代理，结果完全等价。
+            if (full.length <= MAX_TEXT_BYTES / 2) return full
+            var end = MAX_TEXT_BYTES / 2
+            if (Character.isLowSurrogate(full[end])) end--
             return full.substring(0, end)
         }
 
