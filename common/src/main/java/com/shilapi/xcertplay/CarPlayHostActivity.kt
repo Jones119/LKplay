@@ -2011,12 +2011,10 @@ class CarPlayHostActivity : ComponentActivity() {
                     // forward the way the connecting screen used to when it swapped to the session.
                     if (startBehind) {
                         startBehind = false
-                        // Drop the home page's still frame before the window comes forward with the video.
-                        clearLaunchSnapshot()
-                        startActivity(
-                            Intent(this@CarPlayHostActivity, CarPlayHostActivity::class.java)
-                                .addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),
-                        )
+                        // 不在 AirPlay 刚 active 时就把宿主切到前台：那一刻通常还没有一帧，
+                        // 用户看到的只是宿主的黑色窗口（2026-11-11 反馈）。等主屏第一帧真正到达
+                        // 再切；15 s 仍无帧则照旧切过去，让 host 自己的“重启 iPhone”提示可见。
+                        awaitMainFrameThenComeForward()
                     }
                     if (menuOpen) return@runOnUiThread
                     appendLog("AirPlay session active")
@@ -2690,6 +2688,35 @@ class CarPlayHostActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    /**
+     * Brings this window forward only once the main screen has produced a frame.
+     *
+     * The connect flow starts this activity behind the home page on purpose, and the home page keeps
+     * showing the stage text. Coming forward at `onSessionActive` left the driver looking at this
+     * activity's black root layout while the first frame was still in flight.
+     */
+    private fun awaitMainFrameThenComeForward() {
+        val deadline = System.nanoTime() + FIRST_FRAME_FORWARD_TIMEOUT_MILLIS * 1_000_000L
+        val poll = object : Runnable {
+            override fun run() {
+                if (shuttingDown.get() || isFinishing || isDestroyed) return
+                val hasFrame = sink?.mainVideoReceived == true
+                if (!hasFrame && System.nanoTime() < deadline) {
+                    mainHandler.postDelayed(this, FIRST_FRAME_POLL_MILLIS)
+                    return
+                }
+                if (menuOpen) return
+                // Drop the home page's still frame before the window comes forward with the video.
+                clearLaunchSnapshot()
+                startActivity(
+                    Intent(this@CarPlayHostActivity, CarPlayHostActivity::class.java)
+                        .addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),
+                )
+            }
+        }
+        mainHandler.post(poll)
     }
 
     private fun showDiPlayHome(page: String = "home", noAnimation: Boolean = false) {
@@ -3366,6 +3393,10 @@ class CarPlayHostActivity : ComponentActivity() {
 
         /** Grace before the process exits with a finished screen; see `onDestroy`. */
         private const val PROCESS_EXIT_DELAY_MILLIS = 400L
+
+        /** Wait at most this long for the first main-screen frame before coming forward anyway. */
+        private const val FIRST_FRAME_FORWARD_TIMEOUT_MILLIS = 15_000L
+        private const val FIRST_FRAME_POLL_MILLIS = 100L
 
         /** Overlay sampling period, as EasyPlay uses (one second). */
         private const val VIDEO_FPS_INTERVAL_MILLIS = 1_000L
