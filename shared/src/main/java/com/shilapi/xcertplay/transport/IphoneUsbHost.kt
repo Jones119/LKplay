@@ -659,6 +659,12 @@ class Iap2UsbSession internal constructor(
         // cancel() 在请求已完成或连接已异常时可能抛 RuntimeException；它绝不能挡住
         // connection.close()，否则连接与已认领的 USBMUX 接口一起泄漏，下一次 claim 直接失败。
         runCatching { requestToCancel?.cancel() }
+        // cancel() 只唤醒 requestWait，并不等读线程退出；它可能刚返回、正在访问 readBuffer 与
+        // 已完成的 request。这里取一次 readLock 把关闭序列排在读线程之后，否则 request.close()
+        // 释放 native 结构后读线程仍在访问 —— 2026-11-11 实机 tombstone：线程 iap2-usbmux-rea，
+        // SIGSEGV at 0x3c（空指针 + 字段偏移），每次都把整个进程带走。
+        // 锁顺序：stateLock 已在上面释放，cancel 无锁，因此不会与 read() 的 readLock→stateLock 互死。
+        synchronized(readLock) { }
         try {
             connection.close()
         } finally {
